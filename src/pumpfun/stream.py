@@ -31,6 +31,7 @@ def parse_event(d: dict) -> TokenInfo | None:
         complete=False,
         dev_initial_buy=d.get("initialBuy"),
         dev_initial_sol=d.get("solAmount"),
+        discovery_mc_sol=d.get("marketCapSol") if isinstance(d.get("marketCapSol"), (int, float)) else None,
         sources={SOURCE},
     )
 

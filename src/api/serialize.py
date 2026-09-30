@@ -115,8 +115,12 @@ def profile(st: TokenState) -> dict:
         "gain_x": round(gain, 2) if gain is not None else None,
         "gain_pct": round(100 * (gain - 1), 1) if gain is not None else None,
         "ath_mc": tr.ath_mc if tr else None,
-        "mc_path": [usd_short(x) for x in compact_path(tr, mc)],
+        "mc_path": [("⇄ " if tag == "migrate" else "") + usd_short(x) for x, tag in compact_path(tr, mc)],
+        "migrations": [{"ts": x["ts"], "before": usd_short(x["mc_before"]) if x.get("mc_before") else None,
+                        "after": usd_short(x["mc_after"])} for x in (tr.migrations if tr else [])],
         "scenario": None if sc is None else {
+            "kind": sc["kind"],
+            "basis": {"label": usd_short(sc["basis"]["mc"]), "source": sc["basis"]["source"], "ts": sc["basis"]["ts"]},
             "levels": [{"label": usd_short(x["mc"]), "multiple": x["multiple"], "reached": x["reached_before"]}
                        for x in sc["levels"]],
             "refs": [{"label": t(f"web.ref.{r['key']}"), "value": usd_short(r["mc"]), "multiple": r["multiple"],

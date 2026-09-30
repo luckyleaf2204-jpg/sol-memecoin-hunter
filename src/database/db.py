@@ -48,7 +48,7 @@ CREATE INDEX IF NOT EXISTS ix_alert_mint ON alerts(mint, ts);
 CREATE TABLE IF NOT EXISTS watchlist (mint TEXT PRIMARY KEY, added_at REAL, note TEXT);
 CREATE TABLE IF NOT EXISTS mc_track (
     mint TEXT PRIMARY KEY, first_seen REAL, initial_mc REAL, initial_ts REAL, initial_source TEXT,
-    ath_mc REAL, ath_ts REAL, path TEXT
+    ath_mc REAL, ath_ts REAL, path TEXT, last_pair TEXT, migrations TEXT
 );
 """
 
@@ -78,6 +78,10 @@ class Database:
         for col, typ in MIGRATIONS:
             if col not in cols:
                 self.conn.execute(f"ALTER TABLE snapshots ADD COLUMN {col} {typ}")
+        cols = {r[1] for r in self.conn.execute("PRAGMA table_info(mc_track)")}
+        for col in ("last_pair", "migrations"):
+            if col not in cols:
+                self.conn.execute(f"ALTER TABLE mc_track ADD COLUMN {col} TEXT")
 
     def _exec(self, sql: str, args=()) -> None:
         with self._lock:
@@ -174,29 +178,34 @@ class Database:
     # --- MC journey (initial MC at discovery is written once and never overwritten) ---
     def save_mc_tracks(self, items: list[tuple[str, McTrack]]) -> None:
         rows = [(m, t.first_seen, t.initial_mc, t.initial_ts, t.initial_source, t.ath_mc, t.ath_ts,
-                 json.dumps([[round(ts, 1), mc] for ts, mc in t.path])) for m, t in items]
+                 json.dumps([[round(p[0], 1), p[1], p[2] if len(p) > 2 else ""] for p in t.path]),
+                 t.last_pair, json.dumps(t.migrations)) for m, t in items]
         with self._lock:
             self.conn.executemany(
-                """INSERT INTO mc_track VALUES (?,?,?,?,?,?,?,?)
+                """INSERT INTO mc_track (mint, first_seen, initial_mc, initial_ts, initial_source, ath_mc, ath_ts,
+                                         path, last_pair, migrations) VALUES (?,?,?,?,?,?,?,?,?,?)
                    ON CONFLICT(mint) DO UPDATE SET
                    initial_mc=COALESCE(mc_track.initial_mc, excluded.initial_mc),
                    initial_ts=COALESCE(mc_track.initial_ts, excluded.initial_ts),
                    initial_source=CASE WHEN mc_track.initial_mc IS NULL THEN excluded.initial_source
                                        ELSE mc_track.initial_source END,
                    first_seen=MIN(mc_track.first_seen, excluded.first_seen),
-                   ath_mc=excluded.ath_mc, ath_ts=excluded.ath_ts, path=excluded.path""", rows)
+                   ath_mc=excluded.ath_mc, ath_ts=excluded.ath_ts, path=excluded.path,
+                   last_pair=excluded.last_pair, migrations=excluded.migrations""", rows)
             self.conn.commit()
 
     def load_mc_tracks(self, since: float = 0) -> dict[str, McTrack]:
         out = {}
         for r in self._query("SELECT * FROM mc_track WHERE first_seen >= ?", (since,)):
             try:
-                path = [(float(a), float(b)) for a, b in json.loads(r["path"] or "[]")]
-            except (ValueError, TypeError):
-                path = []
+                path = [(float(x[0]), float(x[1]), str(x[2]) if len(x) > 2 else "") for x in json.loads(r["path"] or "[]")]
+                migrations = json.loads(r["migrations"] or "[]")
+            except (ValueError, TypeError, IndexError):
+                path, migrations = [], []
             out[r["mint"]] = McTrack(first_seen=r["first_seen"], initial_mc=r["initial_mc"],
                                      initial_ts=r["initial_ts"], initial_source=r["initial_source"] or "",
-                                     ath_mc=r["ath_mc"], ath_ts=r["ath_ts"], path=path)
+                                     ath_mc=r["ath_mc"], ath_ts=r["ath_ts"], path=path,
+                                     last_pair=r["last_pair"] or "", migrations=migrations)
         return out
 
     # --- watchlist ---

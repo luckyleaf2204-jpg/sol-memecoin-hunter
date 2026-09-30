@@ -51,6 +51,7 @@ class TokenInfo:
     pump_updated_at: float | None = None   # when Pump.fun data above was fetched
     dev_initial_buy: float | None = None   # tokens bought by creator in create tx (PumpPortal)
     dev_initial_sol: float | None = None
+    discovery_mc_sol: float | None = None  # PumpPortal create event: market cap in SOL at creation
     sources: set[str] = field(default_factory=set)
     discovered_at: float = field(default_factory=time.time)
 
@@ -354,15 +355,23 @@ class WhaleIntel:
 
 @dataclass
 class McTrack:
-    """Market-cap journey as WE observed it. `initial_mc` is the first VALIDATED market cap seen after the
-    token was discovered and is never overwritten by later values (it survives restarts via SQLite)."""
+    """Market-cap journey as WE observed it.
+
+    `initial_mc` is the ANCHOR: the MC at discovery, taken from the discovery source when it reports one
+    (PumpPortal create event / Pump.fun list), otherwise the first VALIDATED DexScreener MC. It is written
+    once and never overwritten — not by later MC, not by a new pair after graduation/migration, not by a
+    restart or re-discovery (SQLite COALESCE + in-memory stash)."""
     first_seen: float                      # when the scanner discovered the token
     initial_mc: float | None = None
     initial_ts: float | None = None
     initial_source: str = ""
     ath_mc: float | None = None            # highest validated MC we observed
     ath_ts: float | None = None
-    path: list[tuple[float, float]] = field(default_factory=list)   # (ts, mc) milestones, >= 30 % moves
+    # (ts, mc, tag) milestones: tag "initial" | "" (>= 30 % move) | "migrate" (first MC on a new pair)
+    path: list[tuple] = field(default_factory=list)
+    last_pair: str = ""                    # DexScreener pair of the last observation
+    last_mc: float | None = None
+    migrations: list[dict] = field(default_factory=list)   # {ts, from, to, mc_before, mc_after}
     dirty: bool = False                    # needs saving
 
     def gain_x(self, current: float | None) -> float | None:

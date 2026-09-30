@@ -154,8 +154,11 @@ function cardHtml(c) {
 function scenarioHtml(p) {
   if (!p.scenario) return `<span class="c-muted">${esc(t("web.nodata"))}</span>`;
   const lv = p.scenario.levels.map((l) => `${esc(l.label)} <span class="c-muted">(${esc(l.multiple)}×${l.reached ? " · " + esc(t("web.scn.reached")) : ""})</span>`).join(" · ");
-  const refs = p.scenario.refs.map((r) => `${esc(r.label)} ${esc(r.value)}`).join(" · ");
-  return lv + (refs ? `<div class="meta">${esc(t("web.scn.refs"))}: ${refs}</div>` : "");
+  const refs = p.scenario.refs.map((r) => `${esc(r.label)} ${esc(r.value)} <span class="c-muted">(${esc(r.source)})</span>`).join(" · ");
+  const b = p.scenario.basis;
+  return `<div class="meta">${esc(t("web.scn.levels"))}</div>` + lv +
+    `<div class="meta">${esc(t("web.scn.basis", { mc: b.label, src: b.source }))}</div>` +
+    (refs ? `<div class="meta">${esc(t("web.scn.refs"))}: ${refs}</div>` : "");
 }
 function devHtml(d) {
   if (!d.known) return `<span class="c-muted">${esc(t("web.dev.unknown"))}</span>` + (d.wallet ? ` <span class="meta">${esc(short(d.wallet))}</span>` : "");
@@ -194,7 +197,11 @@ function socialHtml(p) {
   return (links.length ? links.join(" · ") : `<span class="c-muted">${esc(t("web.nodata"))}</span>`) +
     `<div class="meta">${esc(t("web.soc.category"))}: ${s.category.length ? esc(s.category.join(", ")) : esc(t("web.nodata"))} · ${esc(t("web.soc.activity"))}: ${esc(t("web.nodata"))}</div>`;
 }
-function pathHtml(p) { return p.mc_path.length ? esc(p.mc_path.join(" → ")) : `<span class="c-muted">${esc(t("web.nodata"))}</span>`; }
+function pathHtml(p) {
+  if (!p.mc_path.length) return `<span class="c-muted">${esc(t("web.nodata"))}</span>`;
+  const mig = (p.migrations || []).map((m) => esc(t("web.pf.migrated", { time: hhmm(m.ts), before: m.before || "—", after: m.after }))).join(" · ");
+  return esc(p.mc_path.join(" → ")) + (mig ? `<div class="meta">${mig}</div>` : "");
+}
 function profileLine(label, body) { return `<div class="pl"><div class="plk">${esc(label)}</div><div class="plv">${body}</div></div>`; }
 function oppCardHtml(c) {
   const p = c.profile, m = encodeURIComponent(c.mint);

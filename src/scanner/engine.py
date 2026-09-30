@@ -34,7 +34,7 @@ from holders.analyzer import HolderAnalyzer
 from intel.events import EventDetector
 from pumpfun.client import PumpFunClient
 from pumpfun.stream import PumpPortalStream
-from intel.mc_track import compute_trend, update_mc_track
+from intel.mc_track import anchor_at_discovery, compute_trend, update_mc_track
 from scanner.pipeline import evaluate, ingest_market
 from scanner.scheduler import TierClock, deep_due, dev_due, market_due, priority_score
 from scoring.groups import classify_group
@@ -50,6 +50,7 @@ MAX_EVENTS = 500
 PUMP_LATEST_S, PUMP_ACTIVE_S, CURVE_S = 10.0, 20.0, 10.0
 REEVALUATE_S = 20.0               # tokens without fresh data are re-evaluated at the historic cadence
 LOG_EVERY_S = 60.0
+MC_STASH_MAX = 20_000             # MC journeys of pruned tokens kept in memory (anchor survives re-discovery)
 
 
 class ScannerEngine:
@@ -260,7 +261,21 @@ class ScannerEngine:
             return False
         st = self.tracked[info.mint] = TokenState(info=info, watch=info.mint in self.watch)
         self._restore_mc(st)
+        anchor_at_discovery(st, self.sol_price)          # initial MC from the discovery source, if reported
         return True
+
+    def _save_mc(self) -> None:
+        """Write changed MC journeys now (a new anchor is persisted in the same round it was set)."""
+        dirty = [st for st in self.tracked.values() if st.mc_track and st.mc_track.dirty]
+        if not dirty:
+            return
+        try:
+            self.db.save_mc_tracks([(st.mint, st.mc_track) for st in dirty])
+        except Exception as e:           # DB trouble must not stop scanning; retried next round
+            self.log(f"mc_track save failed: {type(e).__name__}: {e}")
+            return
+        for st in dirty:
+            st.mc_track.dirty = False
 
     def _restore_mc(self, st: TokenState) -> None:
         """A restart must not reset the MC at discovery: reload the saved journey (SQLite)."""
@@ -278,6 +293,7 @@ class ScannerEngine:
         want_latest = full or now - self._pump_at["latest"] >= PUMP_LATEST_S - 0.5
         want_active = full or now - self._pump_at["active"] >= PUMP_ACTIVE_S - 0.5
         if not (want_latest or want_active):
+            self._save_mc()
             return added
 
         async def skip():
@@ -291,6 +307,7 @@ class ScannerEngine:
         for batch in (latest, active):
             for info in batch or []:
                 added += self._add(info)
+        self._save_mc()
         if latest is None and active is None and not (self.stream and self.stream.connected):
             mints = await self.dex.latest_profiles() or []
             for m in mints:
@@ -334,6 +351,7 @@ class ScannerEngine:
             if st:
                 ingest_market(st, market, socials, self.sol_price, self.history.get(mint), now)
                 update_mc_track(st, now)
+        self._save_mc()
         return res
 
     def prune(self) -> None:
@@ -346,6 +364,10 @@ class ScannerEngine:
             age = now - created
             mc = st.market.market_cap if st.market else None
             if age > max_age or (not st.snapshotted and age > 900 and (mc or 0) < self.settings.tracking_min_mc):
+                if st.mc_track and st.mc_track.initial_mc is not None:
+                    self._mc_saved[mint] = st.mc_track      # re-discovery restores the same anchor
+                    while len(self._mc_saved) > MC_STASH_MAX:
+                        self._mc_saved.pop(next(iter(self._mc_saved)))
                 del self.tracked[mint]
                 self.history.drop(mint)
                 self.detector.forget(mint)
@@ -359,6 +381,24 @@ class ScannerEngine:
                 out.append(st)
         out.sort(key=lambda st: (not st.watch, -((st.market.vol_5m or 0) if st.market else 0)))
         return out
+
+    def _deep_pool(self) -> list[TokenState]:
+        """Tokens allowed to use Helius: market candidates + tokens with signals (🔥 / 👀 groups) + starred.
+        Discovery never triggers Helius by itself; a brand-new token is holder-checked only once it is in
+        this pool, and then ahead of the others (scheduler priority)."""
+        pool = {st.mint: st for st in self._candidates()}
+        for st in self.tracked.values():
+            if st.watch or st.group in ("opportunity", "watch"):
+                pool.setdefault(st.mint, st)
+        return list(pool.values())
+
+    def _deep_batch(self, now: float) -> list[TokenState]:
+        """Next holder/dev batch: due tokens by priority, capped per round and per minute (Helius budget)."""
+        self._deep_times = [x for x in self._deep_times if now - x < 60]
+        budget = max(0, self.settings.deep_max_per_min - len(self._deep_times))
+        todo = deep_due(self._deep_pool(), now, min(self.settings.deep_per_cycle, budget))
+        self._deep_times += [now] * len(todo)
+        return todo
 
     async def _deep_worker(self) -> None:
         """ON-CHAIN VALIDATION runs in its own loop so slow RPC never delays market scans."""
@@ -376,10 +416,7 @@ class ScannerEngine:
             now = time.time()
             if self.helius_state.get("state") == "FAILED" and now - self._helius_checked_at > 60:
                 await self.check_helius()
-            self._deep_times = [x for x in self._deep_times if now - x < 60]
-            budget = max(0, self.settings.deep_max_per_min - len(self._deep_times))
-            todo = deep_due(self._candidates(), now, min(self.settings.deep_per_cycle, budget))
-            self._deep_times += [now] * len(todo)
+            todo = self._deep_batch(now)
             if todo:
                 await asyncio.gather(*(one(st) for st in todo))
                 if self.rpc.has_das:
@@ -474,11 +511,7 @@ class ScannerEngine:
                     st.snapshotted = True
                 rows.append(st)
         self.db.insert_snapshots(rows)
-        dirty = [st for st in self.tracked.values() if st.mc_track and st.mc_track.dirty]
-        if dirty:
-            self.db.save_mc_tracks([(st.mint, st.mc_track) for st in dirty])
-            for st in dirty:
-                st.mc_track.dirty = False
+        self._save_mc()
 
     async def send_alerts(self) -> None:
         """Alerts come ONLY from the ranked list (VALID data quality + Opportunity Score)."""
