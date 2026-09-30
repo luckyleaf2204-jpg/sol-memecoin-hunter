@@ -21,6 +21,7 @@ import time
 from pathlib import Path
 
 from fastapi import FastAPI, Request
+from fastapi.middleware.gzip import GZipMiddleware
 from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 
@@ -30,6 +31,7 @@ from core.config import DB_PATH, Settings, env
 from database.db import Database
 from i18n import load as load_lang, set_language, t
 from scanner.engine import ScannerEngine
+from scoring.groups import GROUPS, confirm_key
 from scoring.ranking import rank_early, rank_opportunities
 
 STATIC = Path(__file__).resolve().parent / "static"
@@ -38,7 +40,8 @@ AUTH_WINDOW_S, AUTH_MAX_FAILS = 600, 10
 REFRESH_PER_MINT_S, REFRESH_GLOBAL_PER_MIN = 60, 10
 MAX_WATCH = 30
 LIST_KINDS = ("top", "new", "early", "whales", "dev", "social")
-VERSION = "web-1"
+VERSION = "web-2"
+HOME_LIMIT = {"opportunity": 60, "watch": 60, "nodata": 40, "excluded": 40}
 
 
 def client_ip(request: Request) -> str:
@@ -101,6 +104,7 @@ def create_app(engine: ScannerEngine | None = None, start_scanner: bool = True,
     app = FastAPI(title="SOL Memecoin Hunter", docs_url=None, redoc_url=None, openapi_url=None, lifespan=lifespan)
     app.state.hunter = state
     app.state.guard = guard
+    app.add_middleware(GZipMiddleware, minimum_size=1024)      # lists are polled every few seconds
 
     @app.middleware("http")
     async def security(request: Request, call_next):
@@ -149,8 +153,26 @@ def create_app(engine: ScannerEngine | None = None, start_scanner: bool = True,
             "data_quality": dq,
             "early_true": sum(1 for s in sts if s.early and s.early.is_early),
             "sol_usd": e.sol_price if e else None,
+            "refresh": _refresh_info(e),
+            "server_time": now,
             "version": VERSION,
         }
+
+    @app.get("/api/home")
+    async def home():
+        """The 4 home groups. Grouping reads existing results only (scoring.groups)."""
+        sts, now = states(), time.time()
+        buckets: dict[str, list] = {g: [] for g in GROUPS + ("quiet",)}
+        for s in sts:
+            buckets.setdefault(s.group or "nodata", []).append(s)
+        newest = lambda s: -(s.mc_track.first_seen if s.mc_track else s.info.discovered_at)   # noqa: E731
+        buckets["opportunity"].sort(key=confirm_key)
+        buckets["watch"].sort(key=lambda s: (-(s.early.fired_count if s.early else 0), newest(s)))
+        buckets["nodata"].sort(key=newest)
+        buckets["excluded"].sort(key=newest)
+        return {"server_time": now,
+                "counts": {g: len(v) for g, v in buckets.items()},
+                "groups": {g: [card(s) for s in buckets[g][:HOME_LIMIT[g]]] for g in GROUPS}}
 
     @app.get("/api/list/{kind}")
     async def list_kind(kind: str, limit: int = 200):
@@ -169,7 +191,7 @@ def create_app(engine: ScannerEngine | None = None, start_scanner: bool = True,
             rows = [s for s in sts if s.dev]
         else:
             rows = [s for s in sts if s.market and (s.info.twitter or s.info.telegram or s.info.website)]
-        return {"kind": kind, "count": len(rows), "items": [card(s) for s in rows[:limit]]}
+        return {"kind": kind, "count": len(rows), "server_time": time.time(), "items": [card(s) for s in rows[:limit]]}
 
     @app.get("/api/narratives")
     async def narratives():
@@ -278,6 +300,17 @@ def _static_file(name: str, mime: str):
         extra = {"Cache-Control": "no-cache"} if name in ("sw.js", "manifest.webmanifest") else {}
         return FileResponse(STATIC / name, media_type=mime, headers=extra)
     return handler
+
+
+def _refresh_info(e: ScannerEngine | None) -> dict:
+    """Target vs MEASURED refresh intervals (seconds) — shown on the status page."""
+    if not e:
+        return {}
+    from scanner.scheduler import DEV_S, HOLDER_S, MARKET_S
+    tiers = e.clock.stats()
+    hot = sum(1 for s in e.published if s.priority_reasons)
+    return {"tiers": tiers, "market_s": MARKET_S, "holders_s": HOLDER_S, "dev_s": DEV_S, "hot_tokens": hot,
+            "deep_max_per_min": e.settings.deep_max_per_min}
 
 
 async def _add_watch(e: ScannerEngine, mints: list[str]) -> None:

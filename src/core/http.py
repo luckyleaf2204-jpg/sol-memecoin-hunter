@@ -2,6 +2,11 @@
 
 Every data-source adapter goes through this client, so a failing source only marks
 itself unhealthy and returns None — it never crashes the scanner.
+
+Resilience: per-request timeout, retries with exponential backoff (honours Retry-After on 429),
+per-host throttling, and a per-source COOLDOWN (circuit breaker): after a request exhausted its retries on
+429 / 5xx / network errors / timeouts, further calls to that source return None immediately for
+5s, 10s, 20s ... (max COOLDOWN_MAX_S) until one succeeds. HTTP 4xx (e.g. unknown token) never trips it.
 """
 from __future__ import annotations
 
@@ -14,6 +19,7 @@ from urllib.parse import urlparse
 
 import httpx
 
+COOLDOWN_BASE_S, COOLDOWN_MAX_S = 5.0, 120.0
 USER_AGENT = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) SOLMemecoinHunter/1.0"
 _SECRET_RE = re.compile(r"(api-key=|api_key=|bot)[A-Za-z0-9:_\-]{8,}")
 
@@ -34,6 +40,9 @@ class SourceStatus:
     last_endpoint: str = ""            # scheme://host/path only — query strings (API keys) are never stored
     last_call: str = ""                # e.g. JSON-RPC method name
     last_ms: float | None = None
+    consecutive_failures: int = 0      # transient failures in a row (429 / 5xx / network / timeout)
+    cooldown_until: float = 0.0        # monotonic time; calls are skipped until then
+    skipped: int = 0                   # calls skipped because of the cooldown
 
 
 def safe_endpoint(url: str) -> str:
@@ -52,6 +61,7 @@ class Health:
         s = self._get(source)
         s.ok, s.last_ok = True, time.time()
         s.requests += 1
+        s.consecutive_failures, s.cooldown_until = 0, 0.0
 
     def fail(self, source: str, err: str) -> None:
         s = self._get(source)
@@ -69,15 +79,29 @@ class Health:
     def get(self, source: str) -> SourceStatus:
         return self._get(source)
 
+    def trip(self, source: str) -> float:
+        """Transient failure after all retries -> exponential cooldown. Returns the cooldown in seconds."""
+        s = self._get(source)
+        s.consecutive_failures += 1
+        delay = min(COOLDOWN_MAX_S, COOLDOWN_BASE_S * 2 ** (s.consecutive_failures - 1))
+        s.cooldown_until = time.monotonic() + delay
+        return delay
+
+    def cooling(self, source: str) -> float:
+        """Seconds left in this source's cooldown (0 = callable)."""
+        return max(0.0, self._get(source).cooldown_until - time.monotonic())
+
 
 class HttpClient:
-    def __init__(self, timeout: float = 15.0):
+    def __init__(self, timeout: float = 15.0, transport: httpx.AsyncBaseTransport | None = None,
+                 backoff_base: float = 1.5):
         # System trust store (Windows cert store) instead of certifi, so machines with
         # antivirus/corporate SSL inspection still verify certificates correctly.
         self._client = httpx.AsyncClient(
             timeout=timeout, headers={"User-Agent": USER_AGENT}, follow_redirects=True,
-            verify=ssl.create_default_context(),
+            verify=ssl.create_default_context(), transport=transport,
         )
+        self.backoff_base = backoff_base
         self.health = Health()
         self._min_interval: dict[str, float] = {}
         self._last: dict[str, float] = {}
@@ -98,28 +122,34 @@ class HttpClient:
             self._last[host] = time.monotonic()
 
     async def request_json(self, method: str, url: str, *, source: str, params=None,
-                           json=None, headers=None, retries: int = 2):
+                           json=None, headers=None, retries: int = 2, timeout: float | None = None):
         host = urlparse(url).netloc
         endpoint = safe_endpoint(url)
         call = json.get("method", "") if isinstance(json, dict) else method
+        if self.health.cooling(source) > 0:
+            self.health.get(source).skipped += 1
+            return None
         err = ""
+        extra = {"timeout": timeout} if timeout is not None else {}
         for attempt in range(retries + 1):
             await self._throttle(host)
             t0 = time.monotonic()
             try:
-                r = await self._client.request(method, url, params=params, json=json, headers=headers)
+                r = await self._client.request(method, url, params=params, json=json, headers=headers, **extra)
             except (httpx.HTTPError, OSError) as e:
                 err = f"{type(e).__name__}: {e}"
                 self.health.mark(source, status=None, endpoint=endpoint, call=call, ms=None)
-                await asyncio.sleep(min(8, 1.5 * 2 ** attempt))
+                if attempt < retries:
+                    await asyncio.sleep(min(8, self.backoff_base * 2 ** attempt))
                 continue
             self.health.mark(source, status=r.status_code, endpoint=endpoint, call=call,
                              ms=round((time.monotonic() - t0) * 1000))
             if r.status_code == 429 or r.status_code >= 500:
                 err = f"HTTP {r.status_code}"
                 retry_after = r.headers.get("retry-after")
-                delay = float(retry_after) if retry_after and retry_after.isdigit() else 1.5 * 2 ** attempt
-                await asyncio.sleep(min(15, delay))
+                delay = float(retry_after) if retry_after and retry_after.isdigit() else self.backoff_base * 2 ** attempt
+                if attempt < retries:
+                    await asyncio.sleep(min(15, delay))
                 continue
             if r.status_code >= 400:
                 self.health.fail(source, f"HTTP {r.status_code}: {r.text[:150]}")
@@ -132,13 +162,18 @@ class HttpClient:
             self.health.ok(source)
             return data
         self.health.fail(source, err or "request failed")
+        self.health.trip(source)
         return None
 
-    async def get_json(self, url: str, *, source: str, params=None, headers=None, retries: int = 2):
-        return await self.request_json("GET", url, source=source, params=params, headers=headers, retries=retries)
+    async def get_json(self, url: str, *, source: str, params=None, headers=None, retries: int = 2,
+                       timeout: float | None = None):
+        return await self.request_json("GET", url, source=source, params=params, headers=headers, retries=retries,
+                                       timeout=timeout)
 
-    async def post_json(self, url: str, payload, *, source: str, headers=None, retries: int = 2):
-        return await self.request_json("POST", url, source=source, json=payload, headers=headers, retries=retries)
+    async def post_json(self, url: str, payload, *, source: str, headers=None, retries: int = 2,
+                        timeout: float | None = None):
+        return await self.request_json("POST", url, source=source, json=payload, headers=headers, retries=retries,
+                                       timeout=timeout)
 
     async def aclose(self) -> None:
         await self._client.aclose()

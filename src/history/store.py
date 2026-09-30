@@ -16,8 +16,13 @@ from dataclasses import dataclass, field
 
 from core.models import MarketData
 
-MAX_POINTS = 360          # ~2h at a 20s scan interval
+MAX_POINTS = 360          # ~2h of anchor points spaced >= POINT_SPACING_S
 MIN_SPACING_S = 5         # ignore duplicate ingests inside one cycle
+# Faster refresh (5-10s) must not change what Early Signal / events see: the series keeps ONE anchor point
+# every ~20s (the historic scan cadence, same depth and density as before) and a sliding "latest" tail that
+# is replaced until it is >= POINT_SPACING_S after the previous anchor. Current values are always fresh.
+POINT_SPACING_S = 18
+HOLDER_ANCHOR_S = 90      # same idea for holder snapshots (the historic HOLDER_TTL)
 
 
 @dataclass
@@ -70,6 +75,9 @@ class TokenHistory:
     def add_market(self, m: MarketData, ts: float) -> None:
         if self.points and ts - self.points[-1].ts < MIN_SPACING_S:
             self.points.pop()
+        elif (len(self.points) >= 2 and self.points[-1].ts - self.points[-2].ts < POINT_SPACING_S
+              and self.points[-1].pair == self.points[-2].pair):
+            self.points.pop()      # tail was not an anchor yet -> replace it (first point of a new pair stays)
         last = self.points[-1] if self.points else None
         if last and last.pair and m.pair_address and m.pair_address != last.pair:
             self.breaks.append((ts, last.pair, m.pair_address))
@@ -112,6 +120,8 @@ class TokenHistory:
     def add_holders(self, snap: HolderSnap) -> None:
         if self.first_holders is None and snap.complete:
             self.first_holders = snap
+        if len(self.holders) >= 2 and self.holders[-1].ts - self.holders[-2].ts < HOLDER_ANCHOR_S:
+            self.holders.pop()     # keep ~90s anchors (unchanged depth for D3/D6/D7), newest always last
         self.holders.append(snap)
 
     def holders_at(self, ago: float, now: float, tol: float | None = None) -> HolderSnap | None:

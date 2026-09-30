@@ -79,6 +79,7 @@ class Settings:
     max_age_hours: float = 6.0
     max_tracked: int = 400
     deep_per_cycle: int = 15         # tokens per round that get on-chain holder/dev analysis
+    deep_max_per_min: int = 45       # cap on holder/dev analyses per minute (Helius credit budget)
     tracking_min_mc: float = 5_000   # drop tokens below this after 15 min
     snapshot_min_mc: float = 10_000  # start saving snapshots above this MC
     use_pumpportal_ws: bool = True

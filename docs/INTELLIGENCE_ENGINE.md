@@ -280,3 +280,27 @@ External endpoints: xem mục 3.
 | `test_holders_dev.py` | loại curve/pool khỏi tập trung; RPC lỗi → dev UNKNOWN; supply không rõ không bị giả định |
 | `test_database_backtest.py` | backtest không nhìn trước; chỉ tín hiệu VALID; giá INVALID không làm kết quả; backtest Early Signal; migration; events |
 | `test_i18n_api.py` | vi.json ≡ en.json (cùng key); mọi key dùng trong code tồn tại; template format đủ tham số cả 2 ngôn ngữ; API chỉ trả VALID ở `/api/top` |
+
+## 11. Web-2: refresh theo tầng, 4 nhóm, hồ sơ coin
+
+**Refresh theo tầng** (`scanner/scheduler.py`). Ưu tiên chỉ quyết định KHI NÀO lấy dữ liệu, không đổi điểm nào.
+
+| Tầng | Ưu tiên (hot) | Thường | Yên | Nguồn |
+|---|---|---|---|---|
+| Phát hiện | ~5s (WS PumpPortal); Pump.fun latest 10s, recently-traded 20s | | | PumpPortal, Pump.fun |
+| Giá/MC/Volume/Txn/Buy-sell/Liq | 5s | 10s | 30s | DexScreener `/tokens/v1` (batch 30) |
+| Holder/Whale | 30s | 60s | — | Helius DAS (chỉ token ứng viên, tối đa `deep_max_per_min`=45/phút) |
+| Dev | 60s | 120s | — | Solana RPC + Pump.fun (lịch sử cache) |
+| Snapshot SQLite + alert | 20s | | | |
+
+Token **hot** được xếp theo thứ tự: ⭐ đang theo dõi, mới (<15 phút), MC tăng nhanh (≥ +20%/5m), volume tăng (≥ 2×), buy pressure tăng (≥ +10pp), holder tăng (≥ +10/5m), nhóm Cơ hội, nhóm Theo dõi. **Yên**: volume 5m < $500 và < 10 txn.
+
+**Early Signal không đổi.** `history.store` giữ một điểm neo ~20s (POINT_SPACING_S=18) và điểm mới nhất trượt; holder snapshot neo ~90s. Early Signal/D1–D8 vì vậy thấy chuỗi dữ liệu cùng mật độ, cùng độ sâu như trước. Test `test_faster_refresh_gives_identical_early_signal` chứng minh feed 5s và 20s cho kết quả giống hệt.
+
+**Chống lỗi API** (`core/http.py`): timeout riêng mỗi request, retry với exponential backoff (tôn trọng Retry-After), throttle theo host, cooldown theo nguồn 5s → 10s → … → 120s sau lỗi 429/5xx/mạng/timeout (4xx không kích hoạt). Tầng bị lỗi tự lùi lịch (×2, tối đa 120s); dữ liệu cũ được giữ, không bị xoá.
+
+**4 nhóm** (`scoring/groups.py`, chỉ đọc kết quả có sẵn): ⛔ Loại (INVALID, Risk > 60, cờ rug, liquidity SHOCK, holder bất thường, top10 > `max_top10_pct`) → ⏳ Chưa đủ dữ liệu (chưa có market hoặc Early UNKNOWN) → 🔥 Cơ hội (VALID + holder đã xác minh + không bị kìm + [Early TRUE hoặc ≥3 tín hiệu, độ mạnh ≥50, Opportunity ≥60]) → 👀 Theo dõi (≥1 tín hiệu hoặc Opportunity ≥40) → yên (ẩn). Không phải khuyến nghị mua/bán.
+
+**MC ban đầu** (`intel/mc_track.py`, bảng `mc_track`): MC hợp lệ đầu tiên (không có lỗi critical) sau khi phát hiện; ghi một lần, không bao giờ ghi đè (SQL `COALESCE`), khôi phục sau restart. Lịch sử MC = các mốc thay đổi ≥30%. **MC kịch bản** = 3 mốc MC chuẩn kế tiếp kèm hệ số cần đạt, và tham chiếu thật (đỉnh đã ghi nhận, ATH Pump.fun, token tốt nhất của dev nếu lịch sử đã xác minh). Không có xác suất, không phải dự đoán. Không có MC hợp lệ thì hiển thị "Chưa đủ dữ liệu".
+
+API mới: `GET /api/home` (4 nhóm + hồ sơ coin), `GET /api/status` → `refresh` (chu kỳ mục tiêu và thực đo). Ví liên quan của dev và hoạt động X/Telegram: NOT AVAILABLE, không đoán.

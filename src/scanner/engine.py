@@ -1,11 +1,18 @@
 """Scanner orchestrator.
 
-Cycle:  discover -> refresh curve data -> DexScreener batch (validated + history) -> prune
-        -> evaluate (full pipeline) -> events -> persist -> alerts (ranked VALID only) -> publish.
-A separate worker does on-chain validation (holders + dev) and re-evaluates what it touched.
-Performance: DexScreener batches 30 mints/request, per-host throttling, retry/backoff/timeouts in
-core.http, caches for dev history/funding, dedup by mint, bounded in-memory history, shallow copies
-for publishing.
+Tiered loop (scanner.scheduler has the cadences and the priority rules):
+  discovery  ~5s   PumpPortal WS queue drain; Pump.fun latest every 10s, recently-traded every 20s
+  market     ~5s   tick: DexScreener batch for the tokens that are DUE (hot 5s · normal 10s · quiet 30s)
+                   -> validated + history -> MC journey -> evaluate (full pipeline) -> events -> groups -> publish
+  persist    20s   SQLite snapshots (unchanged cadence) + MC journey + alerts (ranked VALID only)
+A separate worker does on-chain validation (holders 30s hot / 60s normal, dev 60s / 120s) for candidates,
+highest priority first, capped per minute, and re-evaluates what it touched.
+The pipeline (validation, Risk, Opportunity, Early Signal D1-D8) is called exactly as before; only WHEN
+data is fetched changed. History keeps ~20s anchor points (history.store) so time-series inputs keep the
+same density.
+Performance: DexScreener batches 30 mints/request, per-host throttling, retry/backoff/timeouts and a per-
+source cooldown in core.http, caches for dev history/funding, dedup by mint, bounded in-memory history,
+shallow copies for publishing.
 """
 from __future__ import annotations
 
@@ -27,7 +34,10 @@ from holders.analyzer import HolderAnalyzer
 from intel.events import EventDetector
 from pumpfun.client import PumpFunClient
 from pumpfun.stream import PumpPortalStream
+from intel.mc_track import compute_trend, update_mc_track
 from scanner.pipeline import evaluate, ingest_market
+from scanner.scheduler import TierClock, deep_due, dev_due, market_due, priority_score
+from scoring.groups import classify_group
 from scoring.ranking import rank_opportunities
 from solana_data.rpc import SolanaRpc
 from i18n import t
@@ -35,10 +45,11 @@ from solana_data.rpc import SOURCE_DAS
 from validation.market import CURVE_MAX_AGE_S
 
 WSOL = "So11111111111111111111111111111111111111112"
-HOLDER_TTL = 90
-DEV_TTL = 300
-CURVE_REFRESH_PER_CYCLE = 8
+CURVE_REFRESH_PER_CYCLE = 3       # per 10s (same Pump.fun budget as the former 8 per 20s minus discovery)
 MAX_EVENTS = 500
+PUMP_LATEST_S, PUMP_ACTIVE_S, CURVE_S = 10.0, 20.0, 10.0
+REEVALUATE_S = 20.0               # tokens without fresh data are re-evaluated at the historic cadence
+LOG_EVERY_S = 60.0
 
 
 class ScannerEngine:
@@ -73,6 +84,15 @@ class ScannerEngine:
         self.stream: PumpPortalStream | None = None
         self.helius_state: dict = {"state": "NO_KEY" if not self.keys.helius else "UNCHECKED"}
         self._helius_checked_at = 0.0
+        self.clock = TierClock()
+        self._pump_at = {"latest": 0.0, "active": 0.0, "curve": 0.0}
+        self._deep_times: list[float] = []
+        self._logged_at = 0.0
+        self._round_new = 0
+        try:
+            self._mc_saved = db.load_mc_tracks(time.time() - max(24.0, settings.max_age_hours) * 3600)
+        except Exception:
+            self._mc_saved = {}
 
     def log(self, msg: str) -> None:
         self.on_log(f"[{time.strftime('%H:%M:%S')}] {msg}")
@@ -91,12 +111,8 @@ class ScannerEngine:
         await self.check_helius(startup=True)
         try:
             while not self._stop.is_set():
-                t0 = time.monotonic()
-                try:
-                    await self.cycle()
-                except Exception as e:  # never let one bad cycle kill the scanner
-                    self.log(f"cycle error: {type(e).__name__}: {e}")
-                wait = max(1.0, self.settings.scan_interval_sec - (time.monotonic() - t0))
+                await self.tick()
+                wait = max(0.2, min(1.0, self.clock.seconds_until_next()))
                 try:
                     await asyncio.wait_for(self._stop.wait(), timeout=wait)
                 except asyncio.TimeoutError:
@@ -136,15 +152,32 @@ class ScannerEngine:
         return res
 
     # ------------------------------------------------------------------ cycle
+    async def tick(self) -> None:
+        """One pass of the tiered loop: run every tier that is due. Errors only back off that tier."""
+        for name, fn in (("discovery", self._discovery_round), ("market", self._market_round),
+                         ("persist", self._persist_round)):
+            if self._stop and self._stop.is_set():
+                return
+            if not self.clock.due(name):
+                continue
+            self.clock.start(name)
+            try:
+                ok = await fn() is not False
+            except Exception as e:  # never let one bad round kill the scanner
+                ok = False
+                self.log(f"{name} error: {type(e).__name__}: {e}")
+            self.clock.done(name, ok)
+
     async def cycle(self) -> None:
+        """A complete round of every tier at once (CLI / audit tools)."""
         self.cycle_no += 1
         t0 = time.monotonic()
-        new = await self.discover()
-        await self.refresh_curves()
+        new = await self.discover(full=True)
+        await self.refresh_curves(force=True)
         await self.refresh_market()
         self.prune()
         now = time.time()
-        for st in self.tracked.values():
+        for st in list(self.tracked.values()):
             self._evaluate(st, now)
         self.persist()
         await self.send_alerts()
@@ -152,6 +185,43 @@ class ScannerEngine:
         self.log(f"cycle {self.cycle_no} ({time.monotonic()-t0:.1f}s): +{new} new, tracking {len(self.tracked)}, "
                  f"SOL ${self.sol_price or 0:.2f}")
         self.publish()
+
+    async def _discovery_round(self) -> bool:
+        self._round_new += await self.discover()
+        return True
+
+    async def _market_round(self) -> bool:
+        now = time.time()
+        due = market_due(list(self.tracked.values()), now)
+        ok = True
+        fresh: set[str] = set()
+        if due:
+            res = await self.refresh_market([s.mint for s in due])
+            ok = res is not None
+            fresh = set(res or ())
+        await self.refresh_curves()
+        self.prune()
+        now = time.time()
+        for st in list(self.tracked.values()):
+            if st.mint in fresh or now - st.refreshed.get("eval", 0.0) >= REEVALUATE_S - 1:
+                self._evaluate(st, now)
+        self.cycle_no += 1
+        self.last_cycle_at = now
+        self.publish()
+        return ok
+
+    async def _persist_round(self) -> bool:
+        self.persist()
+        await self.send_alerts()
+        now = time.time()
+        if now - self._logged_at >= LOG_EVERY_S:
+            self._logged_at = now
+            stats = self.clock.stats()
+            hot = sum(1 for s in self.tracked.values() if s.priority_reasons)
+            self.log(f"round {self.cycle_no}: +{self._round_new} new, tracking {len(self.tracked)} ({hot} hot), "
+                     f"market tick {stats['market']['measured_s']}s, SOL ${self.sol_price or 0:.2f}")
+            self._round_new = 0
+        return True
 
     def publish(self) -> None:
         """Shallow copies are enough: evaluate() replaces result objects instead of mutating them."""
@@ -169,6 +239,9 @@ class ScannerEngine:
             st.holder_status = "pending" if self.rpc.has_das else "no_key"
         h = self.history.get(st.mint)
         evaluate(st, self.settings, h, now, self.sol_price)
+        st.refreshed["eval"] = now
+        st.trend = compute_trend(st, h, now)                 # display / priority only
+        st.group, st.group_reasons = classify_group(st, self.settings)
         events = self.detector.detect(st, h, now)
         if events:
             st.recent_events = (st.recent_events + events)[-20:]
@@ -185,15 +258,36 @@ class ScannerEngine:
         if info.mint not in self.watch and (age_h > self.settings.max_age_hours
                                             or len(self.tracked) >= self.settings.max_tracked):
             return False
-        self.tracked[info.mint] = TokenState(info=info, watch=info.mint in self.watch)
+        st = self.tracked[info.mint] = TokenState(info=info, watch=info.mint in self.watch)
+        self._restore_mc(st)
         return True
 
-    async def discover(self) -> int:
+    def _restore_mc(self, st: TokenState) -> None:
+        """A restart must not reset the MC at discovery: reload the saved journey (SQLite)."""
+        saved = self._mc_saved.pop(st.mint, None)
+        if saved and st.mc_track is None:
+            st.mc_track = saved
+            st.info.discovered_at = saved.first_seen
+
+    async def discover(self, full: bool = False) -> int:
         added = 0
         if self._queue:
             while not self._queue.empty():
                 added += self._add(self._queue.get_nowait())
-        latest, active = await asyncio.gather(self.pump.latest(50), self.pump.recently_traded(50))
+        now = time.monotonic()
+        want_latest = full or now - self._pump_at["latest"] >= PUMP_LATEST_S - 0.5
+        want_active = full or now - self._pump_at["active"] >= PUMP_ACTIVE_S - 0.5
+        if not (want_latest or want_active):
+            return added
+
+        async def skip():
+            return []
+        latest, active = await asyncio.gather(self.pump.latest(50) if want_latest else skip(),
+                                              self.pump.recently_traded(50) if want_active else skip())
+        if want_latest:
+            self._pump_at["latest"] = now
+        if want_active:
+            self._pump_at["active"] = now
         for batch in (latest, active):
             for info in batch or []:
                 added += self._add(info)
@@ -205,29 +299,42 @@ class ScannerEngine:
                 self.log("Pump.fun unavailable — using DexScreener discovery fallback")
         return added
 
-    async def refresh_curves(self) -> None:
+    async def refresh_curves(self, force: bool = False) -> None:
+        if not force and time.monotonic() - self._pump_at["curve"] < CURVE_S - 0.5:
+            return
+        self._pump_at["curve"] = time.monotonic()
         now = time.time()
         stale = [st for st in self._candidates()
                  if not st.info.complete and (st.info.pump_updated_at is None
                                               or now - st.info.pump_updated_at > CURVE_MAX_AGE_S / 2)]
+        stale.sort(key=lambda st: -priority_score(st))
         for st in stale[:CURVE_REFRESH_PER_CYCLE]:
             fresh = await self.pump.coin(st.mint)
             if fresh:
                 st.info.merge(fresh)
 
-    async def refresh_market(self) -> None:
-        res = await self.dex.tokens([WSOL] + list(self.tracked))
+    async def refresh_market(self, mints: list[str] | None = None) -> dict | None:
+        """DexScreener batch for `mints` (default: every tracked token). Returns the result or None."""
+        mints = list(self.tracked) if mints is None else mints
+        started = time.time()                # cadence is measured from the request start, not its end
+        res = await self.dex.tokens([WSOL] + [m for m in mints if m != WSOL])
+        now = time.time()
+        for m in mints:                      # also when DexScreener has no pair yet: do not hammer it
+            st = self.tracked.get(m)
+            if st:
+                st.refreshed["market"] = started
         if res is None:
-            self.log("DexScreener unavailable this cycle - market data ages and turns INVALID if this persists")
-            return
+            self.log("DexScreener unavailable - market data ages and turns INVALID if this persists")
+            return None
         wsol = res.get(WSOL, (None, None))[0]
         if wsol and wsol.price_usd and wsol.price_usd > 0:
             self.sol_price = wsol.price_usd
-        now = time.time()
         for mint, (market, socials) in res.items():
             st = self.tracked.get(mint)
             if st:
                 ingest_market(st, market, socials, self.sol_price, self.history.get(mint), now)
+                update_mc_track(st, now)
+        return res
 
     def prune(self) -> None:
         now = time.time()
@@ -269,7 +376,10 @@ class ScannerEngine:
             now = time.time()
             if self.helius_state.get("state") == "FAILED" and now - self._helius_checked_at > 60:
                 await self.check_helius()
-            todo = [st for st in self._candidates() if now - st.last_deep > HOLDER_TTL][: self.settings.deep_per_cycle]
+            self._deep_times = [x for x in self._deep_times if now - x < 60]
+            budget = max(0, self.settings.deep_max_per_min - len(self._deep_times))
+            todo = deep_due(self._candidates(), now, min(self.settings.deep_per_cycle, budget))
+            self._deep_times += [now] * len(todo)
             if todo:
                 await asyncio.gather(*(one(st) for st in todo))
                 if self.rpc.has_das:
@@ -289,11 +399,12 @@ class ScannerEngine:
                     if st.mint in self.tracked:
                         self._evaluate(st)
             try:
-                await asyncio.wait_for(self._stop.wait(), timeout=3)
+                await asyncio.wait_for(self._stop.wait(), timeout=self.clock.tiers["holders"].interval)
             except asyncio.TimeoutError:
                 pass
 
     async def _deep(self, st: TokenState, force_dev: bool = False) -> None:
+        st.refreshed["holders"] = time.time()          # cadence measured from the start of the scan
         info = st.info
         h = self.history.get(st.mint)
         if not info.creator or info.total_supply is None or (info.real_sol_reserves is None and not info.complete):
@@ -342,7 +453,8 @@ class ScannerEngine:
             st.holders = hs
             st.stamps["holders"] = SourceStamp(hs.source, hs.fetched_at)
             h.add_holders(HolderSnap(hs.fetched_at, hs.holder_count, hs.owner_amounts, hs.complete_list))
-        if force_dev or not st.dev or time.time() - st.dev.fetched_at > DEV_TTL:
+        if force_dev or not st.dev or dev_due(st, time.time()):
+            st.refreshed["dev"] = time.time()
             d = await self.dev.analyze(info, st.holders)
             if d:
                 st.dev = d
@@ -362,6 +474,11 @@ class ScannerEngine:
                     st.snapshotted = True
                 rows.append(st)
         self.db.insert_snapshots(rows)
+        dirty = [st for st in self.tracked.values() if st.mc_track and st.mc_track.dirty]
+        if dirty:
+            self.db.save_mc_tracks([(st.mint, st.mc_track) for st in dirty])
+            for st in dirty:
+                st.mc_track.dirty = False
 
     async def send_alerts(self) -> None:
         """Alerts come ONLY from the ranked list (VALID data quality + Opportunity Score)."""
@@ -387,7 +504,10 @@ class ScannerEngine:
     # ------------------------------------------------------------------ on-demand
     async def analyze_one(self, mint: str) -> TokenState:
         """Full, forced analysis of a single token (CLI --check, watchlist add, detail refresh)."""
-        st = self.tracked.get(mint) or TokenState(info=TokenInfo(mint=mint), watch=mint in self.watch)
+        st = self.tracked.get(mint)
+        if st is None:
+            st = TokenState(info=TokenInfo(mint=mint), watch=mint in self.watch)
+            self._restore_mc(st)
         info = await self.pump.coin(mint)
         if info:
             st.info.merge(info)
@@ -398,6 +518,8 @@ class ScannerEngine:
             self.sol_price = wsol.price_usd
         if mint in res:
             ingest_market(st, res[mint][0], res[mint][1], self.sol_price, self.history.get(mint))
+            update_mc_track(st)
+            st.refreshed["market"] = time.time()
         self._evaluate(st)
         return st
 

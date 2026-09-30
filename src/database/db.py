@@ -12,7 +12,7 @@ import threading
 import time
 from pathlib import Path
 
-from core.models import Event, TokenState
+from core.models import Event, McTrack, TokenState
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS tokens (
@@ -46,6 +46,10 @@ CREATE TABLE IF NOT EXISTS alerts (
 );
 CREATE INDEX IF NOT EXISTS ix_alert_mint ON alerts(mint, ts);
 CREATE TABLE IF NOT EXISTS watchlist (mint TEXT PRIMARY KEY, added_at REAL, note TEXT);
+CREATE TABLE IF NOT EXISTS mc_track (
+    mint TEXT PRIMARY KEY, first_seen REAL, initial_mc REAL, initial_ts REAL, initial_source TEXT,
+    ath_mc REAL, ath_ts REAL, path TEXT
+);
 """
 
 MIGRATIONS = (("dq", "INTEGER"), ("dq_status", "TEXT"), ("liquidity_source", "TEXT"),
@@ -166,6 +170,34 @@ class Database:
 
     def recent_alerts(self, limit: int = 200) -> list[sqlite3.Row]:
         return self._query("SELECT * FROM alerts ORDER BY ts DESC LIMIT ?", (limit,))
+
+    # --- MC journey (initial MC at discovery is written once and never overwritten) ---
+    def save_mc_tracks(self, items: list[tuple[str, McTrack]]) -> None:
+        rows = [(m, t.first_seen, t.initial_mc, t.initial_ts, t.initial_source, t.ath_mc, t.ath_ts,
+                 json.dumps([[round(ts, 1), mc] for ts, mc in t.path])) for m, t in items]
+        with self._lock:
+            self.conn.executemany(
+                """INSERT INTO mc_track VALUES (?,?,?,?,?,?,?,?)
+                   ON CONFLICT(mint) DO UPDATE SET
+                   initial_mc=COALESCE(mc_track.initial_mc, excluded.initial_mc),
+                   initial_ts=COALESCE(mc_track.initial_ts, excluded.initial_ts),
+                   initial_source=CASE WHEN mc_track.initial_mc IS NULL THEN excluded.initial_source
+                                       ELSE mc_track.initial_source END,
+                   first_seen=MIN(mc_track.first_seen, excluded.first_seen),
+                   ath_mc=excluded.ath_mc, ath_ts=excluded.ath_ts, path=excluded.path""", rows)
+            self.conn.commit()
+
+    def load_mc_tracks(self, since: float = 0) -> dict[str, McTrack]:
+        out = {}
+        for r in self._query("SELECT * FROM mc_track WHERE first_seen >= ?", (since,)):
+            try:
+                path = [(float(a), float(b)) for a, b in json.loads(r["path"] or "[]")]
+            except (ValueError, TypeError):
+                path = []
+            out[r["mint"]] = McTrack(first_seen=r["first_seen"], initial_mc=r["initial_mc"],
+                                     initial_ts=r["initial_ts"], initial_source=r["initial_source"] or "",
+                                     ath_mc=r["ath_mc"], ath_ts=r["ath_ts"], path=path)
+        return out
 
     # --- watchlist ---
     def watchlist(self) -> list[str]:

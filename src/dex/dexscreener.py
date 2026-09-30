@@ -96,7 +96,8 @@ class DexScreenerClient:
         any_ok = False
         for i in range(0, len(mints), BATCH):
             chunk = mints[i:i + BATCH]
-            data = await self.http.get_json(f"{self.base}/tokens/v1/{CHAIN}/{','.join(chunk)}", source=SOURCE)
+            data = await self.http.get_json(f"{self.base}/tokens/v1/{CHAIN}/{','.join(chunk)}", source=SOURCE,
+                                            timeout=8.0, retries=1)
             if not isinstance(data, list):
                 continue
             any_ok = True

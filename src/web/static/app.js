@@ -11,8 +11,10 @@ const LS = {
 const S = {
   code: LS.get("accessCode", ""), dict: {}, watch: LS.get("watchlist", []), prefs: LS.get("prefs", {}),
   timer: null, lastStatus: null, busy: false, cache: {}, open: LS.get("openSecs", { overview: true }),
+  offset: 0, home: null,
 };
-const POLL_MS = 15000;
+/* UI refresh (the server refreshes data on its own tiers: market 5-10s, holders 30-60s, dev 60-120s) */
+const POLL = { home: 5000, token: 5000, list: 10000, watch: 10000, events: 10000, status: 10000 };
 const $ = (sel) => document.querySelector(sel);
 const MINT_RE = /^[1-9A-HJ-NP-Za-km-z]{32,44}$/;
 
@@ -40,6 +42,20 @@ function pctS(v, d = 1) { return v === null || v === undefined ? "—" : (v > 0 
 function scoreCls(v) { return v === null || v === undefined ? "c-muted" : v >= 75 ? "c-green" : v >= 55 ? "c-yellow" : v >= 35 ? "c-orange" : "c-muted"; }
 function riskCls(v) { return v === null || v === undefined ? "c-muted" : v <= 30 ? "c-green" : v <= 60 ? "c-yellow" : v <= 80 ? "c-orange" : "c-red"; }
 function ago(sec) { if (sec === null || sec === undefined) return "—"; return sec < 90 ? sec + "s" : Math.round(sec / 60) + "m"; }
+function nowS() { return Date.now() / 1000 + S.offset; }            // server clock
+function sinceTs(ts) { return ts ? Math.max(0, Math.round(nowS() - ts)) : null; }
+function syncClock(serverTime) { if (serverTime) S.offset = serverTime - Date.now() / 1000; }
+function updSpan(ts) { return `<span class="upd" data-ts="${Number(ts) || ""}">${esc(updText(ts))}</span>`; }
+function updText(ts) { const s = sinceTs(ts); return s === null ? t("web.upd.never") : t("web.upd.ago", { s: ago(s) }); }
+function tickUpd() { document.querySelectorAll(".upd[data-ts]").forEach((el) => { el.textContent = updText(Number(el.dataset.ts) || null); }); }
+function hhmm(ts) { return ts ? new Date(ts * 1000).toLocaleTimeString("vi-VN", { hour: "2-digit", minute: "2-digit" }) : "—"; }
+function short(mint) { return mint.slice(0, 4) + "…" + mint.slice(-4); }
+function gainTxt(p) {
+  if (p.gain_x === null || p.gain_x === undefined) return esc(t("web.nodata"));
+  const cls = p.gain_x >= 1 ? "c-green" : "c-red";
+  return `<span class="${cls}">${p.gain_pct > 0 ? "+" : ""}${esc(p.gain_pct.toFixed(0))}% (${esc(p.gain_x.toFixed(2))}×)</span>`;
+}
+function unk(v, f) { return v === null || v === undefined ? `<span class="c-muted">${esc(t("common.unknown"))}</span>` : esc(f ? f(v) : v); }
 function toast(msg) {
   const el = $("#toast"); el.textContent = msg; el.classList.add("show");
   clearTimeout(toast._t); toast._t = setTimeout(() => el.classList.remove("show"), 1800);
@@ -128,15 +144,110 @@ function cardHtml(c) {
       <div><span class="k">${esc(t("col.holders"))}</span><span class="v">${c.holders === null || c.holders === undefined ? esc(t("common.unknown")) : num(c.holders)}</span></div>
       <div><span class="k">Top10</span><span class="v">${c.top10 === null || c.top10 === undefined ? esc(t("common.unknown")) : c.top10.toFixed(1) + "%"}</span></div>
     </div>
+    ${c.profile ? `<div class="meta">${esc(t("web.pf.initial"))} ${esc(c.profile.initial_label)} → ${esc(c.mc_label)} · ${gainTxt(c.profile)}${c.profile.mc_path.length > 2 ? " · " + esc(c.profile.mc_path.join(" → ")) : ""}</div>` : ""}
+    ${c.group_reasons && c.group_reasons.length ? `<div class="meta">${esc(c.group_reasons.join(" · "))}</div>` : ""}
+    <div class="foot">${updSpan(c.updated_at)}${c.hot && c.hot.length ? " · ⚑ " + esc(c.hot.join(", ")) : ""}</div>
   </a>`;
 }
 
+/* ---------------------------------------------------------------- coin profile */
+function scenarioHtml(p) {
+  if (!p.scenario) return `<span class="c-muted">${esc(t("web.nodata"))}</span>`;
+  const lv = p.scenario.levels.map((l) => `${esc(l.label)} <span class="c-muted">(${esc(l.multiple)}×${l.reached ? " · " + esc(t("web.scn.reached")) : ""})</span>`).join(" · ");
+  const refs = p.scenario.refs.map((r) => `${esc(r.label)} ${esc(r.value)}`).join(" · ");
+  return lv + (refs ? `<div class="meta">${esc(t("web.scn.refs"))}: ${refs}</div>` : "");
+}
+function devHtml(d) {
+  if (!d.known) return `<span class="c-muted">${esc(t("web.dev.unknown"))}</span>` + (d.wallet ? ` <span class="meta">${esc(short(d.wallet))}</span>` : "");
+  const parts = [];
+  if (d.prev_tokens !== null) parts.push(esc(t("web.dev.tokens", { n: d.prev_tokens })));
+  if (d.graduated !== null) parts.push(esc(t("web.dev.graduated", { n: d.graduated })));
+  if (d.best_ath) parts.push(esc(t("web.dev.best", { v: d.best_ath })));
+  if (d.dead !== null && d.dead > 0) parts.push(`<span class="c-orange">${esc(t("web.dev.dead", { n: d.dead }))}</span>`);
+  if (d.holding_pct !== null) parts.push(esc(t("web.dev.holding", { v: d.holding_pct.toFixed(2) })));
+  if (d.sold_pct !== null) parts.push(esc(t("web.dev.sold", { v: d.sold_pct.toFixed(0) })));
+  if (d.status) parts.push(esc(d.status));
+  return parts.join(" · ") || `<span class="c-muted">${esc(t("web.dev.unknown"))}</span>`;
+}
+function arrow(v, unit, digits) {
+  if (v === null || v === undefined) return "";
+  const cls = v > 0 ? "c-green" : v < 0 ? "c-red" : "c-muted";
+  return ` <span class="${cls}">${v > 0 ? "↑+" : v < 0 ? "↓" : "→"}${esc(Number(v).toFixed(digits || 0))}${esc(unit || "")}</span>`;
+}
+function onchainHtml(c) {
+  const o = c.profile.onchain;
+  const holders = o.holders === null ? `<span class="c-muted">${esc(t("common.unknown"))}</span>` : esc(num(o.holders)) + arrow(o.holders_chg_15m, "/15m");
+  const buy = o.buy_share === null ? `<span class="c-muted">${esc(t("common.unknown"))}</span>` : esc(o.buy_share.toFixed(0) + "%") + arrow(o.buy_pp_5m, "pp");
+  const cell = (k, v) => `<div><span class="k">${esc(k)}</span><span class="v">${v}</span></div>`;
+  return `<div class="stats three">
+    ${cell(t("col.holders"), holders)}${cell(t("web.oc.whale"), unk(o.whale))}${cell(t("web.oc.buy"), buy)}
+    ${cell("Vol 5m", esc(c.vol5m_label) + arrow(o.vol_chg_5m, "%"))}${cell("Txn 5m", unk(o.txns_5m, num))}${cell(t("col.liq"), esc(c.liq_label))}
+    ${cell("Top10", unk(c.top10, (v) => v.toFixed(1) + "%"))}${cell(t("col.risk"), `<span class="${riskCls(c.risk)}">${unk(c.risk)}</span>`)}
+    ${cell("Early", c.early === null ? `<span class="c-muted">${esc(t("common.unknown"))} (${esc(c.early_groups)}/7)</span>` : `<span class="${scoreCls(c.early)}">${esc(c.early)}</span> <span class="c-muted">(${esc(t("web.oc.fired", { n: c.fired ?? 0 }))})</span>`)}
+  </div><div class="meta">${esc(t("web.oc.pair"))}: ${esc(o.pair_label)}</div>`;
+}
+function socialHtml(p) {
+  const s = p.social, links = [];
+  for (const [k, lab] of [["twitter", "X"], ["telegram", "Telegram"], ["website", "Website"]]) {
+    const u = safeUrl(s.links[k]); if (u) links.push(`<a href="${esc(u)}" target="_blank" rel="noopener noreferrer">${lab}</a>`);
+  }
+  return (links.length ? links.join(" · ") : `<span class="c-muted">${esc(t("web.nodata"))}</span>`) +
+    `<div class="meta">${esc(t("web.soc.category"))}: ${s.category.length ? esc(s.category.join(", ")) : esc(t("web.nodata"))} · ${esc(t("web.soc.activity"))}: ${esc(t("web.nodata"))}</div>`;
+}
+function pathHtml(p) { return p.mc_path.length ? esc(p.mc_path.join(" → ")) : `<span class="c-muted">${esc(t("web.nodata"))}</span>`; }
+function profileLine(label, body) { return `<div class="pl"><div class="plk">${esc(label)}</div><div class="plv">${body}</div></div>`; }
+function oppCardHtml(c) {
+  const p = c.profile, m = encodeURIComponent(c.mint);
+  const age = c.age_min === null ? t("common.unknown") : c.age;
+  return `<div class="card opp">
+    <div class="card-head">
+      <span class="sym">🔥 $${esc(c.symbol)}</span><span class="name">${esc(c.name)}</span>
+      <button class="star${isWatched(c.mint) ? " on" : ""}" data-star="${esc(c.mint)}" aria-label="${esc(t("web.watch.toggle"))}">${isWatched(c.mint) ? "♥" : "♡"}</button>
+    </div>
+    <div class="meta">CA ${esc(short(c.mint))} · ${esc(t("web.pf.found", { time: hhmm(p.first_seen) }))} · ${esc(t("web.pf.age"))} ${esc(age)}</div>
+    <div class="mcrow">
+      <div><span class="k">MC</span><span class="v">${esc(c.mc_label)}</span></div>
+      <div><span class="k">${esc(t("web.pf.initial"))}</span><span class="v">${esc(p.initial_label)}</span></div>
+      <div><span class="k">${esc(t("web.pf.gain"))}</span><span class="v">${gainTxt(p)}</span></div>
+    </div>
+    ${profileLine(t("web.pf.scenario"), scenarioHtml(p))}
+    ${profileLine("DEV", devHtml(p.dev))}
+    ${profileLine("ON-CHAIN", onchainHtml(c))}
+    ${profileLine("SOCIAL", socialHtml(p))}
+    ${profileLine(t("web.pf.history"), pathHtml(p))}
+    ${c.group_reasons.length ? `<div class="meta">${esc(t("web.pf.why_group"))}: ${esc(c.group_reasons.join(" · "))}</div>` : ""}
+    <div class="actions four">
+      <a class="btn primary" href="#/token/${esc(c.mint)}">${esc(t("web.btn.detail"))}</a>
+      <button class="btn" data-copy="${esc(c.mint)}">${esc(t("btn.copy_ca"))}</button>
+      <a class="btn" href="https://dexscreener.com/solana/${esc(m)}" target="_blank" rel="noopener noreferrer">DEXSCREENER</a>
+      <a class="btn" href="https://solscan.io/token/${esc(m)}" target="_blank" rel="noopener noreferrer">SOLSCAN</a>
+    </div>
+    <div class="foot">${updSpan(c.updated_at)} · ${esc(t("web.pf.not_advice"))}</div>
+  </div>`;
+}
+
 /* ---------------------------------------------------------------- list views */
+/* key -> value (higher = first). null/undefined = unknown -> always last, never treated as 0 */
+const neg = (v) => (v === null || v === undefined ? null : -v);
 const SORTS = {
-  opp: (c) => c.opp ?? -1, early: (c) => c.early ?? -1, risk_low: (c) => -(c.risk ?? 101), mc: (c) => c.mc ?? -1,
-  vol5m: (c) => c.vol5m ?? -1, age: (c) => -(c.age_min ?? 1e9), holders: (c) => c.holders ?? -1,
+  confirm: (c) => (c.fired === null || c.fired === undefined ? null : c.fired * 1000 + (c.early ?? 0)),
+  newest: (c) => c.first_seen ?? null, mc_low: (c) => neg(c.mc), mc_rise: (c) => c.mc_rise, vol_rise: (c) => c.vol_rise,
+  buy: (c) => c.buy_pp, holder_rise: (c) => c.holder_rise, risk_low: (c) => neg(c.risk), early: (c) => c.early,
+  liq: (c) => c.liq, dev_hist: (c) => c.dev_hist,
+  opp: (c) => c.opp, mc: (c) => c.mc, vol5m: (c) => c.vol5m, age: (c) => neg(c.age_min), holders: (c) => c.holders,
 };
-const LIST_DEFAULT_SORT = { top: "opp", new: "age", early: "early", whales: "holders", dev: "risk_low", social: "opp" };
+const HOME_SORTS = ["confirm", "newest", "mc_low", "mc_rise", "vol_rise", "buy", "holder_rise", "risk_low", "early", "liq", "dev_hist"];
+const LIST_SORTS = ["opp", "early", "risk_low", "mc", "vol5m", "age", "holders", "newest", "mc_low", "mc_rise", "vol_rise", "buy", "holder_rise", "liq", "dev_hist"];
+const LIST_DEFAULT_SORT = { home: "confirm", top: "opp", new: "age", early: "early", whales: "holders", dev: "risk_low", social: "opp" };
+function sortBy(items, sortKey) {
+  const key = SORTS[sortKey] || SORTS.opp;
+  return items.map((c) => [key(c), c]).sort((a, b) => {
+    const x = a[0], y = b[0];
+    if (x === null || x === undefined || Number.isNaN(x)) return (y === null || y === undefined || Number.isNaN(y)) ? 0 : 1;
+    if (y === null || y === undefined || Number.isNaN(y)) return -1;
+    return y - x;
+  }).map((p) => p[1]);
+}
 
 function listPrefs(kind) {
   S.prefs[kind] = Object.assign({ sort: LIST_DEFAULT_SORT[kind] || "opp", valid: false, lowRisk: false, pass: false, q: "" }, S.prefs[kind] || {});
@@ -147,16 +258,16 @@ function applyFilters(items, p) {
   let out = items.filter((c) =>
     (!p.valid || c.dq === "VALID") && (!p.lowRisk || (c.risk !== null && c.risk <= 60)) && (!p.pass || c.filters_passed) &&
     (!q || (c.symbol || "").toLowerCase().includes(q) || (c.name || "").toLowerCase().includes(q) || c.mint.toLowerCase() === q));
-  const key = SORTS[p.sort] || SORTS.opp;
-  return out.sort((a, b) => key(b) - key(a));
+  return sortBy(out, p.sort);
 }
 function toolbarHtml(kind, p) {
   const opt = (v) => `<option value="${v}"${p.sort === v ? " selected" : ""}>${esc(t("web.sort." + v))}</option>`;
+  const sorts = kind === "home" ? HOME_SORTS : LIST_SORTS;
   const chip = (k) => `<button class="chip${p[k] ? " on" : ""}" data-chip="${k}">${esc(t("web.filter." + k))}</button>`;
   return `<div class="toolbar">
     <div class="row">
       <input class="search" id="q" type="search" placeholder="${esc(t("web.search"))}" value="${esc(p.q)}" autocomplete="off" autocapitalize="off" spellcheck="false">
-      <select class="select" id="sort">${Object.keys(SORTS).map(opt).join("")}</select>
+      <select class="select" id="sort">${sorts.map(opt).join("")}</select>
     </div>
     <div class="chips">${chip("valid")}${chip("lowRisk")}${chip("pass")}</div>
   </div>`;
@@ -168,6 +279,7 @@ async function renderList(kind, silent) {
   bindToolbar(kind);
   try {
     const data = await api(`/api/list/${kind}?limit=300`);
+    syncClock(data.server_time);
     S.cache[kind] = data.items;
     drawList(kind);
   } catch (e) { if (!silent) $("#list").innerHTML = `<div class="empty">${esc(t("web.error"))}: ${esc(e.message)}</div>`; }
@@ -182,11 +294,46 @@ function drawList(kind) {
 function bindToolbar(kind) {
   const p = listPrefs(kind);
   const q = $("#q"), sort = $("#sort");
-  if (q) q.oninput = () => { p.q = q.value; savePrefs(); drawList(kind); };
-  if (sort) sort.onchange = () => { p.sort = sort.value; savePrefs(); drawList(kind); };
+  const draw = () => (kind === "home" ? drawHome() : drawList(kind));
+  if (q) q.oninput = () => { p.q = q.value; savePrefs(); draw(); };
+  if (sort) sort.onchange = () => { p.sort = sort.value; savePrefs(); draw(); };
   document.querySelectorAll("[data-chip]").forEach((b) => {
-    b.onclick = () => { const k = b.dataset.chip; p[k] = !p[k]; savePrefs(); b.classList.toggle("on", p[k]); drawList(kind); };
+    b.onclick = () => { const k = b.dataset.chip; p[k] = !p[k]; savePrefs(); b.classList.toggle("on", p[k]); draw(); };
   });
+}
+
+/* ---------------------------------------------------------------- home: 4 groups */
+const GROUPS = [["opportunity", "🔥"], ["watch", "👀"], ["nodata", "⏳"], ["excluded", "⛔"]];
+async function renderHome(silent) {
+  const p = listPrefs("home");
+  if (!silent) {
+    $("#view").innerHTML = `<h1>${esc(t("web.title.home"))}</h1><div class="banner">${esc(t("web.home.note"))}</div>${toolbarHtml("home", p)}<div id="list"><div class="spin">${esc(t("web.loading"))}</div></div>`;
+    bindToolbar("home");
+  }
+  try {
+    const d = await api("/api/home");
+    syncClock(d.server_time);
+    S.home = d;
+    drawHome();
+  } catch (e) { if (!silent && $("#list")) $("#list").innerHTML = `<div class="empty">${esc(t("web.error"))}: ${esc(e.message)}</div>`; }
+}
+function drawHome() {
+  const d = S.home, el = $("#list");
+  if (!d || !el) return;
+  const p = listPrefs("home");
+  if (S.open["g_opportunity"] === undefined) Object.assign(S.open, { g_opportunity: true, g_watch: true, g_nodata: false, g_excluded: false });
+  el.innerHTML = GROUPS.map(([g, ico]) => {
+    const items = applyFilters(d.groups[g] || [], p);
+    const shown = (d.groups[g] || []).length, total = d.counts[g] || 0;
+    const body = items.length
+      ? `<div class="cards">${items.map(g === "opportunity" ? oppCardHtml : cardHtml).join("")}</div>` +
+        (total > shown ? `<div class="count">${esc(t("web.home.more", { n: total - shown }))}</div>` : "")
+      : `<div class="empty">${esc(t("web.group_empty." + g))}</div>`;
+    return `<details class="sec grp g-${g}" data-k="g_${g}"${S.open["g_" + g] ? " open" : ""}>
+      <summary>${ico} ${esc(t("web.group." + g))} <span class="cnt">${esc(total)}</span></summary>
+      <div class="sec-body"><div class="meta">${esc(t("web.group_rule." + g))}</div>${body}</div></details>`;
+  }).join("") + `<div class="count">${esc(t("web.home.quiet", { n: d.counts.quiet || 0 }))}</div><div class="disclaimer">${esc(t("app.disclaimer"))}</div>`;
+  el.querySelectorAll("details.grp").forEach((x) => x.addEventListener("toggle", () => { S.open[x.dataset.k] = x.open; LS.set("openSecs", S.open); }));
 }
 
 /* ---------------------------------------------------------------- watchlist view */
@@ -240,7 +387,7 @@ function sec(key, title, body) {
 async function renderToken(mint, silent) {
   const view = $("#view");
   if (!silent) view.innerHTML = `<button class="back" id="back">‹ ${esc(t("web.back"))}</button><div class="spin">${esc(t("web.loading"))}</div>`;
-  const back = $("#back"); if (back) back.onclick = () => history.length > 1 ? history.back() : (location.hash = "#/top");
+  const back = $("#back"); if (back) back.onclick = () => history.length > 1 ? history.back() : (location.hash = "#/home");
   let v;
   try { v = await api("/api/token/" + encodeURIComponent(mint)); }
   catch (e) {
@@ -273,6 +420,25 @@ async function renderToken(mint, silent) {
       <button class="btn" id="refresh">${esc(t("web.btn.refresh"))}</button>
     </div>
   </div>`;
+  syncClock(v.server_time);
+  const pf = c.profile;
+  html += `<div class="token-head">
+    <div class="meta">${esc(t("web.pf.found", { time: hhmm(pf.first_seen) }))}${pf.age_at_discovery_min !== null ? " · " + esc(t("web.pf.found_age", { m: pf.age_at_discovery_min })) : ""} · ${esc(t("web.pf.age"))} ${esc(c.age)}</div>
+    <div class="mcrow">
+      <div><span class="k">MC</span><span class="v">${esc(c.mc_label)}</span></div>
+      <div><span class="k">${esc(t("web.pf.initial"))}</span><span class="v">${esc(pf.initial_label)}</span></div>
+      <div><span class="k">${esc(t("web.pf.gain"))}</span><span class="v">${gainTxt(pf)}</span></div>
+    </div>
+    ${pf.initial_ts ? `<div class="meta">${esc(t("web.pf.initial_note", { time: hhmm(pf.initial_ts), src: pf.initial_source }))}</div>` : ""}
+    ${profileLine(t("web.pf.scenario"), scenarioHtml(pf))}
+    <div class="meta">${esc(t("web.scn.disclaimer"))}</div>
+    ${profileLine("DEV", devHtml(pf.dev) + (pf.dev.wallet ? `<div class="meta">${esc(t("web.dev.wallet"))}: ${esc(pf.dev.wallet)}${pf.dev.funding ? " · " + esc(t("web.dev.funding")) + ": " + esc(short(pf.dev.funding)) : ""} · ${esc(t("web.dev.related"))}: ${esc(t("common.not_available"))}</div>` : ""))}
+    ${profileLine("ON-CHAIN", onchainHtml(c))}
+    ${profileLine("SOCIAL", socialHtml(pf))}
+    ${profileLine(t("web.pf.history"), pathHtml(pf))}
+    <div class="foot">${esc(t("web.upd.market"))} ${updSpan(pf.updated.market)} · ${esc(t("web.upd.holders"))} ${updSpan(pf.updated.holders)} · DEV ${updSpan(pf.updated.dev)}</div>
+  </div>`;
+  if (c.group) html += `<div class="banner ${c.group === "excluded" ? "red" : c.group === "opportunity" ? "green" : ""}">${esc(t("web.group." + c.group))}${c.group_reasons.length ? ": " + esc(c.group_reasons.join(" · ")) : ""}</div>`;
   if (v.risk && v.risk.score > 80) html += `<div class="banner red">⚠ ${esc(t("lbl.extreme_risk", { score: v.risk.score }))}</div>`;
   if (c.is_early) html += `<div class="banner green">⚡ EARLY SIGNAL ${esc(c.early)}/100</div>`;
   if (v.data_quality && v.data_quality.status === "INVALID") html += `<div class="banner red">${esc(t("lbl.not_scored_invalid"))}</div>`;
@@ -317,7 +483,7 @@ async function renderToken(mint, silent) {
   html += `<div class="disclaimer">${esc(v.disclaimer)}</div>`;
   view.innerHTML = html;
   view.querySelectorAll("details.sec").forEach((d) => d.addEventListener("toggle", () => { S.open[d.dataset.k] = d.open; LS.set("openSecs", S.open); }));
-  $("#back").onclick = () => history.length > 1 ? history.back() : (location.hash = "#/top");
+  $("#back").onclick = () => history.length > 1 ? history.back() : (location.hash = "#/home");
   $("#copy").onclick = () => copyText(c.mint);
   $("#watchbtn").onclick = async () => { await toggleWatch(c.mint); $("#watchbtn").textContent = isWatched(c.mint) ? t("web.btn.watching") : t("web.btn.watch"); };
   $("#refresh").onclick = () => doRefresh(c.mint);
@@ -343,7 +509,7 @@ async function doRefresh(mint) {
 function renderMore() {
   const item = (href, key, na) => `<a href="${href}"><span>${esc(t(key))}</span>${na ? `<span class="na">${esc(t("common.not_available"))}</span>` : "<span>›</span>"}</a>`;
   $("#view").innerHTML = `<h1>${esc(t("web.nav.more"))}</h1><div class="menu">
-    ${item("#/list/whales", "tab.whales")}${item("#/list/dev", "tab.dev")}${item("#/list/social", "tab.social")}
+    ${item("#/top", "web.title.top")}${item("#/list/whales", "tab.whales")}${item("#/list/dev", "tab.dev")}${item("#/list/social", "tab.social")}
     ${item("#/narrative", "tab.narrative")}${item("#/events", "lbl.live_events")}${item("#/smart", "tab.smart_money", true)}
     ${item("#/status", "web.title.status")}
     <button id="logout"><span>${esc(t("web.login.change"))}</span><span>›</span></button>
@@ -390,7 +556,21 @@ async function renderStatus(silent) {
     ${kv("VALID / PARTIAL / INVALID", `${s.data_quality.VALID} / ${s.data_quality.PARTIAL} / ${s.data_quality.INVALID}`)}
     ${kv("EARLY = TRUE", s.early_true)}${kv("SOL", usd(s.sol_usd))}
     ${kv(t("web.status.uptime"), ago(s.scanner.uptime_s))}${kv(t("web.status.version"), s.version)}
-  </div><div class="disclaimer">${esc(t("web.status.note"))}</div>`;
+  </div>${refreshTable(s.refresh)}<div class="disclaimer">${esc(t("web.status.note"))}</div>`;
+}
+
+function refreshTable(r) {
+  if (!r || !r.tiers) return "";
+  const row = (k, target, tier) => `<div class="kv"><span class="k">${esc(t("web.rf." + k))}</span><span class="v">${esc(target)}${tier && tier.measured_s !== null ? " · " + esc(t("web.rf.measured", { s: tier.measured_s })) : ""}${tier && tier.failures ? " · ⚠ " + esc(tier.failures) : ""}</span></div>`;
+  const tr = r.tiers;
+  return `<h2>${esc(t("web.rf.title"))}</h2><div class="token-head">
+    ${row("discovery", "~" + tr.discovery.target_s + "s", tr.discovery)}
+    ${row("market", `${r.market_s.hot}s / ${r.market_s.normal}s / ${r.market_s.quiet}s`, tr.market)}
+    ${row("holders", `${r.holders_s.hot}s / ${r.holders_s.normal}s`, null)}
+    ${row("dev", `${r.dev_s.hot}s / ${r.dev_s.normal}s`, null)}
+    ${row("persist", tr.persist.target_s + "s", tr.persist)}
+    <div class="kv"><span class="k">${esc(t("web.rf.hot"))}</span><span class="v">${esc(r.hot_tokens)}</span></div>
+    <div class="meta">${esc(t("web.rf.note", { n: r.deep_max_per_min }))}</div></div>`;
 }
 
 /* ---------------------------------------------------------------- login */
@@ -405,7 +585,7 @@ function showLogin(err) {
     S.code = $("#code").value.trim();
     try {
       await api("/api/auth"); LS.set("accessCode", S.code); $("#tabbar").classList.remove("hidden");
-      refreshStatus(); syncWatch(); if (!location.hash) location.hash = "#/top"; route();
+      refreshStatus(); syncWatch(); if (!location.hash) location.hash = "#/home"; route();
     }
     catch (_) { /* message shown by api() */ }
   };
@@ -415,29 +595,38 @@ function showLogin(err) {
 
 /* ---------------------------------------------------------------- router + polling */
 function stopPoll() { clearInterval(S.timer); S.timer = null; }
-function startPoll(fn) {
+function startPoll(fn, ms) {
   stopPoll();
-  S.timer = setInterval(() => { if (!document.hidden) { refreshStatus(); fn(); } }, POLL_MS);
+  let n = 0;
+  S.timer = setInterval(() => {
+    if (document.hidden) return;
+    if (n++ % 2 === 0) refreshStatus();         // status pills every other tick
+    fn();
+  }, ms || POLL.list);
 }
 function setTab(tab) { document.querySelectorAll(".tabbar a").forEach((a) => a.classList.toggle("on", a.dataset.tab === tab)); }
 function route() {
   if (!S.code) { showLogin(""); return; }
-  const h = location.hash || "#/top";
+  const h = location.hash || "#/home";
   const parts = h.slice(2).split("/");
   window.scrollTo(0, 0);
   const [p0, p1] = parts;
-  if (p0 === "token" && p1) { setTab(""); renderToken(p1); startPoll(() => renderToken(p1, true)); return; }
-  if (["top", "new", "early"].includes(p0)) { setTab(p0); renderList(p0); startPoll(() => renderList(p0, true)); return; }
-  if (p0 === "list" && ["whales", "dev", "social"].includes(p1)) { setTab("more"); renderList(p1); startPoll(() => renderList(p1, true)); return; }
-  if (p0 === "watch") { setTab("watch"); renderWatch(); startPoll(() => renderWatch(true)); return; }
+  if (p0 === "home") { setTab("home"); renderHome(); startPoll(() => renderHome(true), POLL.home); return; }
+  if (p0 === "token" && p1) { setTab(""); renderToken(p1); startPoll(() => renderToken(p1, true), POLL.token); return; }
+  if (["new", "early"].includes(p0)) { setTab(p0); renderList(p0); startPoll(() => renderList(p0, true), POLL.list); return; }
+  if (p0 === "top") { setTab("more"); renderList(p0); startPoll(() => renderList(p0, true), POLL.list); return; }
+  if (p0 === "list" && ["whales", "dev", "social"].includes(p1)) { setTab("more"); renderList(p1); startPoll(() => renderList(p1, true), POLL.list); return; }
+  if (p0 === "watch") { setTab("watch"); renderWatch(); startPoll(() => renderWatch(true), POLL.watch); return; }
   if (p0 === "narrative") { setTab("more"); renderNarrative(); stopPoll(); return; }
-  if (p0 === "events") { setTab("more"); renderEvents(); startPoll(() => renderEvents(true)); return; }
-  if (p0 === "status") { setTab("more"); renderStatus(); startPoll(() => renderStatus(true)); return; }
+  if (p0 === "events") { setTab("more"); renderEvents(); startPoll(() => renderEvents(true), POLL.events); return; }
+  if (p0 === "status") { setTab("more"); renderStatus(); startPoll(() => renderStatus(true), POLL.status); return; }
   if (p0 === "smart") { setTab("more"); $("#view").innerHTML = `<h1>${esc(t("tab.smart_money"))}</h1><div class="token-head">${esc(t("na.smart_money"))}</div><div class="disclaimer">${esc(t("na.rule"))}</div>`; stopPoll(); return; }
   setTab("more"); renderMore(); stopPoll();
 }
 
 document.addEventListener("click", (e) => {
+  const cp = e.target.closest("[data-copy]");
+  if (cp) { e.preventDefault(); e.stopPropagation(); copyText(cp.dataset.copy); return; }
   const star = e.target.closest("[data-star]");
   if (star) {
     e.preventDefault(); e.stopPropagation();
@@ -446,6 +635,7 @@ document.addEventListener("click", (e) => {
 });
 document.addEventListener("visibilitychange", () => { if (!document.hidden && S.code) { refreshStatus(); } });
 window.addEventListener("hashchange", route);
+setInterval(tickUpd, 1000);            // "Cập nhật Xs trước" counts up without refetching
 
 (async function init() {
   try { S.dict = await (await fetch("/i18n/vi.json", { cache: "no-cache" })).json(); } catch (_) { S.dict = {}; }

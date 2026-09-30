@@ -353,6 +353,25 @@ class WhaleIntel:
 
 
 @dataclass
+class McTrack:
+    """Market-cap journey as WE observed it. `initial_mc` is the first VALIDATED market cap seen after the
+    token was discovered and is never overwritten by later values (it survives restarts via SQLite)."""
+    first_seen: float                      # when the scanner discovered the token
+    initial_mc: float | None = None
+    initial_ts: float | None = None
+    initial_source: str = ""
+    ath_mc: float | None = None            # highest validated MC we observed
+    ath_ts: float | None = None
+    path: list[tuple[float, float]] = field(default_factory=list)   # (ts, mc) milestones, >= 30 % moves
+    dirty: bool = False                    # needs saving
+
+    def gain_x(self, current: float | None) -> float | None:
+        if current is None or not self.initial_mc:
+            return None
+        return current / self.initial_mc
+
+
+@dataclass
 class Event:
     ts: float
     mint: str
@@ -389,6 +408,12 @@ class TokenState:
     watch: bool = False
     snapshotted: bool = False
     last_deep: float = 0.0
+    mc_track: McTrack | None = None
+    trend: dict = field(default_factory=dict)            # display/priority deltas (never used for scoring)
+    group: str = ""                                       # opportunity | watch | nodata | excluded | quiet
+    group_reasons: list[str] = field(default_factory=list)
+    priority_reasons: list[str] = field(default_factory=list)
+    refreshed: dict[str, float] = field(default_factory=dict)   # tier -> last fetch time (market/holders/dev)
 
     @property
     def mint(self) -> str:

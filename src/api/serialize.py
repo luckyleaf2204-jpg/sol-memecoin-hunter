@@ -14,6 +14,7 @@ from alerts.report import (SECTIONS, age_str, dev_label, event_text, filter_text
                            metric_row, pct, risk_text, subscore_rows, usd, why_items)
 from core.models import TokenState
 from i18n import t
+from intel.mc_track import compact_path, mc_scenario, validated_mc
 
 
 def summary(st: TokenState) -> dict:
@@ -55,9 +56,115 @@ def detail(st: TokenState, now: float | None = None) -> dict:
 
 
 # ---------------------------------------------------------------- display-ready (PWA)
+def usd_short(v) -> str:
+    """$8.4K / $25K / $1.3M — for MC journeys and scenario levels."""
+    if v is None:
+        return t("common.unknown")
+    v = float(v)
+    for div, suf in ((1e9, "B"), (1e6, "M"), (1e3, "K")):
+        if abs(v) >= div:
+            x = v / div
+            txt = f"{x:.1f}" if x < 10 else f"{x:.0f}"
+            return f"${txt.rstrip('0').rstrip('.') if '.' in txt else txt}{suf}"
+    return f"${v:,.0f}"
+
+
+def _group_reason(st: TokenState, r: str) -> str:
+    if r.startswith("rug:"):
+        key = r.split(":", 1)[1]
+        f = next((f for f in (st.risk.factors if st.risk else []) if f.key == key), None)
+        return risk_text(f)[0] if f else key
+    if r == "early_unknown" and st.early:
+        return t("web.gr.early_unknown", groups=st.early.groups_computable, minutes=round(st.early.history_min, 1))
+    if r == "top10" and st.holders and st.holders.top10_pct is not None:
+        return t("web.gr.top10", pct=f"{st.holders.top10_pct:.1f}")
+    if r == "risk_high" and st.risk:
+        return t("web.gr.risk_high", risk=st.risk.score)
+    return t(f"web.gr.{r}")
+
+
+def _pair_status(st: TokenState) -> tuple[str, str]:
+    m, i = st.market, st.info
+    if any(e.type == "DATA_BREAK" and time.time() - e.ts < 1800 for e in st.recent_events[-10:]):
+        return "migrated", t("web.pair.migrated")
+    if m and m.is_curve or (i.complete is False):
+        prog = f" {i.curve_progress:.0f}%" if i.curve_progress is not None else ""
+        return "curve", t("web.pair.curve") + prog
+    if i.complete or (m and m.dex_id and not m.is_curve):
+        return "graduated", t("web.pair.graduated", dex=(m.dex_id if m and m.dex_id else "AMM"))
+    return "unknown", t("common.unknown")
+
+
+def profile(st: TokenState) -> dict:
+    """Coin profile: MC journey, reference scenario, dev / on-chain / social summaries. Real data only."""
+    m, d, hi, tr = st.market, st.dev, st.holder_intel, st.mc_track
+    mc = validated_mc(st)
+    gain = tr.gain_x(mc) if tr else None
+    sc = mc_scenario(st)
+    dev_ok, hist_ok = bool(d and d.balance_verified), bool(d and d.history_verified)
+    trend = st.trend or {}
+    pair_key, pair_label = _pair_status(st)
+    return {
+        "first_seen": tr.first_seen if tr else st.info.discovered_at,
+        "age_at_discovery_min": round((st.info.discovered_at - st.info.created_at) / 60, 1)
+        if st.info.created_at and st.info.discovered_at >= st.info.created_at else None,
+        "initial_mc": tr.initial_mc if tr else None,
+        "initial_ts": tr.initial_ts if tr else None,
+        "initial_label": usd_short(tr.initial_mc) if tr and tr.initial_mc else t("web.nodata"),
+        "initial_source": tr.initial_source if tr else "",
+        "gain_x": round(gain, 2) if gain is not None else None,
+        "gain_pct": round(100 * (gain - 1), 1) if gain is not None else None,
+        "ath_mc": tr.ath_mc if tr else None,
+        "mc_path": [usd_short(x) for x in compact_path(tr, mc)],
+        "scenario": None if sc is None else {
+            "levels": [{"label": usd_short(x["mc"]), "multiple": x["multiple"], "reached": x["reached_before"]}
+                       for x in sc["levels"]],
+            "refs": [{"label": t(f"web.ref.{r['key']}"), "value": usd_short(r["mc"]), "multiple": r["multiple"],
+                      "source": r["source"]} for r in sc["refs"]],
+        },
+        "dev": {
+            "known": dev_ok or hist_ok,
+            "wallet": st.info.creator or None,
+            "holding_pct": d.current_pct if dev_ok else None,
+            "sold_pct": d.sold_pct if dev_ok else None,
+            "status": t(f"devstatus.{d.status}") if dev_ok else None,
+            "initial_buy": st.info.dev_initial_buy,
+            "prev_tokens": d.prev_tokens_count if hist_ok else None,
+            "graduated": d.prev_graduated if hist_ok else None,
+            "dead": d.prev_dead if hist_ok else None,
+            "best_ath": usd_short(d.prev_best_ath) if hist_ok and d.prev_best_ath else None,
+            "funding": d.funding_wallet if d and d.funding_wallet else None,
+            "funding_sol": d.funding_sol if d and d.funding_wallet else None,
+            "related": None,                        # wallet clustering NOT AVAILABLE -> never guessed
+            "updated": d.fetched_at if d else None,
+        },
+        "onchain": {
+            "holders": st.holders.holder_count if st.holders else None,
+            "holders_chg_15m": hi.abs_growth_15m if hi else None,
+            "holders_chg_5m": hi.abs_growth_5m if hi else None,
+            "whale": t(f"state.{st.whale_intel.state}") if st.whale_intel and st.whale_intel.state != "UNKNOWN" else None,
+            "buy_share": trend.get("buy_share"),
+            "buy_pp_5m": trend.get("buy_pp_5m"),
+            "mc_chg_5m": trend.get("mc_chg_5m_pct"),
+            "vol_chg_5m": trend.get("vol_chg_5m_pct"),
+            "txns_5m": m.txns_5m if m else None,
+            "pair": pair_key, "pair_label": pair_label,
+            "holder_status": st.holder_status or None,
+        },
+        "social": {
+            "links": {k: getattr(st.info, k) for k in ("twitter", "telegram", "website") if getattr(st.info, k)},
+            "category": [t(f"narrative.{n}") for n in st.narratives],
+            "activity": None,                       # X / Telegram activity NOT AVAILABLE (no scraping)
+        },
+        "updated": {k: v.updated_at for k, v in st.stamps.items() if k in ("market", "holders", "dev", "curve")},
+    }
+
+
 def card(st: TokenState) -> dict:
     """Compact coin card. Numbers are kept raw for client-side sort/filter; labels are localized."""
     m, e, h, wi = st.market, st.early, st.holders, st.whale_intel
+    trend, hi, d = st.trend or {}, st.holder_intel, st.dev
+    hist_ok = bool(d and d.history_verified)
     return {
         "mint": st.mint, "symbol": st.info.symbol or st.mint[:6], "name": st.info.name,
         "age_min": round(st.age_minutes, 1) if st.age_minutes is not None else None, "age": age_str(st.age_minutes),
@@ -89,6 +196,19 @@ def card(st: TokenState) -> dict:
         "narratives": [t(f"narrative.{n}") for n in st.narratives],
         "filters_passed": not st.filter_fails,
         "watch": st.watch,
+        "fired": e.fired_count if e and e.strength is not None else None,
+        "group": st.group or None,
+        "group_reasons": [_group_reason(st, r) for r in st.group_reasons],
+        "hot": [t(f"web.hot.{r}") for r in st.priority_reasons],
+        "first_seen": st.mc_track.first_seen if st.mc_track else st.info.discovered_at,
+        "updated_at": st.stamps["market"].updated_at if "market" in st.stamps else None,
+        # sort keys (raw, None = unknown -> always sorted last)
+        "mc_rise": trend.get("mc_chg_5m_pct") if trend.get("mc_chg_5m_pct") is not None else (m.price_change_5m if m else None),
+        "vol_rise": m.vol_accel if m and m.vol_accel is not None else None,
+        "buy_pp": trend.get("buy_pp_5m"),
+        "holder_rise": hi.abs_growth_15m if hi else None,
+        "dev_hist": (d.prev_graduated if hist_ok else None),
+        "profile": profile(st),
     }
 
 
@@ -117,6 +237,7 @@ def view(st: TokenState, events=None, now: float | None = None) -> dict:
         }
     return {
         "card": card(st),
+        "server_time": now,
         "links": st.links,
         "scores": [{"label": lab, "value": val, "note": note} for lab, val, note in subscore_rows(st)],
         "why": [{"points": p, "label": lab, "value": val, "source": src} for p, lab, val, src in why_items(st)],

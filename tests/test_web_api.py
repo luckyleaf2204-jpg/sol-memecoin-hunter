@@ -187,7 +187,11 @@ def test_every_key_used_by_the_pwa_exists():
     keys = {k for k in keys if not k.endswith(".")}           # prefixes built at runtime -> enumerated below
     kinds = ("top", "new", "early", "whales", "dev", "social")
     keys |= {f"web.title.{k}" for k in kinds + ("watch", "status")} | {f"web.empty.{k}" for k in kinds + ("watch",)}
-    keys |= {f"web.sort.{k}" for k in ("opp", "early", "risk_low", "mc", "vol5m", "age", "holders")}
+    keys |= {f"web.sort.{k}" for k in ("opp", "early", "risk_low", "mc", "vol5m", "age", "holders", "confirm", "newest",
+                                       "mc_low", "mc_rise", "vol_rise", "buy", "holder_rise", "liq", "dev_hist")}
+    groups = ("opportunity", "watch", "nodata", "excluded")
+    keys |= {f"web.{p}.{g}" for p in ("group", "group_rule", "group_empty") for g in groups} | {"web.title.home"}
+    keys |= {f"web.rf.{k}" for k in ("discovery", "market", "holders", "dev", "persist")}
     keys |= {f"web.filter.{k}" for k in ("valid", "lowRisk", "pass")}
     for lang in ("vi", "en"):
         missing = sorted(k for k in keys if k not in load(lang))
