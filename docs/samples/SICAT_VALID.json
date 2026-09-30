@@ -1,0 +1,151 @@
+{
+  "captured_at": "2026-09-29 15:42:50",
+  "mint": "9pMXEbTjQ5HHiYifGbNBwkMkrQxGyhuSmB8ndKNXpump",
+  "raw_dexscreener_pairs": [
+    {
+      "chainId": "solana",
+      "dexId": "pumpswap",
+      "url": "https://dexscreener.com/solana/b4kjcppu2bxh7srjmejq8nvm9srpzvlum5yvjgq6vchh",
+      "pairAddress": "B4kJcppu2bxh7srJmEJq8NVM9SrpZVLum5YVjGq6VChH",
+      "baseToken": {
+        "address": "9pMXEbTjQ5HHiYifGbNBwkMkrQxGyhuSmB8ndKNXpump",
+        "name": "Super Intelligent Cat",
+        "symbol": "SICAT"
+      },
+      "quoteToken": {
+        "address": "Xsc9qvGR1efVDFGLrVsmkzv3qi45LTBjeUKSPmx9qEh",
+        "name": "NVIDIA xStock",
+        "symbol": "NVDAx"
+      },
+      "priceNative": "0.0000009483",
+      "priceUsd": "0.0002191",
+      "txns": {
+        "m5": {
+          "buys": 20,
+          "sells": 13
+        },
+        "h1": {
+          "buys": 196,
+          "sells": 125
+        },
+        "h6": {
+          "buys": 1814,
+          "sells": 1330
+        },
+        "h24": {
+          "buys": 28242,
+          "sells": 17510
+        }
+      },
+      "volume": {
+        "h24": 3255287.7,
+        "h6": 179295.09,
+        "h1": 19091.15,
+        "m5": 3759.71
+      },
+      "priceChange": {
+        "m5": -12.64,
+        "h1": -20.82,
+        "h6": -7.66,
+        "h24": 326
+      },
+      "liquidity": {
+        "usd": 50152.5,
+        "base": 119765067,
+        "quote": 103.4848
+      },
+      "fdv": 211951,
+      "marketCap": 211951,
+      "pairCreatedAt": 1790608872000,
+      "info": {
+        "imageUrl": "https://cdn.dexscreener.com/cms/images/hu2xpR50gmx2IxYB?width=800&height=800&quality=95&format=auto",
+        "header": "https://cdn.dexscreener.com/cms/images/uc26hhRW9sA72Xat?width=1500&height=500&quality=95&format=auto",
+        "openGraph": "https://cdn.dexscreener.com/token-images/og/solana/9pMXEbTjQ5HHiYifGbNBwkMkrQxGyhuSmB8ndKNXpump?timestamp=1790671200000",
+        "websites": [
+          {
+            "url": "https://sicatcoin.com/",
+            "label": "Website"
+          }
+        ],
+        "socials": [
+          {
+            "url": "https://x.com/sicatcoin",
+            "type": "twitter"
+          },
+          {
+            "url": "https://t.me/sicatsol",
+            "type": "telegram"
+          }
+        ]
+      }
+    }
+  ],
+  "raw_pumpfun_coin": {
+    "mint": "9pMXEbTjQ5HHiYifGbNBwkMkrQxGyhuSmB8ndKNXpump",
+    "name": "Super Intelligent Cat",
+    "symbol": "SICAT",
+    "creator": "Ee74HnN114swkYnwfnZruPxxz8rXnmXaEeR3sH3qGJmZ",
+    "created_timestamp": 1790608864000,
+    "complete": true,
+    "program": "pump",
+    "mayhem_state": null,
+    "quote_mint": "Xsc9qvGR1efVDFGLrVsmkzv3qi45LTBjeUKSPmx9qEh",
+    "quote_decimals": 8,
+    "market_cap": 1855.3007077490508,
+    "usd_market_cap": 221133.29135660938,
+    "virtual_sol_reserves": 7282303343,
+    "virtual_quote_reserves": 7282303343,
+    "real_sol_reserves": 0,
+    "real_quote_reserves": 0,
+    "real_token_reserves": 0,
+    "total_supply": 1000000000000000,
+    "pool_address": "B4kJcppu2bxh7srJmEJq8NVM9SrpZVLum5YVjGq6VChH",
+    "pump_swap_pool": "B4kJcppu2bxh7srJmEJq8NVM9SrpZVLum5YVjGq6VChH",
+    "canonical_pool_liquidity_usd": 52966.802555615315
+  },
+  "sol_usd": 119.17,
+  "validated_market": {
+    "price_usd": 0.0002195,
+    "market_cap": 212417.0,
+    "fdv": 212417.0,
+    "liquidity_usd": 50210.15,
+    "liquidity_source": "dexscreener_amm",
+    "vol_5m": 3914.12,
+    "vol_1h": 19245.56,
+    "vol_6h": 179449.5,
+    "vol_24h": 3255442.1,
+    "buys_5m": 22,
+    "sells_5m": 17,
+    "buys_1h": 198,
+    "sells_1h": 129,
+    "price_change_5m": -12.44,
+    "price_change_1h": -20.65,
+    "price_change_6h": -7.46,
+    "price_change_24h": 327.0,
+    "dex_id": "pumpswap",
+    "pair_address": "B4kJcppu2bxh7srJmEJq8NVM9SrpZVLum5YVjGq6VChH",
+    "quote_symbol": "NVDAx",
+    "pair_created_at": 1790608872.0,
+    "updated_at": 1790671370.644555
+  },
+  "data_quality": {
+    "status": "VALID",
+    "score": 85,
+    "issues": [
+      {
+        "severity": "warning",
+        "field": "holders",
+        "key": "holders_unavailable",
+        "params": {}
+      },
+      {
+        "severity": "warning",
+        "field": "social",
+        "key": "social_unavailable",
+        "params": {}
+      }
+    ]
+  },
+  "opportunity_score": 32,
+  "risk_score": 10
+}

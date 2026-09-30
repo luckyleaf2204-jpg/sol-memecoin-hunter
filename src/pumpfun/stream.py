@@ -1,0 +1,77 @@
+"""PumpPortal real-time data websocket (third-party, free data API).
+
+wss://pumpportal.fun/api/data  ->  {"method": "subscribeNewToken"}
+Verified 2026-09-29: emits one message per new Pump.fun token including the
+creator wallet (traderPublicKey) and the creator's initial buy (initialBuy / solAmount).
+PumpPortal asks clients to keep a single connection, which is what this does.
+"""
+from __future__ import annotations
+
+import asyncio
+import json
+import time
+
+from core.http import Health
+from core.models import TokenInfo
+
+WS_URL = "wss://pumpportal.fun/api/data"
+SOURCE = "pumpportal"
+
+
+def parse_event(d: dict) -> TokenInfo | None:
+    if d.get("txType") != "create" or not d.get("mint"):
+        return None
+    return TokenInfo(
+        mint=d["mint"],
+        name=d.get("name") or "",
+        symbol=d.get("symbol") or "",
+        creator=d.get("traderPublicKey") or "",
+        created_at=time.time(),
+        bonding_curve=d.get("bondingCurveKey") or "",
+        complete=False,
+        dev_initial_buy=d.get("initialBuy"),
+        dev_initial_sol=d.get("solAmount"),
+        sources={SOURCE},
+    )
+
+
+class PumpPortalStream:
+    def __init__(self, queue: asyncio.Queue, health: Health):
+        self.queue = queue
+        self.health = health
+        self.connected = False
+
+    async def run(self, stop: asyncio.Event) -> None:
+        import websockets  # imported lazily so the module can be tested without it
+
+        backoff = 2
+        while not stop.is_set():
+            try:
+                async with websockets.connect(WS_URL, ping_interval=20, open_timeout=15) as ws:
+                    await ws.send(json.dumps({"method": "subscribeNewToken"}))
+                    self.connected, backoff = True, 2
+                    self.health.ok(SOURCE)
+                    while not stop.is_set():
+                        try:
+                            raw = await asyncio.wait_for(ws.recv(), timeout=60)
+                        except asyncio.TimeoutError:
+                            continue
+                        try:
+                            info = parse_event(json.loads(raw))
+                        except ValueError:
+                            continue
+                        if info:
+                            self.health.ok(SOURCE)
+                            try:
+                                self.queue.put_nowait(info)
+                            except asyncio.QueueFull:
+                                pass
+            except Exception as e:  # network errors must never kill the scanner
+                self.health.fail(SOURCE, f"{type(e).__name__}: {e}")
+            self.connected = False
+            if not stop.is_set():
+                try:
+                    await asyncio.wait_for(stop.wait(), timeout=backoff)
+                except asyncio.TimeoutError:
+                    pass
+                backoff = min(60, backoff * 2)

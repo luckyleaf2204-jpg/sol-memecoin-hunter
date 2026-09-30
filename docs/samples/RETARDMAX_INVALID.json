@@ -1,0 +1,130 @@
+{
+  "captured_at": "2026-09-29 14:06:20",
+  "mint": "DpLsb6BnNmjD5XrMz3GX5Ce8t5KKPDYratA34J23pump",
+  "raw_dexscreener_pairs": [
+    {
+      "chainId": "solana",
+      "dexId": "pumpfun",
+      "url": "https://dexscreener.com/solana/cwhf8pkrpmwojz2w6rzsvvn9vqgoytfbudqzsuieu56n",
+      "pairAddress": "CwhF8pKrpmWoJZ2w6rzSvVn9VQGoyTFBudQzSUieU56N",
+      "baseToken": {
+        "address": "DpLsb6BnNmjD5XrMz3GX5Ce8t5KKPDYratA34J23pump",
+        "name": "Retard Maxing",
+        "symbol": "RETARDMAX"
+      },
+      "quoteToken": {
+        "address": "So11111111111111111111111111111111111111112",
+        "name": "Wrapped SOL",
+        "symbol": "SOL"
+      },
+      "priceNative": "0.0000002448",
+      "priceUsd": "0.00002911",
+      "txns": {
+        "m5": {
+          "buys": 0,
+          "sells": 0
+        },
+        "h1": {
+          "buys": 28,
+          "sells": 18
+        },
+        "h6": {
+          "buys": 28,
+          "sells": 18
+        },
+        "h24": {
+          "buys": 28,
+          "sells": 18
+        }
+      },
+      "volume": {
+        "h24": 913.02,
+        "h6": 913.02,
+        "h1": 913.02,
+        "m5": 0
+      },
+      "priceChange": {
+        "h1": 762,
+        "h6": 762,
+        "h24": 762
+      },
+      "fdv": 29112.81,
+      "marketCap": 29112.81,
+      "pairCreatedAt": 1790664731000
+    }
+  ],
+  "raw_pumpfun_coin": {
+    "mint": "DpLsb6BnNmjD5XrMz3GX5Ce8t5KKPDYratA34J23pump",
+    "name": "Retard Maxing",
+    "symbol": "RETARDMAX",
+    "creator": "8Q7EGENcxteRGf1Zajh59Jo6sdZcSoTn5oGVPX4y59Xd",
+    "created_timestamp": 1790664731000,
+    "complete": false,
+    "program": "pump",
+    "mayhem_state": "completed",
+    "quote_mint": "11111111111111111111111111111111",
+    "quote_decimals": 9,
+    "market_cap": 244.81004682110043,
+    "usd_market_cap": 29142.05577615851,
+    "virtual_sol_reserves": 256783848295,
+    "virtual_quote_reserves": 256783848295,
+    "real_sol_reserves": 3,
+    "real_quote_reserves": 3,
+    "real_token_reserves": 769010580388270,
+    "total_supply": 1000000000000000,
+    "pool_address": "3F5oaQwfQ5SQPZg6299KEVs2xsrQtfE8NGPX7px1f94a",
+    "pump_swap_pool": null,
+    "canonical_pool_liquidity_usd": 3.5711838e-07
+  },
+  "sol_usd": 119.24,
+  "validated_market": {
+    "price_usd": 2.911e-05,
+    "market_cap": 29112.81,
+    "fdv": 29112.81,
+    "liquidity_usd": null,
+    "liquidity_source": "",
+    "vol_5m": null,
+    "vol_1h": 913.02,
+    "vol_6h": 913.02,
+    "vol_24h": 913.02,
+    "buys_5m": 0,
+    "sells_5m": 0,
+    "buys_1h": 28,
+    "sells_1h": 18,
+    "price_change_5m": null,
+    "price_change_1h": 762.0,
+    "dex_id": "pumpfun",
+    "pair_address": "CwhF8pKrpmWoJZ2w6rzSvVn9VQGoyTFBudQzSUieU56N",
+    "quote_symbol": "SOL",
+    "pair_created_at": 1790664731.0,
+    "updated_at": 1790665580.9324603
+  },
+  "data_quality": {
+    "status": "INVALID",
+    "score": 5,
+    "issues": [
+      {
+        "severity": "critical",
+        "field": "vol_5m",
+        "message": "vol_5m missing or <= 0 (raw: 0.0)"
+      },
+      {
+        "severity": "critical",
+        "field": "liquidity",
+        "message": "bonding-curve reserves inconsistent (virtual 256.783848295 SOL vs real 3e-09 SOL; non-standard curve e.g. mayhem mode) — liquidity unknown"
+      },
+      {
+        "severity": "warning",
+        "field": "holders",
+        "message": "holder distribution unavailable"
+      },
+      {
+        "severity": "warning",
+        "field": "social",
+        "message": "X / Telegram activity source unavailable"
+      }
+    ]
+  },
+  "opportunity_score": null,
+  "risk_score": 58
+}

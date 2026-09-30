@@ -1,0 +1,40 @@
+<!doctype html>
+<html lang="vi">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="theme-color" content="#0f1117">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <meta name="apple-mobile-web-app-title" content="SOL Hunter">
+  <meta name="format-detection" content="telephone=no">
+  <title>SOL Memecoin Hunter</title>
+  <link rel="manifest" href="/manifest.webmanifest">
+  <link rel="apple-touch-icon" href="/apple-touch-icon.png">
+  <link rel="icon" type="image/png" href="/favicon.png">
+  <link rel="stylesheet" href="/static/styles.css">
+</head>
+<body>
+  <header class="topbar">
+    <div class="brand">SOL Hunter</div>
+    <div class="pills">
+      <span id="pill-scanner" class="pill">…</span>
+      <span id="pill-helius" class="pill">…</span>
+    </div>
+  </header>
+
+  <main id="view" class="view" aria-live="polite"></main>
+
+  <nav class="tabbar" id="tabbar">
+    <a href="#/top" data-tab="top"><span class="ico">★</span><span data-i18n="web.nav.top"></span></a>
+    <a href="#/new" data-tab="new"><span class="ico">✦</span><span data-i18n="web.nav.new"></span></a>
+    <a href="#/early" data-tab="early"><span class="ico">⚡</span><span data-i18n="web.nav.early"></span></a>
+    <a href="#/watch" data-tab="watch"><span class="ico">♥</span><span data-i18n="web.nav.watch"></span></a>
+    <a href="#/more" data-tab="more"><span class="ico">☰</span><span data-i18n="web.nav.more"></span></a>
+  </nav>
+
+  <div id="toast" class="toast" role="status"></div>
+  <script src="/static/app.js" defer></script>
+</body>
+</html>

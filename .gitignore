@@ -1,0 +1,35 @@
+# --- secrets: NEVER commit ---
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+
+# --- local data / databases (contain scan history, settings) ---
+data/
+*.db
+*.db-shm
+*.db-wal
+*.sqlite
+
+# --- build output ---
+dist/
+build/
+*.exe
+
+# --- python / tooling ---
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+*.log
+
+# --- editors / OS ---
+.vscode/
+.idea/
+.claude/
+.DS_Store
+Thumbs.db

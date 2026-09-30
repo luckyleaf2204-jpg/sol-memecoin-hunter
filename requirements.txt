@@ -1,0 +1,8 @@
+httpx>=0.27,<1.0
+websockets>=13.0
+python-dotenv>=1.0
+PySide6>=6.7
+pyqtgraph>=0.13.7
+pytest>=8.0
+fastapi>=0.110
+uvicorn>=0.29

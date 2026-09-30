@@ -1,0 +1,321 @@
+  … 29s, tracking 74, cycle 2
+  … 59s, tracking 91, cycle 3
+  … 90s, tracking 107, cycle 5
+  … 119s, tracking 119, cycle 6
+  … 149s, tracking 137, cycle 8
+  … 180s, tracking 144, cycle 9
+  … 210s, tracking 158, cycle 11
+  … 240s, tracking 165, cycle 12
+  … 270s, tracking 180, cycle 14
+  … 300s, tracking 190, cycle 15
+  … 330s, tracking 203, cycle 17
+  … 360s, tracking 212, cycle 18
+  … 390s, tracking 229, cycle 20
+  … 420s, tracking 234, cycle 21
+  … 450s, tracking 252, cycle 23
+  … 480s, tracking 259, cycle 24
+  … 510s, tracking 272, cycle 26
+  … 540s, tracking 278, cycle 27
+  … 570s, tracking 290, cycle 29
+  … 600s, tracking 299, cycle 30
+  … 630s, tracking 317, cycle 32
+  … 660s, tracking 322, cycle 33
+  … 690s, tracking 336, cycle 35
+  … 720s, tracking 343, cycle 36
+
+=== EARLY SIGNAL AUDIT 2026-09-29 18:24:58 — tracked 343, with >=10 min history 34 ===
+transition TRUE: 0 · >=3 signals fired: 1 · strength>=50: 0 · INVALID among eligible: 12
+
+Component availability across all eligible tokens:
+  VOLUME_ACCELERATION        computable   34 · fired   0 · near-miss    3 · UNKNOWN    0
+  HOLDER_ACCELERATION        computable   16 · fired   1 · near-miss    0 · UNKNOWN   18
+  BUY_PRESSURE               computable   34 · fired   2 · near-miss    1 · UNKNOWN    0
+  LIQUIDITY_GROWTH           computable   21 · fired   6 · near-miss    2 · UNKNOWN   13
+  TRANSACTION_ACCELERATION   computable   34 · fired   1 · near-miss    2 · UNKNOWN    0
+  MC_ACCELERATION            computable   34 · fired   1 · near-miss    2 · UNKNOWN    0
+  SMART_MONEY                computable    0 · fired   0 · near-miss    0 · UNKNOWN   34
+  WHALE                      computable   18 · fired   1 · near-miss    1 · UNKNOWN   16
+  SOCIAL_ACCELERATION        computable    0 · fired   0 · near-miss    0 · UNKNOWN   34
+  NARRATIVE                  computable    0 · fired   0 · near-miss    0 · UNKNOWN   34
+
+--- $POND 84D3VopU3g5qo7jUwzQK4P4BnVPQWr2MzeaRCFkHpump  EARLY 30 (is_early=False) DQ VALID · age 69.2m · history 11.4m · fired 4 · groups 7/7 · denominator weight 110
+    transition: baseline median $16,881 over 5 pts, now $20,988 (x1.24) -> False
+    HOLDERS: 1299 (snapshots 8) · top10 24.24% · growth 5m 36.73684210526316 (prev 7.223476297968397) · quality ORGANIC · churn 4.251550044286979 · WHALE ACCUMULATION n=16 held=31.31% Δ=1.268
+    VOLUME_ACCELERATION        NOT FIRED points   0.0 (if fired   0.0) | now=20987.75, before_5m=21745.94, ratio=0.965, buy_share_now=0.6, mc_growth_5m=30.81, direction_ok=True | rule: ratio>=2.0, now>=$2K, direction ok
+    HOLDER_ACCELERATION        FIRED     points  18.2 (if fired  18.2) | now=1299, abs_increase_5m=349, growth_last_5m=36.74, growth_prev_5m=7.22 | rule: growth>=5%, > previous 5m, >= +10 holders, >= 50 holders
+    BUY_PRESSURE               NOT FIRED points   0.0 (if fired   0.0) | buys=258, sells=172, buy_share_now=0.6, buy_share_5m_ago=0.605, delta_pp=-0.5 | rule: buy share +>=10pp and >=55%
+    LIQUIDITY_GROWTH           FIRED     points   5.7 (if fired   5.7) | now=30795.05, before_10m=23145.05, change_pct=33.05, source_now=dexscreener_amm | rule: change>=+10% same pair
+    TRANSACTION_ACCELERATION   NOT FIRED points   0.0 (if fired   0.0) | now=430, before_5m=471, ratio=0.913, buy_share_now=0.6, mc_growth_5m=30.81, direction_ok=True | rule: ratio>=1.8, now>=15, direction ok
+    MC_ACCELERATION            FIRED     points   5.7 (if fired   5.7) | mc_now=114735.0, mc_5m_ago=87709.0, mc_10m_ago=67994.0, growth_last_5m=30.81, growth_prev_5m=29.0 | rule: growth_last_5m>=15% and > growth_prev_5m
+    SMART_MONEY                UNKNOWN | SOURCE: — | REASON: module not implemented - no data source
+    WHALE                      FIRED     points   0.6 (if fired   0.6) | state=ACCUMULATION, delta_supply_pct=1.268, holders=1299, holder_increase=169 | rule: ACCUMULATION, >=50 holders, >= +10 holders, not suspicious
+    SOCIAL_ACCELERATION        UNKNOWN | SOURCE: — | REASON: module not implemented - no data source
+    NARRATIVE                  UNKNOWN | SOURCE: — | REASON: module not implemented - no data source
+
+--- $Dicknado Et6BaJbrr43opKJ9oGDQDP5hCkMKuHZeZh3kspyRpump  EARLY 21 (is_early=False) DQ INVALID · age 11.6m · history 10.1m · fired 1 · groups 4/7 · denominator weight 70 · SUPPRESSED: rug risk: liquidity_shock; rug risk: dev_dump; risk 90 > 60
+    transition: baseline median n/a over 1 pts, now n/a (xNone) -> None  [fewer than 3 snapshots 10-30 min ago]
+    HOLDERS: 6 (snapshots 2) · top10 0.47% · growth 5m -45.45454545454545 (prev None) · quality UNKNOWN · churn 60.0 · WHALE NEUTRAL n=0 held=0% Δ=0
+    VOLUME_ACCELERATION        NOT FIRED points   0.0 (if fired   0.0) | now=1.4, before_5m=13531.68, ratio=0.0, buy_share_now=1.0, mc_growth_5m=0.0, direction_ok=True | rule: ratio>=2.0, now>=$2K, direction ok
+    HOLDER_ACCELERATION        UNKNOWN | SOURCE: Helius DAS snapshots | REASON: not eligible: 6 holders < 50
+    BUY_PRESSURE               FIRED     points  21.4 (if fired  21.4) | buys=1, sells=0, buy_share_now=1.0, buy_share_5m_ago=0.374, delta_pp=62.6 | rule: buy share +>=10pp and >=55%
+    LIQUIDITY_GROWTH           UNKNOWN | SOURCE: snapshots (DexScreener) | REASON: liquidity UNKNOWN (failed validation)
+    TRANSACTION_ACCELERATION   NOT FIRED points   0.0 (if fired   0.0) | now=1, before_5m=147, ratio=0.007, buy_share_now=1.0, mc_growth_5m=0.0, direction_ok=True | rule: ratio>=1.8, now>=15, direction ok
+    MC_ACCELERATION            NOT FIRED points   0.0 (if fired   0.0) | mc_now=3363.58, mc_5m_ago=3363.58, mc_10m_ago=13606.18, growth_last_5m=0.0, growth_prev_5m=-75.28 | rule: growth_last_5m>=15% and > growth_prev_5m
+    SMART_MONEY                UNKNOWN | SOURCE: — | REASON: module not implemented - no data source
+    WHALE                      UNKNOWN | SOURCE: holder snapshots | REASON: not eligible: 6 holders < 50
+    SOCIAL_ACCELERATION        UNKNOWN | SOURCE: — | REASON: module not implemented - no data source
+    NARRATIVE                  UNKNOWN | SOURCE: — | REASON: module not implemented - no data source
+
+--- $COOKR DdXVb6wPHqYqJLhKuKHFaFkppeftTfEGjFdDSK5Vpump  EARLY 21 (is_early=False) DQ PARTIAL · age 130.2m · history 10.8m · fired 2 · groups 5/7 · denominator weight 80
+    transition: baseline median $1,017 over 3 pts, now $1,216 (x1.19) -> False
+    HOLDERS: UNKNOWN | SOURCE: Helius DAS | REASON: pending (snapshots 0)
+    VOLUME_ACCELERATION        NOT FIRED points   0.0 (if fired   0.0) | now=1215.59, before_5m=1179.58, ratio=1.031, buy_share_now=0.815, mc_growth_5m=14.55, direction_ok=True | rule: ratio>=2.0, now>=$2K, direction ok
+    HOLDER_ACCELERATION        UNKNOWN | SOURCE: Helius DAS snapshots | REASON: Helius connected, token not holder-checked yet
+    BUY_PRESSURE               FIRED     points  18.8 (if fired  18.8) | buys=22, sells=5, buy_share_now=0.815, buy_share_5m_ago=0.462, delta_pp=35.3 | rule: buy share +>=10pp and >=55%
+    LIQUIDITY_GROWTH           FIRED     points   2.3 (if fired   2.3) | now=5229.78254046846, before_10m=4611.173005033759, change_pct=13.42, source_now=pumpfun_curve | rule: change>=+10% same pair
+    TRANSACTION_ACCELERATION   NOT FIRED points   0.0 (if fired   0.0) | now=27, before_5m=26, ratio=1.038, buy_share_now=0.815, mc_growth_5m=14.55, direction_ok=True | rule: ratio>=1.8, now>=15, direction ok
+    MC_ACCELERATION            NOT FIRED points   0.0 (if fired   1.7) | mc_now=19973.52, mc_5m_ago=17436.51, mc_10m_ago=17648.69, growth_last_5m=14.55, growth_prev_5m=-1.2 | rule: growth_last_5m>=15% and > growth_prev_5m
+    SMART_MONEY                UNKNOWN | SOURCE: — | REASON: module not implemented - no data source
+    WHALE                      UNKNOWN | SOURCE: holder snapshots | REASON: Helius connected, token not holder-checked yet
+    SOCIAL_ACCELERATION        UNKNOWN | SOURCE: — | REASON: module not implemented - no data source
+    NARRATIVE                  UNKNOWN | SOURCE: — | REASON: module not implemented - no data source
+
+--- $Liza 7UfcTJD2RSRg9AJ4k2V2rs71Ew8Zy2avaU5roc8bpump  EARLY 7 (is_early=False) DQ VALID · age 339.2m · history 11.8m · fired 2 · groups 6/7 · denominator weight 90
+    transition: baseline median $591 over 6 pts, now $1,376 (x2.33) -> False
+    HOLDERS: 191 (snapshots 4) · top10 30.03% · growth 5m -2.051282051282051 (prev None) · quality ORGANIC · churn 0.0 · WHALE ACCUMULATION n=19 held=41.97% Δ=1.353
+    VOLUME_ACCELERATION        NOT FIRED points   0.0 (if fired   0.0) | now=1376.33, before_5m=998.71, ratio=1.378, buy_share_now=0.579, mc_growth_5m=6.8, direction_ok=True | rule: ratio>=2.0, now>=$2K, direction ok
+    HOLDER_ACCELERATION        UNKNOWN | SOURCE: Helius DAS snapshots | REASON: only 4 valid holder snapshot(s); need counts at now, -5m and -10m
+    BUY_PRESSURE               NOT FIRED points   0.0 (if fired   0.0) | buys=11, sells=8, buy_share_now=0.579, buy_share_5m_ago=0.9, delta_pp=-32.1 | rule: buy share +>=10pp and >=55%
+    LIQUIDITY_GROWTH           FIRED     points   3.3 (if fired   3.3) | now=6576.0231247776, before_10m=5552.24127645748, change_pct=18.44, source_now=pumpfun_curve | rule: change>=+10% same pair
+    TRANSACTION_ACCELERATION   FIRED     points   3.7 (if fired   3.7) | now=19, before_5m=10, ratio=1.9, buy_share_now=0.579, mc_growth_5m=6.8, direction_ok=True | rule: ratio>=1.8, now>=15, direction ok
+    MC_ACCELERATION            NOT FIRED points   0.0 (if fired   0.0) | mc_now=28541.29, mc_5m_ago=26724.39, mc_10m_ago=21592.13, growth_last_5m=6.8, growth_prev_5m=23.77 | rule: growth_last_5m>=15% and > growth_prev_5m
+    SMART_MONEY                UNKNOWN | SOURCE: — | REASON: module not implemented - no data source
+    WHALE                      NOT FIRED points   0.0 (if fired   1.0) | state=ACCUMULATION, delta_supply_pct=1.353, holders=191, holder_increase=1, blocked=D3 holder increase 1 < 10 | rule: ACCUMULATION, >=50 holders, >= +10 holders, not suspicious
+    SOCIAL_ACCELERATION        UNKNOWN | SOURCE: — | REASON: module not implemented - no data source
+    NARRATIVE                  UNKNOWN | SOURCE: — | REASON: module not implemented - no data source
+
+--- $BOPE EdfUDQxVihNgHf7KDjhxC3ZSdXtNr33tojuKq3rgUCfv  EARLY 5 (is_early=False) DQ PARTIAL · age 297.4m · history 11.8m · fired 1 · groups 5/7 · denominator weight 80
+    transition: baseline median $5,160 over 6 pts, now $1,978 (x0.38) -> False
+    HOLDERS: UNKNOWN | SOURCE: Helius DAS | REASON: pending (snapshots 0)
+    VOLUME_ACCELERATION        NOT FIRED points   0.0 (if fired   0.0) | now=1977.6, before_5m=2140.65, ratio=0.924, buy_share_now=0.464, mc_growth_5m=9.41, direction_ok=True | rule: ratio>=2.0, now>=$2K, direction ok
+    HOLDER_ACCELERATION        UNKNOWN | SOURCE: Helius DAS snapshots | REASON: Helius connected, token not holder-checked yet
+    BUY_PRESSURE               NOT FIRED points   0.0 (if fired   0.0) | buys=13, sells=15, buy_share_now=0.464, buy_share_5m_ago=0.463, delta_pp=0.1 | rule: buy share +>=10pp and >=55%
+    LIQUIDITY_GROWTH           FIRED     points   4.6 (if fired   4.6) | now=11085.25, before_10m=9118.32, change_pct=21.57, source_now=dexscreener_amm | rule: change>=+10% same pair
+    TRANSACTION_ACCELERATION   NOT FIRED points   0.0 (if fired   0.0) | now=28, before_5m=41, ratio=0.683, buy_share_now=0.464, mc_growth_5m=9.41, direction_ok=True | rule: ratio>=1.8, now>=15, direction ok
+    MC_ACCELERATION            NOT FIRED points   0.0 (if fired   0.0) | mc_now=17468.0, mc_5m_ago=15965.0, mc_10m_ago=12641.0, growth_last_5m=9.41, growth_prev_5m=26.3 | rule: growth_last_5m>=15% and > growth_prev_5m
+    SMART_MONEY                UNKNOWN | SOURCE: — | REASON: module not implemented - no data source
+    WHALE                      UNKNOWN | SOURCE: holder snapshots | REASON: Helius connected, token not holder-checked yet
+    SOCIAL_ACCELERATION        UNKNOWN | SOURCE: — | REASON: module not implemented - no data source
+    NARRATIVE                  UNKNOWN | SOURCE: — | REASON: module not implemented - no data source
+
+--- $Danfo 3kWATYWZcHiZ948oKKu6AMQXjicD2kz8ziGNH8Rupump  EARLY 4 (is_early=False) DQ PARTIAL · age 142.2m · history 10.1m · fired 1 · groups 5/7 · denominator weight 80
+    transition: baseline median n/a over 1 pts, now n/a (xNone) -> None  [fewer than 3 snapshots 10-30 min ago]
+    HOLDERS: UNKNOWN | SOURCE: Helius DAS | REASON: pending (snapshots 0)
+    VOLUME_ACCELERATION        NOT FIRED points   0.0 (if fired   0.0) | now=1434.59, before_5m=2959.75, ratio=0.485, buy_share_now=0.519, mc_growth_5m=-20.24, direction_ok=True | rule: ratio>=2.0, now>=$2K, direction ok
+    HOLDER_ACCELERATION        UNKNOWN | SOURCE: Helius DAS snapshots | REASON: Helius connected, token not holder-checked yet
+    BUY_PRESSURE               NOT FIRED points   0.0 (if fired   0.0) | buys=27, sells=25, buy_share_now=0.519, buy_share_5m_ago=0.667, delta_pp=-14.7 | rule: buy share +>=10pp and >=55%
+    LIQUIDITY_GROWTH           FIRED     points   3.8 (if fired   3.8) | now=7739.97, before_10m=6530.0, change_pct=18.53, source_now=dexscreener_amm | rule: change>=+10% same pair
+    TRANSACTION_ACCELERATION   NOT FIRED points   0.0 (if fired   0.0) | now=52, before_5m=90, ratio=0.578, buy_share_now=0.519, mc_growth_5m=-20.24, direction_ok=True | rule: ratio>=1.8, now>=15, direction ok
+    MC_ACCELERATION            NOT FIRED points   0.0 (if fired   0.0) | mc_now=11501.0, mc_5m_ago=14420.0, mc_10m_ago=8845.0, growth_last_5m=-20.24, growth_prev_5m=63.03 | rule: growth_last_5m>=15% and > growth_prev_5m
+    SMART_MONEY                UNKNOWN | SOURCE: — | REASON: module not implemented - no data source
+    WHALE                      UNKNOWN | SOURCE: holder snapshots | REASON: Helius connected, token not holder-checked yet
+    SOCIAL_ACCELERATION        UNKNOWN | SOURCE: — | REASON: module not implemented - no data source
+    NARRATIVE                  UNKNOWN | SOURCE: — | REASON: module not implemented - no data source
+
+--- $glungus Bd9thw3PAeyHeBGSi4R1ARBuptpG5rM4fhB8BRWJkq1e  EARLY 2 (is_early=False) DQ VALID · age 201.6m · history 10.4m · fired 1 · groups 7/7 · denominator weight 110
+    transition: baseline median n/a over 2 pts, now n/a (xNone) -> None  [fewer than 3 snapshots 10-30 min ago]
+    HOLDERS: 259 (snapshots 7) · top10 24.35% · growth 5m 0.7782101167315175 (prev 1.5810276679841897) · quality ORGANIC · churn 1.9455252918287937 · WHALE DISTRIBUTION n=22 held=41.53% Δ=-2.273
+    VOLUME_ACCELERATION        NOT FIRED points   0.0 (if fired   0.0) | now=2637.52, before_5m=2418.69, ratio=1.09, buy_share_now=0.568, mc_growth_5m=10.83, direction_ok=True | rule: ratio>=2.0, now>=$2K, direction ok
+    HOLDER_ACCELERATION        NOT FIRED points   0.0 (if fired   0.0) | now=259, abs_increase_5m=2, growth_last_5m=0.78, growth_prev_5m=1.58 | rule: growth>=5%, > previous 5m, >= +10 holders, >= 50 holders
+    BUY_PRESSURE               NOT FIRED points   0.0 (if fired   0.0) | buys=21, sells=16, buy_share_now=0.568, buy_share_5m_ago=0.581, delta_pp=-1.4 | rule: buy share +>=10pp and >=55%
+    LIQUIDITY_GROWTH           FIRED     points   2.3 (if fired   2.3) | now=16739.81, before_10m=14353.34, change_pct=16.63, source_now=dexscreener_amm | rule: change>=+10% same pair
+    TRANSACTION_ACCELERATION   NOT FIRED points   0.0 (if fired   0.0) | now=37, before_5m=43, ratio=0.86, buy_share_now=0.568, mc_growth_5m=10.83, direction_ok=True | rule: ratio>=1.8, now>=15, direction ok
+    MC_ACCELERATION            NOT FIRED points   0.0 (if fired   0.2) | mc_now=40129.0, mc_5m_ago=36208.0, mc_10m_ago=30594.0, growth_last_5m=10.83, growth_prev_5m=18.35 | rule: growth_last_5m>=15% and > growth_prev_5m
+    SMART_MONEY                UNKNOWN | SOURCE: — | REASON: module not implemented - no data source
+    WHALE                      NOT FIRED points   0.0 (if fired   0.0) | state=DISTRIBUTION, delta_supply_pct=-2.273, holders=259, holder_increase=1 | rule: ACCUMULATION, >=50 holders, >= +10 holders, not suspicious
+    SOCIAL_ACCELERATION        UNKNOWN | SOURCE: — | REASON: module not implemented - no data source
+    NARRATIVE                  UNKNOWN | SOURCE: — | REASON: module not implemented - no data source
+
+--- $SFDFDSDFS 8c2SynrXXaRiJJWe5pw6ozjeZNEPknWxoM9bzrtedRTQ  EARLY 0 (is_early=False) DQ INVALID · age 12.1m · history 11.1m · fired 0 · groups 4/7 · denominator weight 70
+    transition: baseline median $236 over 4 pts, now $0 (x0.0) -> False
+    HOLDERS: UNKNOWN | SOURCE: Helius DAS | REASON: pending (snapshots 0)
+    VOLUME_ACCELERATION        NOT FIRED points   0.0 (if fired  35.7) | now=0.15, before_5m=0.03, ratio=5.0, buy_share_now=0.375, mc_growth_5m=-0.0, direction_ok=False | rule: ratio>=2.0, now>=$2K, direction ok
+    HOLDER_ACCELERATION        UNKNOWN | SOURCE: Helius DAS snapshots | REASON: Helius connected, token not holder-checked yet
+    BUY_PRESSURE               NOT FIRED points   0.0 (if fired   0.0) | buys=6, sells=10, buy_share_now=0.375, buy_share_5m_ago=0.8, delta_pp=-42.5 | rule: buy share +>=10pp and >=55%
+    LIQUIDITY_GROWTH           UNKNOWN | SOURCE: snapshots (DexScreener) | REASON: liquidity UNKNOWN (failed validation)
+    TRANSACTION_ACCELERATION   NOT FIRED points   0.0 (if fired  15.1) | blocked=D1 sell-off: buy share < 50% and MC falling, now=16, before_5m=5, ratio=3.2, buy_share_now=0.375, mc_growth_5m=-0.0, direction_ok=False | rule: ratio>=1.8, now>=15, direction ok
+    MC_ACCELERATION            NOT FIRED points   0.0 (if fired   0.0) | mc_now=3334.11, mc_5m_ago=3334.18, mc_10m_ago=3336.35, growth_last_5m=-0.0, growth_prev_5m=-0.07 | rule: growth_last_5m>=15% and > growth_prev_5m
+    SMART_MONEY                UNKNOWN | SOURCE: — | REASON: module not implemented - no data source
+    WHALE                      UNKNOWN | SOURCE: holder snapshots | REASON: Helius connected, token not holder-checked yet
+    SOCIAL_ACCELERATION        UNKNOWN | SOURCE: — | REASON: module not implemented - no data source
+    NARRATIVE                  UNKNOWN | SOURCE: — | REASON: module not implemented - no data source
+
+--- $DAUMENXYZ 7EuNcPzpo3Rgu2Qk3Wwjiuh5SeYJMgUEAowQ6TBRs8Sk  EARLY 0 (is_early=False) DQ PARTIAL · age 12.5m · history 11.1m · fired 0 · groups 4/7 · denominator weight 70
+    transition: baseline median $3,196 over 4 pts, now $944 (x0.3) -> False
+    HOLDERS: UNKNOWN | SOURCE: Helius DAS | REASON: pending (snapshots 0)
+    VOLUME_ACCELERATION        NOT FIRED points   0.0 (if fired   0.0) | now=944.44, before_5m=4445.13, ratio=0.212, buy_share_now=0.182, mc_growth_5m=-27.43, direction_ok=False | rule: ratio>=2.0, now>=$2K, direction ok
+    HOLDER_ACCELERATION        UNKNOWN | SOURCE: Helius DAS snapshots | REASON: Helius connected, token not holder-checked yet
+    BUY_PRESSURE               NOT FIRED points   0.0 (if fired   0.0) | buys=4, sells=18, buy_share_now=0.182, buy_share_5m_ago=0.571, delta_pp=-39.0 | rule: buy share +>=10pp and >=55%
+    LIQUIDITY_GROWTH           UNKNOWN | SOURCE: snapshots (DexScreener) | REASON: liquidity UNKNOWN (failed validation)
+    TRANSACTION_ACCELERATION   NOT FIRED points   0.0 (if fired   0.0) | now=22, before_5m=84, ratio=0.262, buy_share_now=0.182, mc_growth_5m=-27.43, direction_ok=False | rule: ratio>=1.8, now>=15, direction ok
+    MC_ACCELERATION            NOT FIRED points   0.0 (if fired   0.0) | mc_now=4201.33, mc_5m_ago=5789.66, mc_10m_ago=3490.31, growth_last_5m=-27.43, growth_prev_5m=65.88 | rule: growth_last_5m>=15% and > growth_prev_5m
+    SMART_MONEY                UNKNOWN | SOURCE: — | REASON: module not implemented - no data source
+    WHALE                      UNKNOWN | SOURCE: holder snapshots | REASON: Helius connected, token not holder-checked yet
+    SOCIAL_ACCELERATION        UNKNOWN | SOURCE: — | REASON: module not implemented - no data source
+    NARRATIVE                  UNKNOWN | SOURCE: — | REASON: module not implemented - no data source
+
+--- $GOD 7RWhbVbhmNZ5pzr4iW2WJVgAKVXZXD3QBF5K96VNpump  EARLY 0 (is_early=False) DQ INVALID · age 12.7m · history 11.8m · fired 0 · groups 4/7 · denominator weight 70 · SUPPRESSED: rug risk: liquidity_shock; risk 83 > 60
+    transition: baseline median $675 over 6 pts, now $47 (x0.07) -> False
+    HOLDERS: UNKNOWN | SOURCE: Helius DAS | REASON: pending (snapshots 0)
+    VOLUME_ACCELERATION        NOT FIRED points   0.0 (if fired   0.0) | now=47.15, before_5m=63.8, ratio=0.739, buy_share_now=0.167, mc_growth_5m=-2.54, direction_ok=False | rule: ratio>=2.0, now>=$2K, direction ok
+    HOLDER_ACCELERATION        UNKNOWN | SOURCE: Helius DAS snapshots | REASON: Helius connected, token not holder-checked yet
+    BUY_PRESSURE               NOT FIRED points   0.0 (if fired   0.0) | buys=1, sells=5, buy_share_now=0.167, buy_share_5m_ago=0.4, delta_pp=-23.3 | rule: buy share +>=10pp and >=55%
+    LIQUIDITY_GROWTH           UNKNOWN | SOURCE: snapshots (DexScreener) | REASON: liquidity UNKNOWN (failed validation)
+    TRANSACTION_ACCELERATION   NOT FIRED points   0.0 (if fired   0.0) | now=6, before_5m=20, ratio=0.3, buy_share_now=0.167, mc_growth_5m=-2.54, direction_ok=False | rule: ratio>=1.8, now>=15, direction ok
+    MC_ACCELERATION            NOT FIRED points   0.0 (if fired   0.0) | mc_now=3444.93, mc_5m_ago=3534.82, mc_10m_ago=3660.43, growth_last_5m=-2.54, growth_prev_5m=-3.43 | rule: growth_last_5m>=15% and > growth_prev_5m
+    SMART_MONEY                UNKNOWN | SOURCE: — | REASON: module not implemented - no data source
+    WHALE                      UNKNOWN | SOURCE: holder snapshots | REASON: Helius connected, token not holder-checked yet
+    SOCIAL_ACCELERATION        UNKNOWN | SOURCE: — | REASON: module not implemented - no data source
+    NARRATIVE                  UNKNOWN | SOURCE: — | REASON: module not implemented - no data source
+
+--- $DUO 7QLBn355B6UbZ7xA23iA7AA6y5yMAaB2gc2NEzVnpump  EARLY 0 (is_early=False) DQ VALID · age 13.1m · history 11.8m · fired 0 · groups 7/7 · denominator weight 110 · SUPPRESSED: rug risk: dev_sold_recent; risk 78 > 60
+    transition: baseline median $33,400 over 6 pts, now $6,881 (x0.21) -> False
+    HOLDERS: 123 (snapshots 7) · top10 11.81% · growth 5m -47.21030042918455 (prev 14.215686274509803) · quality UNKNOWN · churn 44.38502673796791 · WHALE DISTRIBUTION n=6 held=9.44% Δ=-18.361
+    VOLUME_ACCELERATION        NOT FIRED points   0.0 (if fired   0.0) | now=6881.0, before_5m=49573.01, ratio=0.139, buy_share_now=0.351, mc_growth_5m=-52.12, direction_ok=False | rule: ratio>=2.0, now>=$2K, direction ok
+    HOLDER_ACCELERATION        NOT FIRED points   0.0 (if fired   0.0) | now=123, abs_increase_5m=-110, growth_last_5m=-47.21, growth_prev_5m=14.22 | rule: growth>=5%, > previous 5m, >= +10 holders, >= 50 holders
+    BUY_PRESSURE               NOT FIRED points   0.0 (if fired   0.0) | buys=86, sells=159, buy_share_now=0.351, buy_share_5m_ago=0.541, delta_pp=-19.0 | rule: buy share +>=10pp and >=55%
+    LIQUIDITY_GROWTH           NOT FIRED points   0.0 (if fired   0.0) | now=476.75807374338, before_10m=8328.403039667919, change_pct=-94.28, source_now=pumpfun_curve | rule: change>=+10% same pair
+    TRANSACTION_ACCELERATION   NOT FIRED points   0.0 (if fired   0.0) | now=245, before_5m=1288, ratio=0.19, buy_share_now=0.351, mc_growth_5m=-52.12, direction_ok=False | rule: ratio>=1.8, now>=15, direction ok
+    MC_ACCELERATION            NOT FIRED points   0.0 (if fired   0.0) | mc_now=4510.16, mc_5m_ago=9419.63, mc_10m_ago=25793.71, growth_last_5m=-52.12, growth_prev_5m=-63.48 | rule: growth_last_5m>=15% and > growth_prev_5m
+    SMART_MONEY                UNKNOWN | SOURCE: — | REASON: module not implemented - no data source
+    WHALE                      NOT FIRED points   0.0 (if fired   0.0) | state=DISTRIBUTION, delta_supply_pct=-18.361, holders=123, holder_increase=-65 | rule: ACCUMULATION, >=50 holders, >= +10 holders, not suspicious
+    SOCIAL_ACCELERATION        UNKNOWN | SOURCE: — | REASON: module not implemented - no data source
+    NARRATIVE                  UNKNOWN | SOURCE: — | REASON: module not implemented - no data source
+
+--- $VERSE 8SM5XduDCMp1Fac1ctTRmVGDp93BVsiTFDy3gyhmM1pH  EARLY 0 (is_early=False) DQ INVALID · age 13.2m · history 11.8m · fired 0 · groups 4/7 · denominator weight 70
+    transition: baseline median $128 over 6 pts, now $0 (x0.0) -> False
+    HOLDERS: UNKNOWN | SOURCE: Helius DAS | REASON: pending (snapshots 0)
+    VOLUME_ACCELERATION        NOT FIRED points   0.0 (if fired   0.0) | now=0.06, before_5m=0.19, ratio=0.316, buy_share_now=0.286, mc_growth_5m=-0.0, direction_ok=False | rule: ratio>=2.0, now>=$2K, direction ok
+    HOLDER_ACCELERATION        UNKNOWN | SOURCE: Helius DAS snapshots | REASON: Helius connected, token not holder-checked yet
+    BUY_PRESSURE               NOT FIRED points   0.0 (if fired   0.0) | buys=2, sells=5, buy_share_now=0.286, buy_share_5m_ago=0.5, delta_pp=-21.4 | rule: buy share +>=10pp and >=55%
+    LIQUIDITY_GROWTH           UNKNOWN | SOURCE: snapshots (DexScreener) | REASON: liquidity UNKNOWN (failed validation)
+    TRANSACTION_ACCELERATION   NOT FIRED points   0.0 (if fired   0.0) | now=7, before_5m=20, ratio=0.35, buy_share_now=0.286, mc_growth_5m=-0.0, direction_ok=False | rule: ratio>=1.8, now>=15, direction ok
+    MC_ACCELERATION            NOT FIRED points   0.0 (if fired   0.0) | mc_now=3334.11, mc_5m_ago=3334.18, mc_10m_ago=3353.95, growth_last_5m=-0.0, growth_prev_5m=-0.59 | rule: growth_last_5m>=15% and > growth_prev_5m
+    SMART_MONEY                UNKNOWN | SOURCE: — | REASON: module not implemented - no data source
+    WHALE                      UNKNOWN | SOURCE: holder snapshots | REASON: Helius connected, token not holder-checked yet
+    SOCIAL_ACCELERATION        UNKNOWN | SOURCE: — | REASON: module not implemented - no data source
+    NARRATIVE                  UNKNOWN | SOURCE: — | REASON: module not implemented - no data source
+
+--- $hotdog 4WJVLCNB769cjvRspCbB8bSzMRNAtr3uYgdH3tAtD4Xr  EARLY 0 (is_early=False) DQ INVALID · age 14.0m · history 11.8m · fired 0 · groups 4/7 · denominator weight 70
+    transition: baseline median $4,885 over 6 pts, now $22 (x0.0) -> False
+    HOLDERS: UNKNOWN | SOURCE: Helius DAS | REASON: pending (snapshots 0)
+    VOLUME_ACCELERATION        NOT FIRED points   0.0 (if fired   0.0) | now=22.26, before_5m=4113.16, ratio=0.005, buy_share_now=0.0, mc_growth_5m=-1.23, direction_ok=False | rule: ratio>=2.0, now>=$2K, direction ok
+    HOLDER_ACCELERATION        UNKNOWN | SOURCE: Helius DAS snapshots | REASON: Helius connected, token not holder-checked yet
+    BUY_PRESSURE               NOT FIRED points   0.0 (if fired   0.0) | buys=0, sells=1, buy_share_now=0.0, buy_share_5m_ago=0.491, delta_pp=-49.1 | rule: buy share +>=10pp and >=55%
+    LIQUIDITY_GROWTH           UNKNOWN | SOURCE: snapshots (DexScreener) | REASON: liquidity UNKNOWN (failed validation)
+    TRANSACTION_ACCELERATION   NOT FIRED points   0.0 (if fired   0.0) | now=1, before_5m=57, ratio=0.018, buy_share_now=0.0, mc_growth_5m=-1.23, direction_ok=False | rule: ratio>=1.8, now>=15, direction ok
+    MC_ACCELERATION            NOT FIRED points   0.0 (if fired   0.0) | mc_now=3334.11, mc_5m_ago=3375.74, mc_10m_ago=3702.55, growth_last_5m=-1.23, growth_prev_5m=-8.83 | rule: growth_last_5m>=15% and > growth_prev_5m
+    SMART_MONEY                UNKNOWN | SOURCE: — | REASON: module not implemented - no data source
+    WHALE                      UNKNOWN | SOURCE: holder snapshots | REASON: Helius connected, token not holder-checked yet
+    SOCIAL_ACCELERATION        UNKNOWN | SOURCE: — | REASON: module not implemented - no data source
+    NARRATIVE                  UNKNOWN | SOURCE: — | REASON: module not implemented - no data source
+
+--- $WORKSSSS Dfps1btUD1CP8mCV23kPc4RH7QTmi8Ji7Ft9omQR2Aiz  EARLY 0 (is_early=False) DQ INVALID · age 14.1m · history 11.8m · fired 0 · groups 4/7 · denominator weight 70
+    transition: baseline median n/a over 1 pts, now n/a (xNone) -> None  [fewer than 3 snapshots 10-30 min ago]
+    HOLDERS: UNKNOWN | SOURCE: Helius DAS | REASON: pending (snapshots 0)
+    VOLUME_ACCELERATION        NOT FIRED points   0.0 (if fired   0.0) | now=0.02, before_5m=1.36, ratio=0.015, buy_share_now=0.0, mc_growth_5m=-0.0, direction_ok=False | rule: ratio>=2.0, now>=$2K, direction ok
+    HOLDER_ACCELERATION        UNKNOWN | SOURCE: Helius DAS snapshots | REASON: Helius connected, token not holder-checked yet
+    BUY_PRESSURE               NOT FIRED points   0.0 (if fired   0.0) | buys=0, sells=3, buy_share_now=0.0, buy_share_5m_ago=0.455, delta_pp=-45.5 | rule: buy share +>=10pp and >=55%
+    LIQUIDITY_GROWTH           UNKNOWN | SOURCE: snapshots (DexScreener) | REASON: liquidity UNKNOWN (failed validation)
+    TRANSACTION_ACCELERATION   NOT FIRED points   0.0 (if fired   0.0) | now=3, before_5m=22, ratio=0.136, buy_share_now=0.0, mc_growth_5m=-0.0, direction_ok=False | rule: ratio>=1.8, now>=15, direction ok
+    MC_ACCELERATION            NOT FIRED points   0.0 (if fired   0.0) | mc_now=3336.3, mc_5m_ago=3336.35, mc_10m_ago=3338.59, growth_last_5m=-0.0, growth_prev_5m=-0.07 | rule: growth_last_5m>=15% and > growth_prev_5m
+    SMART_MONEY                UNKNOWN | SOURCE: — | REASON: module not implemented - no data source
+    WHALE                      UNKNOWN | SOURCE: holder snapshots | REASON: Helius connected, token not holder-checked yet
+    SOCIAL_ACCELERATION        UNKNOWN | SOURCE: — | REASON: module not implemented - no data source
+    NARRATIVE                  UNKNOWN | SOURCE: — | REASON: module not implemented - no data source
+
+--- $SPX83K Fw3tayLNdQAkdsLnCd8LyLURnVtoNkdwTEk8Uhypump  EARLY 0 (is_early=False) DQ VALID · age 14.8m · history 11.8m · fired 0 · groups 7/7 · denominator weight 110 · SUPPRESSED: rug risk: dev_sold_recent
+    transition: baseline median $83,074 over 6 pts, now $646 (x0.01) -> False
+    HOLDERS: 4029 (snapshots 8) · top10 9.77% · growth 5m -0.02481389578163772 (prev 0.04965243296921549) · quality UNKNOWN · churn 0.04964010920824026 · WHALE NEUTRAL n=0 held=0% Δ=0
+    VOLUME_ACCELERATION        NOT FIRED points   0.0 (if fired   0.0) | now=646.08, before_5m=619.93, ratio=1.042, buy_share_now=0.533, mc_growth_5m=-0.65, direction_ok=True | rule: ratio>=2.0, now>=$2K, direction ok
+    HOLDER_ACCELERATION        NOT FIRED points   0.0 (if fired   0.0) | now=4029, abs_increase_5m=-1, growth_last_5m=-0.02, growth_prev_5m=0.05 | rule: growth>=5%, > previous 5m, >= +10 holders, >= 50 holders
+    BUY_PRESSURE               NOT FIRED points   0.0 (if fired   0.0) | buys=16, sells=14, buy_share_now=0.533, buy_share_5m_ago=0.5, delta_pp=3.3 | rule: buy share +>=10pp and >=55%
+    LIQUIDITY_GROWTH           NOT FIRED points   0.0 (if fired   0.0) | now=187815.91, before_10m=186197.74, change_pct=0.87, source_now=dexscreener_amm | rule: change>=+10% same pair
+    TRANSACTION_ACCELERATION   NOT FIRED points   0.0 (if fired   0.0) | now=30, before_5m=30, ratio=1.0, buy_share_now=0.533, mc_growth_5m=-0.65, direction_ok=True | rule: ratio>=1.8, now>=15, direction ok
+    MC_ACCELERATION            NOT FIRED points   0.0 (if fired   0.0) | mc_now=4292034.0, mc_5m_ago=4320245.0, mc_10m_ago=4216567.0, growth_last_5m=-0.65, growth_prev_5m=2.46 | rule: growth_last_5m>=15% and > growth_prev_5m
+    SMART_MONEY                UNKNOWN | SOURCE: — | REASON: module not implemented - no data source
+    WHALE                      NOT FIRED points   0.0 (if fired   0.0) | state=NEUTRAL, delta_supply_pct=0, holders=4029, holder_increase=-1 | rule: ACCUMULATION, >=50 holders, >= +10 holders, not suspicious
+    SOCIAL_ACCELERATION        UNKNOWN | SOURCE: — | REASON: module not implemented - no data source
+    NARRATIVE                  UNKNOWN | SOURCE: — | REASON: module not implemented - no data source
+
+--- $OER HQaPB1tZwNsVZw1T8oCdsX7hruMCgn9WckvTo2G8pump  EARLY 0 (is_early=False) DQ INVALID · age 14.8m · history 11.8m · fired 0 · groups 4/7 · denominator weight 70
+    transition: baseline median $241 over 6 pts, now $0 (x0.0) -> False
+    HOLDERS: UNKNOWN | SOURCE: Helius DAS | REASON: pending (snapshots 0)
+    VOLUME_ACCELERATION        NOT FIRED points   0.0 (if fired   0.0) | now=0.02, before_5m=6.72, ratio=0.003, buy_share_now=0.0, mc_growth_5m=-0.0, direction_ok=False | rule: ratio>=2.0, now>=$2K, direction ok
+    HOLDER_ACCELERATION        UNKNOWN | SOURCE: Helius DAS snapshots | REASON: Helius connected, token not holder-checked yet
+    BUY_PRESSURE               NOT FIRED points   0.0 (if fired   0.0) | buys=0, sells=3, buy_share_now=0.0, buy_share_5m_ago=0.467, delta_pp=-46.7 | rule: buy share +>=10pp and >=55%
+    LIQUIDITY_GROWTH           UNKNOWN | SOURCE: snapshots (DexScreener) | REASON: liquidity UNKNOWN (failed validation)
+    TRANSACTION_ACCELERATION   NOT FIRED points   0.0 (if fired   0.0) | now=3, before_5m=15, ratio=0.2, buy_share_now=0.0, mc_growth_5m=-0.0, direction_ok=False | rule: ratio>=1.8, now>=15, direction ok
+    MC_ACCELERATION            NOT FIRED points   0.0 (if fired   0.0) | mc_now=3334.11, mc_5m_ago=3334.16, mc_10m_ago=3336.38, growth_last_5m=-0.0, growth_prev_5m=-0.07 | rule: growth_last_5m>=15% and > growth_prev_5m
+    SMART_MONEY                UNKNOWN | SOURCE: — | REASON: module not implemented - no data source
+    WHALE                      UNKNOWN | SOURCE: holder snapshots | REASON: Helius connected, token not holder-checked yet
+    SOCIAL_ACCELERATION        UNKNOWN | SOURCE: — | REASON: module not implemented - no data source
+    NARRATIVE                  UNKNOWN | SOURCE: — | REASON: module not implemented - no data source
+
+--- $LONGPAD 3622gCNE3APNtj3XBMMv1XuetmYgV676cem3XVczpump  EARLY 0 (is_early=False) DQ INVALID · age 14.9m · history 11.8m · fired 0 · groups 4/7 · denominator weight 70
+    transition: baseline median $2,173 over 6 pts, now $23 (x0.01) -> False
+    HOLDERS: UNKNOWN | SOURCE: Helius DAS | REASON: pending (snapshots 0)
+    VOLUME_ACCELERATION        NOT FIRED points   0.0 (if fired   0.0) | now=23.4, before_5m=54.81, ratio=0.427, buy_share_now=0.0, mc_growth_5m=-1.3, direction_ok=False | rule: ratio>=2.0, now>=$2K, direction ok
+    HOLDER_ACCELERATION        UNKNOWN | SOURCE: Helius DAS snapshots | REASON: Helius connected, token not holder-checked yet
+    BUY_PRESSURE               NOT FIRED points   0.0 (if fired   0.0) | buys=0, sells=1, buy_share_now=0.0, buy_share_5m_ago=0.5, delta_pp=-50.0 | rule: buy share +>=10pp and >=55%
+    LIQUIDITY_GROWTH           UNKNOWN | SOURCE: snapshots (DexScreener) | REASON: liquidity UNKNOWN (failed validation)
+    TRANSACTION_ACCELERATION   NOT FIRED points   0.0 (if fired   0.0) | now=1, before_5m=2, ratio=0.5, buy_share_now=0.0, mc_growth_5m=-1.3, direction_ok=False | rule: ratio>=1.8, now>=15, direction ok
+    MC_ACCELERATION            NOT FIRED points   0.0 (if fired   0.0) | mc_now=3337.25, mc_5m_ago=3381.05, mc_10m_ago=3480.36, growth_last_5m=-1.3, growth_prev_5m=-2.85 | rule: growth_last_5m>=15% and > growth_prev_5m
+    SMART_MONEY                UNKNOWN | SOURCE: — | REASON: module not implemented - no data source
+    WHALE                      UNKNOWN | SOURCE: holder snapshots | REASON: Helius connected, token not holder-checked yet
+    SOCIAL_ACCELERATION        UNKNOWN | SOURCE: — | REASON: module not implemented - no data source
+    NARRATIVE                  UNKNOWN | SOURCE: — | REASON: module not implemented - no data source
+
+--- $NTDA 9FptJJh3EGZtD6CAyKcY52JrNAMD5saFXdo1XiFSpump  EARLY 0 (is_early=False) DQ VALID · age 119.0m · history 11.8m · fired 0 · groups 7/7 · denominator weight 110
+    transition: baseline median $1,860 over 6 pts, now $1,676 (x0.9) -> False
+    HOLDERS: 2412 (snapshots 8) · top10 3.79% · growth 5m -0.08285004142502071 (prev 0.0) · quality UNKNOWN · churn 0.08288437629506838 · WHALE NEUTRAL n=0 held=0% Δ=0
+    VOLUME_ACCELERATION        NOT FIRED points   0.0 (if fired   0.0) | now=1675.7, before_5m=1993.46, ratio=0.841, buy_share_now=0.946, mc_growth_5m=0.91, direction_ok=True | rule: ratio>=2.0, now>=$2K, direction ok
+    HOLDER_ACCELERATION        NOT FIRED points   0.0 (if fired   0.0) | now=2412, abs_increase_5m=-2, growth_last_5m=-0.08, growth_prev_5m=0.0 | rule: growth>=5%, > previous 5m, >= +10 holders, >= 50 holders
+    BUY_PRESSURE               NOT FIRED points   0.0 (if fired   0.0) | buys=87, sells=5, buy_share_now=0.946, buy_share_5m_ago=0.956, delta_pp=-1.0 | rule: buy share +>=10pp and >=55%
+    LIQUIDITY_GROWTH           NOT FIRED points   0.0 (if fired   0.0) | now=244443.54, before_10m=242252.97, change_pct=0.9, source_now=dexscreener_amm | rule: change>=+10% same pair
+    TRANSACTION_ACCELERATION   NOT FIRED points   0.0 (if fired   0.0) | now=92, before_5m=90, ratio=1.022, buy_share_now=0.946, mc_growth_5m=0.91, direction_ok=True | rule: ratio>=1.8, now>=15, direction ok
+    MC_ACCELERATION            NOT FIRED points   0.0 (if fired   0.0) | mc_now=7228599.0, mc_5m_ago=7163700.0, mc_10m_ago=7096517.0, growth_last_5m=0.91, growth_prev_5m=0.95 | rule: growth_last_5m>=15% and > growth_prev_5m
+    SMART_MONEY                UNKNOWN | SOURCE: — | REASON: module not implemented - no data source
+    WHALE                      NOT FIRED points   0.0 (if fired   0.0) | state=NEUTRAL, delta_supply_pct=0, holders=2412, holder_increase=-2 | rule: ACCUMULATION, >=50 holders, >= +10 holders, not suspicious
+    SOCIAL_ACCELERATION        UNKNOWN | SOURCE: — | REASON: module not implemented - no data source
+    NARRATIVE                  UNKNOWN | SOURCE: — | REASON: module not implemented - no data source
+
+--- $NTDA BfEAyMiALpmY4Q2ikxmmhfURjFh8eLhKCCUrXBwrpump  EARLY 0 (is_early=False) DQ VALID · age 305.5m · history 11.8m · fired 0 · groups 7/7 · denominator weight 110
+    transition: baseline median $2,493 over 6 pts, now $2,158 (x0.87) -> False
+    HOLDERS: 2812 (snapshots 8) · top10 5.01% · growth 5m 0.0 (prev -0.03554923569143263) · quality UNKNOWN · churn 0.0 · WHALE NEUTRAL n=0 held=0% Δ=0
+    VOLUME_ACCELERATION        NOT FIRED points   0.0 (if fired   0.0) | now=2157.98, before_5m=2168.93, ratio=0.995, buy_share_now=0.964, mc_growth_5m=0.28, direction_ok=True | rule: ratio>=2.0, now>=$2K, direction ok
+    HOLDER_ACCELERATION        NOT FIRED points   0.0 (if fired   0.0) | now=2812, abs_increase_5m=0, growth_last_5m=0.0, growth_prev_5m=-0.04 | rule: growth>=5%, > previous 5m, >= +10 holders, >= 50 holders
+    BUY_PRESSURE               NOT FIRED points   0.0 (if fired   0.0) | buys=238, sells=9, buy_share_now=0.964, buy_share_5m_ago=0.969, delta_pp=-0.6 | rule: buy share +>=10pp and >=55%
+    LIQUIDITY_GROWTH           NOT FIRED points   0.0 (if fired   0.0) | now=815094.0, before_10m=813362.36, change_pct=0.21, source_now=dexscreener_amm | rule: change>=+10% same pair
+    TRANSACTION_ACCELERATION   NOT FIRED points   0.0 (if fired   0.0) | now=247, before_5m=295, ratio=0.837, buy_share_now=0.964, mc_growth_5m=0.28, direction_ok=True | rule: ratio>=1.8, now>=15, direction ok
+    MC_ACCELERATION            NOT FIRED points   0.0 (if fired   0.0) | mc_now=79393259.0, mc_5m_ago=79175310.0, mc_10m_ago=79006354.0, growth_last_5m=0.28, growth_prev_5m=0.21 | rule: growth_last_5m>=15% and > growth_prev_5m
+    SMART_MONEY                UNKNOWN | SOURCE: — | REASON: module not implemented - no data source
+    WHALE                      NOT FIRED points   0.0 (if fired   0.0) | state=NEUTRAL, delta_supply_pct=0, holders=2812, holder_increase=0 | rule: ACCUMULATION, >=50 holders, >= +10 holders, not suspicious
+    SOCIAL_ACCELERATION        UNKNOWN | SOURCE: — | REASON: module not implemented - no data source
+    NARRATIVE                  UNKNOWN | SOURCE: — | REASON: module not implemented - no data source
+
+--- $DANFO EGNEhpQPdhmkpPBTv8ake87w5nZjktUyvfi7S7awpump  EARLY 0 (is_early=False) DQ INVALID · age 131.7m · history 11.8m · fired 0 · groups 4/7 · denominator weight 70 · SUPPRESSED: risk 68 > 60
+    transition: baseline median $794 over 6 pts, now $50 (x0.06) -> False
+    HOLDERS: UNKNOWN | SOURCE: Helius DAS | REASON: pending (snapshots 0)
+    VOLUME_ACCELERATION        NOT FIRED points   0.0 (if fired   0.0) | now=49.9, before_5m=253.81, ratio=0.197, buy_share_now=0.0, mc_growth_5m=-1.86, direction_ok=False | rule: ratio>=2.0, now>=$2K, direction ok
+    HOLDER_ACCELERATION        UNKNOWN | SOURCE: Helius DAS snapshots | REASON: Helius connected, token not holder-checked yet
+    BUY_PRESSURE               NOT FIRED points   0.0 (if fired   0.0) | buys=0, sells=2, buy_share_now=0.0, buy_share_5m_ago=0.0, delta_pp=0.0 | rule: buy share +>=10pp and >=55%
+    LIQUIDITY_GROWTH           UNKNOWN | SOURCE: snapshots (DexScreener) | REASON: liquidity UNKNOWN (failed validation)
+    TRANSACTION_ACCELERATION   NOT FIRED points   0.0 (if fired   0.0) | now=2, before_5m=10, ratio=0.2, buy_share_now=0.0, mc_growth_5m=-1.86, direction_ok=False | rule: ratio>=1.8, now>=15, direction ok
+    MC_ACCELERATION            NOT FIRED points   0.0 (if fired   0.0) | mc_now=7313.84, mc_5m_ago=7452.27, mc_10m_ago=7531.03, growth_last_5m=-1.86, growth_prev_5m=-1.05 | rule: growth_last_5m>=15% and > growth_prev_5m
+    SMART_MONEY                UNKNOWN | SOURCE: — | REASON: module not implemented - no data source
+    WHALE                      UNKNOWN | SOURCE: holder snapshots | REASON: Helius connected, token not holder-checked yet
+    SOCIAL_ACCELERATION        UNKNOWN | SOURCE: — | REASON: module not implemented - no data source
+    NARRATIVE                  UNKNOWN | SOURCE: — | REASON: module not implemented - no data source
+
+JSON: D:\code\sol_memecoin_hunter\docs\audit\early_audit_20260929_1824.json

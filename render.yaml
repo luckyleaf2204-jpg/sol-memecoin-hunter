@@ -1,0 +1,22 @@
+# Render Blueprint — one free web service: FastAPI + PWA + the scanner in the same process.
+# Secrets are NOT stored here: `sync: false` makes Render ask for them in the dashboard.
+services:
+  - type: web
+    name: sol-memecoin-hunter
+    runtime: python
+    plan: free
+    buildCommand: pip install -r requirements-server.txt
+    startCommand: python src/main.py --web --host 0.0.0.0 --port $PORT
+    healthCheckPath: /healthz
+    autoDeploy: true
+    envVars:
+      - key: PYTHON_VERSION
+        value: 3.12.10
+      - key: APP_ACCESS_CODE          # required — the code you type once on the iPhone
+        sync: false
+      - key: HELIUS_API_KEY           # required for holder / whale data
+        sync: false
+      - key: TELEGRAM_BOT_TOKEN       # optional — alerts
+        sync: false
+      - key: TELEGRAM_CHAT_ID         # optional — alerts
+        sync: false

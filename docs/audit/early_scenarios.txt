@@ -1,0 +1,65 @@
+
+=== S1: Volume +400%, holders +150%, B/S 2.5, liquidity +30%, transactions +300%, 3 smart-money wallets
+EARLY SIGNAL = 79  is_early=True  fired=6  transition=True  denominator weight=110  lifecycle=EARLY_MOMENTUM
+RISK = 0 LOW  flags: 
+Opportunity = 76  DQ = VALID 95
+  signal             status     weight strength  points  value / reason
+  volume_accel       FIRED          25    1.000    22.7  5.00×
+  txn_accel          FIRED          15    1.000    13.6  4.00×
+  buy_pressure       FIRED          15    1.000    13.6  1.00 → 2.52
+  mc_accel           FIRED          15    0.400     5.5  +0.0% → +30.0%
+  holder_accel       FIRED          20    1.000    18.2  +4.2% → +150.0%
+  liquidity_growth   FIRED          10    0.556     5.1  +30.0%
+  whale_accum        not fired      10    0.000     0.0  +0.00% supply
+  smart_money        UNKNOWN         0        —     0.0  module not implemented - no data source
+  social_accel       UNKNOWN         0        —     0.0  module not implemented - no data source
+  narrative_accel    UNKNOWN         0        —     0.0  module not implemented - no data source
+  NOTE: 3 smart-money wallets requested: SMART MONEY module NOT AVAILABLE -> cannot be represented; weight 0, excluded from the denominator
+
+=== S2: Price +100% but volume, holders and liquidity flat
+EARLY SIGNAL = 14  is_early=False  fired=1  transition=False  denominator weight=110  lifecycle=MATURE
+RISK = 8 LOW  flags: pump_without_liquidity+8
+Opportunity = 6  DQ = VALID 95
+  signal             status     weight strength  points  value / reason
+  volume_accel       not fired      25    0.000     0.0  1.00×
+  txn_accel          not fired      15    0.000     0.0  1.00×
+  buy_pressure       not fired      15    0.000     0.0  1.00 → 1.00
+  mc_accel           FIRED          15    1.000    13.6  +0.0% → +100.0%
+  holder_accel       not fired      20    0.000     0.0  +0.0% → +0.0%
+  liquidity_growth   not fired      10    0.000     0.0  +0.0%
+  whale_accum        not fired      10    0.000     0.0  +0.00% supply
+  smart_money        UNKNOWN         0        —     0.0  module not implemented - no data source
+  social_accel       UNKNOWN         0        —     0.0  module not implemented - no data source
+  narrative_accel    UNKNOWN         0        —     0.0  module not implemented - no data source
+
+=== S3: Volume +500% but liquidity -50% and top-holder concentration rising
+EARLY SIGNAL = 63  is_early=True  fired=5  transition=True  denominator weight=110  lifecycle=EARLY_MOMENTUM
+RISK = 67 HIGH  flags: low_liquidity+7, liquidity_shock+25, top10_high+25, volume_without_holders+10
+Opportunity = 51  DQ = VALID 95
+  signal             status     weight strength  points  value / reason
+  volume_accel       FIRED          25    1.000    22.7  6.00×
+  txn_accel          FIRED          15    0.907    12.4  3.75×
+  buy_pressure       FIRED          15    1.000    13.6  1.00 → 2.00
+  mc_accel           FIRED          15    0.400     5.5  +0.0% → +30.0%
+  holder_accel       not fired      20    0.000     0.0  +0.0% → +0.0%
+  liquidity_growth   not fired      10    0.000     0.0  -50.0%
+  whale_accum        FIRED          10    1.000     9.1  +35.00% supply
+  smart_money        UNKNOWN         0        —     0.0  module not implemented - no data source
+  social_accel       UNKNOWN         0        —     0.0  module not implemented - no data source
+  narrative_accel    UNKNOWN         0        —     0.0  module not implemented - no data source
+
+=== S4: Volume +300%, holders +100%, liquidity +50%, buy/sell +2.0, many new wallets, no major risk
+EARLY SIGNAL = 68  is_early=True  fired=6  transition=True  denominator weight=110  lifecycle=EARLY_MOMENTUM
+RISK = 0 LOW  flags: 
+Opportunity = 72  DQ = VALID 95
+  signal             status     weight strength  points  value / reason
+  volume_accel       FIRED          25    0.714    16.2  4.00×
+  txn_accel          FIRED          15    0.506     6.9  2.67×
+  buy_pressure       FIRED          15    1.000    13.6  1.00 → 3.00
+  mc_accel           FIRED          15    0.300     4.1  +0.0% → +25.0%
+  holder_accel       FIRED          20    1.000    18.2  +2.0% → +100.0%
+  liquidity_growth   FIRED          10    1.000     9.1  +50.0%
+  whale_accum        not fired      10    0.000     0.0  +0.00% supply
+  smart_money        UNKNOWN         0        —     0.0  module not implemented - no data source
+  social_accel       UNKNOWN         0        —     0.0  module not implemented - no data source
+  narrative_accel    UNKNOWN         0        —     0.0  module not implemented - no data source

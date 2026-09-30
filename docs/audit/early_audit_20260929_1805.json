@@ -1,0 +1,3182 @@
+{
+ "generated_at": "2026-09-29 18:05:46",
+ "tracked": 358,
+ "eligible_with_10m_history": 128,
+ "eligible_invalid": 91,
+ "transition_true": 5,
+ "three_or_more_fired": 5,
+ "strength_ge_50": 2,
+ "component_stats": {
+  "volume_accel": {
+   "computable": 64,
+   "fired": 4,
+   "near_miss": 9,
+   "unknown": 64
+  },
+  "holder_accel": {
+   "computable": 31,
+   "fired": 0,
+   "near_miss": 1,
+   "unknown": 97
+  },
+  "buy_pressure": {
+   "computable": 64,
+   "fired": 8,
+   "near_miss": 8,
+   "unknown": 64
+  },
+  "liquidity_growth": {
+   "computable": 39,
+   "fired": 6,
+   "near_miss": 0,
+   "unknown": 89
+  },
+  "txn_accel": {
+   "computable": 87,
+   "fired": 7,
+   "near_miss": 3,
+   "unknown": 41
+  },
+  "mc_accel": {
+   "computable": 117,
+   "fired": 7,
+   "near_miss": 2,
+   "unknown": 11
+  },
+  "smart_money": {
+   "computable": 0,
+   "fired": 0,
+   "near_miss": 0,
+   "unknown": 128
+  },
+  "whale_accum": {
+   "computable": 34,
+   "fired": 0,
+   "near_miss": 3,
+   "unknown": 94
+  },
+  "social_accel": {
+   "computable": 0,
+   "fired": 0,
+   "near_miss": 0,
+   "unknown": 128
+  },
+  "narrative_accel": {
+   "computable": 0,
+   "fired": 0,
+   "near_miss": 0,
+   "unknown": 128
+  }
+ },
+ "weights": {
+  "volume_accel": 25,
+  "txn_accel": 15,
+  "buy_pressure": 15,
+  "mc_accel": 15,
+  "holder_accel": 20,
+  "liquidity_growth": 10,
+  "whale_accum": 10
+ },
+ "tracked_with_holders": 51,
+ "holder_status_counts": {
+  "pending": 299,
+  "invalid": 8,
+  "ok": 51
+ },
+ "helius": {
+  "state": "CONNECTED",
+  "endpoint": "https://mainnet.helius-rpc.com/",
+  "call": "getTokenAccounts",
+  "status": 200,
+  "ms": 422,
+  "error": ""
+ },
+ "data_quality_counts": {
+  "VALID": 40,
+  "PARTIAL": 27,
+  "INVALID": 291
+ },
+ "early_unknown": 230,
+ "early_true": 0,
+ "early_suppressed": 29,
+ "data_breaks_total": 3,
+ "top": [
+  {
+   "token": "$STRAIGHT",
+   "mint": "8ggKQ4J1CZCEieP6pKTx6MosipWK8c5qkRQQx5DFpump",
+   "data_quality": "VALID",
+   "lifecycle": "DECLINING",
+   "age_min": 71.8,
+   "history_min": 29.9,
+   "EARLY_SIGNAL_SCORE": 73,
+   "is_early": false,
+   "fired_count": 5,
+   "coverage_pct": 100,
+   "denominator_weight": 110,
+   "suppressed_by": [
+    "rug risk: dev_sold_recent"
+   ],
+   "data_breaks": 0,
+   "transition": {
+    "baseline_points": 60,
+    "baseline_median": 79204.33,
+    "current_vol_5m": 3625.74,
+    "multiple": 0.05,
+    "transition": false,
+    "rule": "median < $10,000 and now >= 3.0x median"
+   },
+   "holders": {
+    "status": "OK",
+    "holders": 480,
+    "top10_pct": 8.39,
+    "top20_pct": 9.43,
+    "source": "helius_das",
+    "snapshots": 8,
+    "growth_5m_pct": -40.37267080745342,
+    "growth_prev_5m_pct": 13.861386138613861,
+    "holder_quality": "UNKNOWN",
+    "churn_pct": 6.102362204724409,
+    "whale_state": "ACCUMULATION",
+    "whale_count": 4,
+    "whale_pct": 6.68,
+    "whale_delta_pct": 3.494
+   },
+   "components": {
+    "VOLUME_ACCELERATION": {
+     "status": "FIRED",
+     "points": 22.7,
+     "points_if_fired": 22.7,
+     "strength": 1.0,
+     "weight": 25,
+     "value": "67.72×",
+     "rule": "ratio>=2.0, now>=$2K, direction ok",
+     "raw": {
+      "now": 3625.74,
+      "before_5m": 53.54,
+      "ratio": 67.72,
+      "buy_share_now": 0.864,
+      "mc_growth_5m": 360.32,
+      "direction_ok": true
+     }
+    },
+    "HOLDER_ACCELERATION": {
+     "status": "NOT FIRED",
+     "points": 0.0,
+     "points_if_fired": 0.0,
+     "strength": 0.0,
+     "weight": 20,
+     "value": "+13.9% → -40.4%",
+     "rule": "growth>=5%, > previous 5m, >= +10 holders, >= 50 holders",
+     "raw": {
+      "now": 480,
+      "abs_increase_5m": -325,
+      "growth_last_5m": -40.37,
+      "growth_prev_5m": 13.86
+     }
+    },
+    "BUY_PRESSURE": {
+     "status": "FIRED",
+     "points": 13.6,
+     "points_if_fired": 13.6,
+     "strength": 1.0,
+     "weight": 15,
+     "value": "20% → 86%",
+     "rule": "buy share +>=10pp and >=55%",
+     "raw": {
+      "buys": 51,
+      "sells": 8,
+      "buy_share_now": 0.864,
+      "buy_share_5m_ago": 0.2,
+      "delta_pp": 66.4
+     }
+    },
+    "LIQUIDITY_GROWTH": {
+     "status": "FIRED",
+     "points": 9.1,
+     "points_if_fired": 9.1,
+     "strength": 1.0,
+     "weight": 10,
+     "value": "+168.8%",
+     "rule": "change>=+10% same pair",
+     "raw": {
+      "now": 11430.49,
+      "before_10m": 4252.03,
+      "change_pct": 168.82,
+      "source_now": "dexscreener_amm"
+     }
+    },
+    "TRANSACTION_ACCELERATION": {
+     "status": "FIRED",
+     "points": 13.6,
+     "points_if_fired": 13.6,
+     "strength": 1.0,
+     "weight": 15,
+     "value": "11.80×",
+     "rule": "ratio>=1.8, now>=15, direction ok",
+     "raw": {
+      "now": 59,
+      "before_5m": 5,
+      "ratio": 11.8,
+      "buy_share_now": 0.864,
+      "mc_growth_5m": 360.32,
+      "direction_ok": true
+     }
+    },
+    "MC_ACCELERATION": {
+     "status": "FIRED",
+     "points": 13.6,
+     "points_if_fired": 13.6,
+     "strength": 1.0,
+     "weight": 15,
+     "value": "-1.4% → +360.3%",
+     "rule": "growth_last_5m>=15% and > growth_prev_5m",
+     "raw": {
+      "mc_now": 16309.0,
+      "mc_5m_ago": 3543.0,
+      "mc_10m_ago": 3595.0,
+      "growth_last_5m": 360.32,
+      "growth_prev_5m": -1.45
+     }
+    },
+    "SMART_MONEY": {
+     "status": "UNKNOWN",
+     "source": "—",
+     "reason": "module not implemented - no data source",
+     "raw": {
+      "missing": "module not implemented - no data source"
+     }
+    },
+    "WHALE": {
+     "status": "NOT FIRED",
+     "points": 0.0,
+     "points_if_fired": 5.7,
+     "strength": 0.624,
+     "weight": 10,
+     "value": "+3.49% supply",
+     "rule": "ACCUMULATION, >=50 holders, >= +10 holders, not suspicious",
+     "raw": {
+      "state": "ACCUMULATION",
+      "delta_supply_pct": 3.494,
+      "holders": 480,
+      "holder_increase": -29,
+      "blocked": "D3 holder increase -29 < 10"
+     }
+    },
+    "SOCIAL_ACCELERATION": {
+     "status": "UNKNOWN",
+     "source": "—",
+     "reason": "module not implemented - no data source",
+     "raw": {
+      "missing": "module not implemented - no data source"
+     }
+    },
+    "NARRATIVE": {
+     "status": "UNKNOWN",
+     "source": "—",
+     "reason": "module not implemented - no data source",
+     "raw": {
+      "missing": "module not implemented - no data source"
+     }
+    }
+   }
+  },
+  {
+   "token": "$BEAGLE",
+   "mint": "4J2Sgaw4CF8Aqd2JTSXp7PGToYQxFfdhmV6bZcAHpump",
+   "data_quality": "INVALID",
+   "lifecycle": "EARLY",
+   "age_min": 12.1,
+   "history_min": 11.1,
+   "EARLY_SIGNAL_SCORE": 66,
+   "is_early": false,
+   "fired_count": 1,
+   "coverage_pct": 14,
+   "denominator_weight": 15,
+   "suppressed_by": [],
+   "data_breaks": 0,
+   "transition": {
+    "baseline_points": 4,
+    "baseline_median": 7.09,
+    "current_vol_5m": 3.05,
+    "multiple": 0.43,
+    "transition": false,
+    "rule": "median < $10,000 and now >= 3.0x median"
+   },
+   "holders": {
+    "status": "UNKNOWN",
+    "holder_status": "pending",
+    "reason": "pending",
+    "snapshots": 0
+   },
+   "components": {
+    "VOLUME_ACCELERATION": {
+     "status": "UNKNOWN",
+     "source": "snapshots (DexScreener)",
+     "reason": "volume missing/zero 5m ago",
+     "raw": {
+      "now": 3.05,
+      "before_5m": null,
+      "missing": "volume missing/zero 5m ago"
+     }
+    },
+    "HOLDER_ACCELERATION": {
+     "status": "UNKNOWN",
+     "source": "Helius DAS snapshots",
+     "reason": "Helius connected, token not holder-checked yet",
+     "raw": {
+      "missing": "Helius connected, token not holder-checked yet"
+     }
+    },
+    "BUY_PRESSURE": {
+     "status": "UNKNOWN",
+     "source": "snapshots (DexScreener)",
+     "reason": "no transactions now or 5m ago",
+     "raw": {
+      "buys": 1,
+      "sells": 0,
+      "missing": "no transactions now or 5m ago"
+     }
+    },
+    "LIQUIDITY_GROWTH": {
+     "status": "UNKNOWN",
+     "source": "snapshots (DexScreener)",
+     "reason": "liquidity UNKNOWN (failed validation)",
+     "raw": {
+      "now": null,
+      "before_10m": null,
+      "missing": "liquidity UNKNOWN (failed validation)"
+     }
+    },
+    "TRANSACTION_ACCELERATION": {
+     "status": "UNKNOWN",
+     "source": "snapshots (DexScreener)",
+     "reason": "txn missing/zero 5m ago",
+     "raw": {
+      "now": 1,
+      "before_5m": 0,
+      "missing": "txn missing/zero 5m ago"
+     }
+    },
+    "MC_ACCELERATION": {
+     "status": "FIRED",
+     "points": 66.1,
+     "points_if_fired": 66.1,
+     "strength": 0.661,
+     "weight": 15,
+     "value": "+0.0% → +43.0%",
+     "rule": "growth_last_5m>=15% and > growth_prev_5m",
+     "raw": {
+      "mc_now": 4792.58,
+      "mc_5m_ago": 3350.7,
+      "mc_10m_ago": 3350.7,
+      "growth_last_5m": 43.03,
+      "growth_prev_5m": 0.0
+     }
+    },
+    "SMART_MONEY": {
+     "status": "UNKNOWN",
+     "source": "—",
+     "reason": "module not implemented - no data source",
+     "raw": {
+      "missing": "module not implemented - no data source"
+     }
+    },
+    "WHALE": {
+     "status": "UNKNOWN",
+     "source": "holder snapshots",
+     "reason": "Helius connected, token not holder-checked yet",
+     "raw": {
+      "missing": "Helius connected, token not holder-checked yet"
+     }
+    },
+    "SOCIAL_ACCELERATION": {
+     "status": "UNKNOWN",
+     "source": "—",
+     "reason": "module not implemented - no data source",
+     "raw": {
+      "missing": "module not implemented - no data source"
+     }
+    },
+    "NARRATIVE": {
+     "status": "UNKNOWN",
+     "source": "—",
+     "reason": "module not implemented - no data source",
+     "raw": {
+      "missing": "module not implemented - no data source"
+     }
+    }
+   }
+  },
+  {
+   "token": "$Liza",
+   "mint": "7UfcTJD2RSRg9AJ4k2V2rs71Ew8Zy2avaU5roc8bpump",
+   "data_quality": "INVALID",
+   "lifecycle": "MATURE",
+   "age_min": 320.0,
+   "history_min": 24.5,
+   "EARLY_SIGNAL_SCORE": 45,
+   "is_early": false,
+   "fired_count": 3,
+   "coverage_pct": 64,
+   "denominator_weight": 70,
+   "suppressed_by": [],
+   "data_breaks": 0,
+   "transition": {
+    "baseline_points": 44,
+    "baseline_median": 182.95499999999998,
+    "current_vol_5m": 2287.87,
+    "multiple": 12.51,
+    "transition": true,
+    "rule": "median < $10,000 and now >= 3.0x median"
+   },
+   "holders": {
+    "status": "UNKNOWN",
+    "holder_status": "pending",
+    "reason": "pending",
+    "snapshots": 0
+   },
+   "components": {
+    "VOLUME_ACCELERATION": {
+     "status": "FIRED",
+     "points": 8.9,
+     "points_if_fired": 8.9,
+     "strength": 0.25,
+     "weight": 25,
+     "value": "2.37×",
+     "rule": "ratio>=2.0, now>=$2K, direction ok",
+     "raw": {
+      "now": 2287.87,
+      "before_5m": 963.99,
+      "ratio": 2.373,
+      "buy_share_now": 0.686,
+      "mc_growth_5m": -1.95,
+      "direction_ok": true
+     }
+    },
+    "HOLDER_ACCELERATION": {
+     "status": "UNKNOWN",
+     "source": "Helius DAS snapshots",
+     "reason": "Helius connected, token not holder-checked yet",
+     "raw": {
+      "missing": "Helius connected, token not holder-checked yet"
+     }
+    },
+    "BUY_PRESSURE": {
+     "status": "FIRED",
+     "points": 21.4,
+     "points_if_fired": 21.4,
+     "strength": 1.0,
+     "weight": 15,
+     "value": "36% → 69%",
+     "rule": "buy share +>=10pp and >=55%",
+     "raw": {
+      "buys": 24,
+      "sells": 11,
+      "buy_share_now": 0.686,
+      "buy_share_5m_ago": 0.364,
+      "delta_pp": 32.2
+     }
+    },
+    "LIQUIDITY_GROWTH": {
+     "status": "UNKNOWN",
+     "source": "snapshots (DexScreener)",
+     "reason": "liquidity UNKNOWN (failed validation)",
+     "raw": {
+      "now": null,
+      "before_10m": null,
+      "missing": "liquidity UNKNOWN (failed validation)"
+     }
+    },
+    "TRANSACTION_ACCELERATION": {
+     "status": "FIRED",
+     "points": 14.9,
+     "points_if_fired": 14.9,
+     "strength": 0.697,
+     "weight": 15,
+     "value": "3.18×",
+     "rule": "ratio>=1.8, now>=15, direction ok",
+     "raw": {
+      "now": 35,
+      "before_5m": 11,
+      "ratio": 3.182,
+      "buy_share_now": 0.686,
+      "mc_growth_5m": -1.95,
+      "direction_ok": true
+     }
+    },
+    "MC_ACCELERATION": {
+     "status": "NOT FIRED",
+     "points": 0.0,
+     "points_if_fired": 0.0,
+     "strength": 0.0,
+     "weight": 15,
+     "value": "-8.0% → -1.9%",
+     "rule": "growth_last_5m>=15% and > growth_prev_5m",
+     "raw": {
+      "mc_now": 19421.98,
+      "mc_5m_ago": 19807.86,
+      "mc_10m_ago": 21532.53,
+      "growth_last_5m": -1.95,
+      "growth_prev_5m": -8.01
+     }
+    },
+    "SMART_MONEY": {
+     "status": "UNKNOWN",
+     "source": "—",
+     "reason": "module not implemented - no data source",
+     "raw": {
+      "missing": "module not implemented - no data source"
+     }
+    },
+    "WHALE": {
+     "status": "UNKNOWN",
+     "source": "holder snapshots",
+     "reason": "Helius connected, token not holder-checked yet",
+     "raw": {
+      "missing": "Helius connected, token not holder-checked yet"
+     }
+    },
+    "SOCIAL_ACCELERATION": {
+     "status": "UNKNOWN",
+     "source": "—",
+     "reason": "module not implemented - no data source",
+     "raw": {
+      "missing": "module not implemented - no data source"
+     }
+    },
+    "NARRATIVE": {
+     "status": "UNKNOWN",
+     "source": "—",
+     "reason": "module not implemented - no data source",
+     "raw": {
+      "missing": "module not implemented - no data source"
+     }
+    }
+   }
+  },
+  {
+   "token": "$COOKR",
+   "mint": "DdXVb6wPHqYqJLhKuKHFaFkppeftTfEGjFdDSK5Vpump",
+   "data_quality": "INVALID",
+   "lifecycle": "MATURE",
+   "age_min": 111.0,
+   "history_min": 20.9,
+   "EARLY_SIGNAL_SCORE": 41,
+   "is_early": false,
+   "fired_count": 4,
+   "coverage_pct": 64,
+   "denominator_weight": 70,
+   "suppressed_by": [],
+   "data_breaks": 0,
+   "transition": {
+    "baseline_points": 33,
+    "baseline_median": 1115.33,
+    "current_vol_5m": 2861.71,
+    "multiple": 2.57,
+    "transition": false,
+    "rule": "median < $10,000 and now >= 3.0x median"
+   },
+   "holders": {
+    "status": "OK",
+    "holders": 233,
+    "top10_pct": 21.15,
+    "top20_pct": 32.67,
+    "source": "helius_das",
+    "snapshots": 1,
+    "growth_5m_pct": null,
+    "growth_prev_5m_pct": null,
+    "holder_quality": "UNKNOWN",
+    "churn_pct": null,
+    "whale_state": "UNKNOWN",
+    "whale_count": 20,
+    "whale_pct": 32.67,
+    "whale_delta_pct": null
+   },
+   "components": {
+    "VOLUME_ACCELERATION": {
+     "status": "FIRED",
+     "points": 10.3,
+     "points_if_fired": 10.3,
+     "strength": 0.288,
+     "weight": 25,
+     "value": "2.51×",
+     "rule": "ratio>=2.0, now>=$2K, direction ok",
+     "raw": {
+      "now": 2861.71,
+      "before_5m": 1141.71,
+      "ratio": 2.507,
+      "buy_share_now": 0.712,
+      "mc_growth_5m": 16.33,
+      "direction_ok": true
+     }
+    },
+    "HOLDER_ACCELERATION": {
+     "status": "UNKNOWN",
+     "source": "Helius DAS snapshots",
+     "reason": "only 1 valid holder snapshot(s); need counts at now, -5m and -10m",
+     "raw": {
+      "missing": "only 1 valid holder snapshot(s); need counts at now, -5m and -10m"
+     }
+    },
+    "BUY_PRESSURE": {
+     "status": "FIRED",
+     "points": 21.4,
+     "points_if_fired": 21.4,
+     "strength": 1.0,
+     "weight": 15,
+     "value": "33% → 71%",
+     "rule": "buy share +>=10pp and >=55%",
+     "raw": {
+      "buys": 37,
+      "sells": 15,
+      "buy_share_now": 0.712,
+      "buy_share_5m_ago": 0.333,
+      "delta_pp": 37.8
+     }
+    },
+    "LIQUIDITY_GROWTH": {
+     "status": "UNKNOWN",
+     "source": "snapshots (DexScreener)",
+     "reason": "liquidity UNKNOWN (failed validation)",
+     "raw": {
+      "now": null,
+      "before_10m": null,
+      "missing": "liquidity UNKNOWN (failed validation)"
+     }
+    },
+    "TRANSACTION_ACCELERATION": {
+     "status": "FIRED",
+     "points": 6.9,
+     "points_if_fired": 6.9,
+     "strength": 0.321,
+     "weight": 15,
+     "value": "2.17×",
+     "rule": "ratio>=1.8, now>=15, direction ok",
+     "raw": {
+      "now": 52,
+      "before_5m": 24,
+      "ratio": 2.167,
+      "buy_share_now": 0.712,
+      "mc_growth_5m": 16.33,
+      "direction_ok": true
+     }
+    },
+    "MC_ACCELERATION": {
+     "status": "FIRED",
+     "points": 2.7,
+     "points_if_fired": 2.7,
+     "strength": 0.127,
+     "weight": 15,
+     "value": "-17.7% → +16.3%",
+     "rule": "growth_last_5m>=15% and > growth_prev_5m",
+     "raw": {
+      "mc_now": 21584.1,
+      "mc_5m_ago": 18553.79,
+      "mc_10m_ago": 22537.22,
+      "growth_last_5m": 16.33,
+      "growth_prev_5m": -17.67
+     }
+    },
+    "SMART_MONEY": {
+     "status": "UNKNOWN",
+     "source": "—",
+     "reason": "module not implemented - no data source",
+     "raw": {
+      "missing": "module not implemented - no data source"
+     }
+    },
+    "WHALE": {
+     "status": "UNKNOWN",
+     "source": "holder snapshots",
+     "reason": "needs 2 valid holder snapshots >=2 min apart",
+     "raw": {
+      "missing": "needs 2 valid holder snapshots >=2 min apart"
+     }
+    },
+    "SOCIAL_ACCELERATION": {
+     "status": "UNKNOWN",
+     "source": "—",
+     "reason": "module not implemented - no data source",
+     "raw": {
+      "missing": "module not implemented - no data source"
+     }
+    },
+    "NARRATIVE": {
+     "status": "UNKNOWN",
+     "source": "—",
+     "reason": "module not implemented - no data source",
+     "raw": {
+      "missing": "module not implemented - no data source"
+     }
+    }
+   }
+  },
+  {
+   "token": "$OPENWORLD",
+   "mint": "31hRQRgsUZ2BGqCCsVKTHTmDWv2uPPdCwmnEyrNPpump",
+   "data_quality": "INVALID",
+   "lifecycle": "MATURE",
+   "age_min": 200.5,
+   "history_min": 23.8,
+   "EARLY_SIGNAL_SCORE": 33,
+   "is_early": false,
+   "fired_count": 3,
+   "coverage_pct": 64,
+   "denominator_weight": 70,
+   "suppressed_by": [],
+   "data_breaks": 0,
+   "transition": {
+    "baseline_points": 42,
+    "baseline_median": 682.445,
+    "current_vol_5m": 1939.31,
+    "multiple": 2.84,
+    "transition": false,
+    "rule": "median < $10,000 and now >= 3.0x median"
+   },
+   "holders": {
+    "status": "UNKNOWN",
+    "holder_status": "pending",
+    "reason": "pending",
+    "snapshots": 0
+   },
+   "components": {
+    "VOLUME_ACCELERATION": {
+     "status": "NOT FIRED",
+     "points": 0.0,
+     "points_if_fired": 0.0,
+     "strength": 0.0,
+     "weight": 25,
+     "value": "1.47×",
+     "rule": "ratio>=2.0, now>=$2K, direction ok",
+     "raw": {
+      "now": 1939.31,
+      "before_5m": 1322.65,
+      "ratio": 1.466,
+      "buy_share_now": 0.8,
+      "mc_growth_5m": 23.73,
+      "direction_ok": true
+     }
+    },
+    "HOLDER_ACCELERATION": {
+     "status": "UNKNOWN",
+     "source": "Helius DAS snapshots",
+     "reason": "Helius connected, token not holder-checked yet",
+     "raw": {
+      "missing": "Helius connected, token not holder-checked yet"
+     }
+    },
+    "BUY_PRESSURE": {
+     "status": "FIRED",
+     "points": 21.4,
+     "points_if_fired": 21.4,
+     "strength": 1.0,
+     "weight": 15,
+     "value": "33% → 80%",
+     "rule": "buy share +>=10pp and >=55%",
+     "raw": {
+      "buys": 24,
+      "sells": 6,
+      "buy_share_now": 0.8,
+      "buy_share_5m_ago": 0.333,
+      "delta_pp": 46.7
+     }
+    },
+    "LIQUIDITY_GROWTH": {
+     "status": "UNKNOWN",
+     "source": "snapshots (DexScreener)",
+     "reason": "liquidity UNKNOWN (failed validation)",
+     "raw": {
+      "now": null,
+      "before_10m": null,
+      "missing": "liquidity UNKNOWN (failed validation)"
+     }
+    },
+    "TRANSACTION_ACCELERATION": {
+     "status": "FIRED",
+     "points": 5.5,
+     "points_if_fired": 5.5,
+     "strength": 0.259,
+     "weight": 15,
+     "value": "2.00×",
+     "rule": "ratio>=1.8, now>=15, direction ok",
+     "raw": {
+      "now": 30,
+      "before_5m": 15,
+      "ratio": 2.0,
+      "buy_share_now": 0.8,
+      "mc_growth_5m": 23.73,
+      "direction_ok": true
+     }
+    },
+    "MC_ACCELERATION": {
+     "status": "FIRED",
+     "points": 5.9,
+     "points_if_fired": 5.9,
+     "strength": 0.275,
+     "weight": 15,
+     "value": "-10.2% → +23.7%",
+     "rule": "growth_last_5m>=15% and > growth_prev_5m",
+     "raw": {
+      "mc_now": 18250.32,
+      "mc_5m_ago": 14749.78,
+      "mc_10m_ago": 16421.22,
+      "growth_last_5m": 23.73,
+      "growth_prev_5m": -10.18
+     }
+    },
+    "SMART_MONEY": {
+     "status": "UNKNOWN",
+     "source": "—",
+     "reason": "module not implemented - no data source",
+     "raw": {
+      "missing": "module not implemented - no data source"
+     }
+    },
+    "WHALE": {
+     "status": "UNKNOWN",
+     "source": "holder snapshots",
+     "reason": "Helius connected, token not holder-checked yet",
+     "raw": {
+      "missing": "Helius connected, token not holder-checked yet"
+     }
+    },
+    "SOCIAL_ACCELERATION": {
+     "status": "UNKNOWN",
+     "source": "—",
+     "reason": "module not implemented - no data source",
+     "raw": {
+      "missing": "module not implemented - no data source"
+     }
+    },
+    "NARRATIVE": {
+     "status": "UNKNOWN",
+     "source": "—",
+     "reason": "module not implemented - no data source",
+     "raw": {
+      "missing": "module not implemented - no data source"
+     }
+    }
+   }
+  },
+  {
+   "token": "$アル",
+   "mint": "A1y5NQWAmtqQahPHP9Jm7sqezAzjgK5Atz3fM6aBc3zV",
+   "data_quality": "PARTIAL",
+   "lifecycle": "DECLINING",
+   "age_min": 152.0,
+   "history_min": 27.9,
+   "EARLY_SIGNAL_SCORE": 29,
+   "is_early": false,
+   "fired_count": 3,
+   "coverage_pct": 73,
+   "denominator_weight": 80,
+   "suppressed_by": [],
+   "data_breaks": 0,
+   "transition": {
+    "baseline_points": 54,
+    "baseline_median": 1311.655,
+    "current_vol_5m": 869.87,
+    "multiple": 0.66,
+    "transition": false,
+    "rule": "median < $10,000 and now >= 3.0x median"
+   },
+   "holders": {
+    "status": "UNKNOWN",
+    "holder_status": "pending",
+    "reason": "pending",
+    "snapshots": 0
+   },
+   "components": {
+    "VOLUME_ACCELERATION": {
+     "status": "NOT FIRED",
+     "points": 0.0,
+     "points_if_fired": 5.1,
+     "strength": 0.164,
+     "weight": 25,
+     "value": "2.07×",
+     "rule": "ratio>=2.0, now>=$2K, direction ok",
+     "raw": {
+      "now": 869.87,
+      "before_5m": 419.38,
+      "ratio": 2.074,
+      "buy_share_now": 0.769,
+      "mc_growth_5m": 30.76,
+      "direction_ok": true
+     }
+    },
+    "HOLDER_ACCELERATION": {
+     "status": "UNKNOWN",
+     "source": "Helius DAS snapshots",
+     "reason": "Helius connected, token not holder-checked yet",
+     "raw": {
+      "missing": "Helius connected, token not holder-checked yet"
+     }
+    },
+    "BUY_PRESSURE": {
+     "status": "FIRED",
+     "points": 18.8,
+     "points_if_fired": 18.8,
+     "strength": 1.0,
+     "weight": 15,
+     "value": "21% → 77%",
+     "rule": "buy share +>=10pp and >=55%",
+     "raw": {
+      "buys": 20,
+      "sells": 6,
+      "buy_share_now": 0.769,
+      "buy_share_5m_ago": 0.208,
+      "delta_pp": 56.1
+     }
+    },
+    "LIQUIDITY_GROWTH": {
+     "status": "FIRED",
+     "points": 2.1,
+     "points_if_fired": 2.1,
+     "strength": 0.17,
+     "weight": 10,
+     "value": "+12.7%",
+     "rule": "change>=+10% same pair",
+     "raw": {
+      "now": 7909.96,
+      "before_10m": 7021.36,
+      "change_pct": 12.66,
+      "source_now": "dexscreener_amm"
+     }
+    },
+    "TRANSACTION_ACCELERATION": {
+     "status": "NOT FIRED",
+     "points": 0.0,
+     "points_if_fired": 0.0,
+     "strength": 0.0,
+     "weight": 15,
+     "value": "1.08×",
+     "rule": "ratio>=1.8, now>=15, direction ok",
+     "raw": {
+      "now": 26,
+      "before_5m": 24,
+      "ratio": 1.083,
+      "buy_share_now": 0.769,
+      "mc_growth_5m": 30.76,
+      "direction_ok": true
+     }
+    },
+    "MC_ACCELERATION": {
+     "status": "FIRED",
+     "points": 7.8,
+     "points_if_fired": 7.8,
+     "strength": 0.415,
+     "weight": 15,
+     "value": "-7.9% → +30.8%",
+     "rule": "growth_last_5m>=15% and > growth_prev_5m",
+     "raw": {
+      "mc_now": 11213.0,
+      "mc_5m_ago": 8575.0,
+      "mc_10m_ago": 9311.0,
+      "growth_last_5m": 30.76,
+      "growth_prev_5m": -7.9
+     }
+    },
+    "SMART_MONEY": {
+     "status": "UNKNOWN",
+     "source": "—",
+     "reason": "module not implemented - no data source",
+     "raw": {
+      "missing": "module not implemented - no data source"
+     }
+    },
+    "WHALE": {
+     "status": "UNKNOWN",
+     "source": "holder snapshots",
+     "reason": "Helius connected, token not holder-checked yet",
+     "raw": {
+      "missing": "Helius connected, token not holder-checked yet"
+     }
+    },
+    "SOCIAL_ACCELERATION": {
+     "status": "UNKNOWN",
+     "source": "—",
+     "reason": "module not implemented - no data source",
+     "raw": {
+      "missing": "module not implemented - no data source"
+     }
+    },
+    "NARRATIVE": {
+     "status": "UNKNOWN",
+     "source": "—",
+     "reason": "module not implemented - no data source",
+     "raw": {
+      "missing": "module not implemented - no data source"
+     }
+    }
+   }
+  },
+  {
+   "token": "$phone",
+   "mint": "9JkjnA4zZaKrEB79qarLDJkyMuRyCFwyru2TWNUzXMS3",
+   "data_quality": "PARTIAL",
+   "lifecycle": "DECLINING",
+   "age_min": 285.1,
+   "history_min": 20.2,
+   "EARLY_SIGNAL_SCORE": 27,
+   "is_early": false,
+   "fired_count": 2,
+   "coverage_pct": 73,
+   "denominator_weight": 80,
+   "suppressed_by": [],
+   "data_breaks": 0,
+   "transition": {
+    "baseline_points": 31,
+    "baseline_median": 93.52,
+    "current_vol_5m": 329.26,
+    "multiple": 3.52,
+    "transition": true,
+    "rule": "median < $10,000 and now >= 3.0x median"
+   },
+   "holders": {
+    "status": "UNKNOWN",
+    "holder_status": "pending",
+    "reason": "pending",
+    "snapshots": 0
+   },
+   "components": {
+    "VOLUME_ACCELERATION": {
+     "status": "NOT FIRED",
+     "points": 0.0,
+     "points_if_fired": 23.8,
+     "strength": 0.761,
+     "weight": 25,
+     "value": "4.16×",
+     "rule": "ratio>=2.0, now>=$2K, direction ok",
+     "raw": {
+      "now": 329.26,
+      "before_5m": 79.1,
+      "ratio": 4.163,
+      "buy_share_now": 0.375,
+      "mc_growth_5m": 61.56,
+      "direction_ok": true
+     }
+    },
+    "HOLDER_ACCELERATION": {
+     "status": "UNKNOWN",
+     "source": "Helius DAS snapshots",
+     "reason": "Helius connected, token not holder-checked yet",
+     "raw": {
+      "missing": "Helius connected, token not holder-checked yet"
+     }
+    },
+    "BUY_PRESSURE": {
+     "status": "NOT FIRED",
+     "points": 0.0,
+     "points_if_fired": 0.0,
+     "strength": 0.0,
+     "weight": 15,
+     "value": "33% → 38%",
+     "rule": "buy share +>=10pp and >=55%",
+     "raw": {
+      "buys": 3,
+      "sells": 5,
+      "buy_share_now": 0.375,
+      "buy_share_5m_ago": 0.333,
+      "delta_pp": 4.2
+     }
+    },
+    "LIQUIDITY_GROWTH": {
+     "status": "FIRED",
+     "points": 8.0,
+     "points_if_fired": 8.0,
+     "strength": 0.641,
+     "weight": 10,
+     "value": "+33.8%",
+     "rule": "change>=+10% same pair",
+     "raw": {
+      "now": 6510.89,
+      "before_10m": 4865.12,
+      "change_pct": 33.83,
+      "source_now": "dexscreener_amm"
+     }
+    },
+    "TRANSACTION_ACCELERATION": {
+     "status": "NOT FIRED",
+     "points": 0.0,
+     "points_if_fired": 9.5,
+     "strength": 0.506,
+     "weight": 15,
+     "value": "2.67×",
+     "rule": "ratio>=1.8, now>=15, direction ok",
+     "raw": {
+      "now": 8,
+      "before_5m": 3,
+      "ratio": 2.667,
+      "buy_share_now": 0.375,
+      "mc_growth_5m": 61.56,
+      "direction_ok": true
+     }
+    },
+    "MC_ACCELERATION": {
+     "status": "FIRED",
+     "points": 18.8,
+     "points_if_fired": 18.8,
+     "strength": 1.0,
+     "weight": 15,
+     "value": "-5.4% → +61.6%",
+     "rule": "growth_last_5m>=15% and > growth_prev_5m",
+     "raw": {
+      "mc_now": 8393.0,
+      "mc_5m_ago": 5195.0,
+      "mc_10m_ago": 5492.0,
+      "growth_last_5m": 61.56,
+      "growth_prev_5m": -5.41
+     }
+    },
+    "SMART_MONEY": {
+     "status": "UNKNOWN",
+     "source": "—",
+     "reason": "module not implemented - no data source",
+     "raw": {
+      "missing": "module not implemented - no data source"
+     }
+    },
+    "WHALE": {
+     "status": "UNKNOWN",
+     "source": "holder snapshots",
+     "reason": "Helius connected, token not holder-checked yet",
+     "raw": {
+      "missing": "Helius connected, token not holder-checked yet"
+     }
+    },
+    "SOCIAL_ACCELERATION": {
+     "status": "UNKNOWN",
+     "source": "—",
+     "reason": "module not implemented - no data source",
+     "raw": {
+      "missing": "module not implemented - no data source"
+     }
+    },
+    "NARRATIVE": {
+     "status": "UNKNOWN",
+     "source": "—",
+     "reason": "module not implemented - no data source",
+     "raw": {
+      "missing": "module not implemented - no data source"
+     }
+    }
+   }
+  },
+  {
+   "token": "$OrangeShark",
+   "mint": "DpWKcbRUxgZnbmvxvs5ZG8CPZfETLTXZFRxzvVCJpump",
+   "data_quality": "INVALID",
+   "lifecycle": "MATURE",
+   "age_min": 176.2,
+   "history_min": 25.2,
+   "EARLY_SIGNAL_SCORE": 21,
+   "is_early": false,
+   "fired_count": 1,
+   "coverage_pct": 64,
+   "denominator_weight": 70,
+   "suppressed_by": [
+    "risk 61 > 60"
+   ],
+   "data_breaks": 0,
+   "transition": {
+    "baseline_points": 46,
+    "baseline_median": 1694.48,
+    "current_vol_5m": 208.53,
+    "multiple": 0.12,
+    "transition": false,
+    "rule": "median < $10,000 and now >= 3.0x median"
+   },
+   "holders": {
+    "status": "UNKNOWN",
+    "holder_status": "pending",
+    "reason": "pending",
+    "snapshots": 0
+   },
+   "components": {
+    "VOLUME_ACCELERATION": {
+     "status": "NOT FIRED",
+     "points": 0.0,
+     "points_if_fired": 0.0,
+     "strength": 0.0,
+     "weight": 25,
+     "value": "0.28×",
+     "rule": "ratio>=2.0, now>=$2K, direction ok",
+     "raw": {
+      "now": 208.53,
+      "before_5m": 757.35,
+      "ratio": 0.275,
+      "buy_share_now": 0.714,
+      "mc_growth_5m": 3.49,
+      "direction_ok": true
+     }
+    },
+    "HOLDER_ACCELERATION": {
+     "status": "UNKNOWN",
+     "source": "Helius DAS snapshots",
+     "reason": "Helius connected, token not holder-checked yet",
+     "raw": {
+      "missing": "Helius connected, token not holder-checked yet"
+     }
+    },
+    "BUY_PRESSURE": {
+     "status": "FIRED",
+     "points": 21.4,
+     "points_if_fired": 21.4,
+     "strength": 1.0,
+     "weight": 15,
+     "value": "38% → 71%",
+     "rule": "buy share +>=10pp and >=55%",
+     "raw": {
+      "buys": 5,
+      "sells": 2,
+      "buy_share_now": 0.714,
+      "buy_share_5m_ago": 0.385,
+      "delta_pp": 33.0
+     }
+    },
+    "LIQUIDITY_GROWTH": {
+     "status": "UNKNOWN",
+     "source": "snapshots (DexScreener)",
+     "reason": "liquidity UNKNOWN (failed validation)",
+     "raw": {
+      "now": null,
+      "before_10m": 2263.56966730624,
+      "missing": "liquidity UNKNOWN (failed validation)"
+     }
+    },
+    "TRANSACTION_ACCELERATION": {
+     "status": "NOT FIRED",
+     "points": 0.0,
+     "points_if_fired": 0.0,
+     "strength": 0.0,
+     "weight": 15,
+     "value": "0.54×",
+     "rule": "ratio>=1.8, now>=15, direction ok",
+     "raw": {
+      "now": 7,
+      "before_5m": 13,
+      "ratio": 0.538,
+      "buy_share_now": 0.714,
+      "mc_growth_5m": 3.49,
+      "direction_ok": true
+     }
+    },
+    "MC_ACCELERATION": {
+     "status": "NOT FIRED",
+     "points": 0.0,
+     "points_if_fired": 0.0,
+     "strength": 0.0,
+     "weight": 15,
+     "value": "-7.3% → +3.5%",
+     "rule": "growth_last_5m>=15% and > growth_prev_5m",
+     "raw": {
+      "mc_now": 8536.97,
+      "mc_5m_ago": 8249.03,
+      "mc_10m_ago": 8903.0,
+      "growth_last_5m": 3.49,
+      "growth_prev_5m": -7.35
+     }
+    },
+    "SMART_MONEY": {
+     "status": "UNKNOWN",
+     "source": "—",
+     "reason": "module not implemented - no data source",
+     "raw": {
+      "missing": "module not implemented - no data source"
+     }
+    },
+    "WHALE": {
+     "status": "UNKNOWN",
+     "source": "holder snapshots",
+     "reason": "Helius connected, token not holder-checked yet",
+     "raw": {
+      "missing": "Helius connected, token not holder-checked yet"
+     }
+    },
+    "SOCIAL_ACCELERATION": {
+     "status": "UNKNOWN",
+     "source": "—",
+     "reason": "module not implemented - no data source",
+     "raw": {
+      "missing": "module not implemented - no data source"
+     }
+    },
+    "NARRATIVE": {
+     "status": "UNKNOWN",
+     "source": "—",
+     "reason": "module not implemented - no data source",
+     "raw": {
+      "missing": "module not implemented - no data source"
+     }
+    }
+   }
+  },
+  {
+   "token": "$PERPED",
+   "mint": "9HAJX5QCka4Yrgjz7eaJQEhjNuL4N76fQ1VJPFApump",
+   "data_quality": "INVALID",
+   "lifecycle": "MATURE",
+   "age_min": 80.7,
+   "history_min": 22.6,
+   "EARLY_SIGNAL_SCORE": 21,
+   "is_early": false,
+   "fired_count": 1,
+   "coverage_pct": 64,
+   "denominator_weight": 70,
+   "suppressed_by": [],
+   "data_breaks": 0,
+   "transition": {
+    "baseline_points": 38,
+    "baseline_median": 1304.275,
+    "current_vol_5m": 144.18,
+    "multiple": 0.11,
+    "transition": false,
+    "rule": "median < $10,000 and now >= 3.0x median"
+   },
+   "holders": {
+    "status": "UNKNOWN",
+    "holder_status": "pending",
+    "reason": "pending",
+    "snapshots": 0
+   },
+   "components": {
+    "VOLUME_ACCELERATION": {
+     "status": "NOT FIRED",
+     "points": 0.0,
+     "points_if_fired": 0.0,
+     "strength": 0.0,
+     "weight": 25,
+     "value": "0.71×",
+     "rule": "ratio>=2.0, now>=$2K, direction ok",
+     "raw": {
+      "now": 144.18,
+      "before_5m": 201.94,
+      "ratio": 0.714,
+      "buy_share_now": 0.667,
+      "mc_growth_5m": 3.33,
+      "direction_ok": true
+     }
+    },
+    "HOLDER_ACCELERATION": {
+     "status": "UNKNOWN",
+     "source": "Helius DAS snapshots",
+     "reason": "Helius connected, token not holder-checked yet",
+     "raw": {
+      "missing": "Helius connected, token not holder-checked yet"
+     }
+    },
+    "BUY_PRESSURE": {
+     "status": "FIRED",
+     "points": 21.4,
+     "points_if_fired": 21.4,
+     "strength": 1.0,
+     "weight": 15,
+     "value": "14% → 67%",
+     "rule": "buy share +>=10pp and >=55%",
+     "raw": {
+      "buys": 4,
+      "sells": 2,
+      "buy_share_now": 0.667,
+      "buy_share_5m_ago": 0.143,
+      "delta_pp": 52.4
+     }
+    },
+    "LIQUIDITY_GROWTH": {
+     "status": "UNKNOWN",
+     "source": "snapshots (DexScreener)",
+     "reason": "liquidity UNKNOWN (failed validation)",
+     "raw": {
+      "now": null,
+      "before_10m": null,
+      "missing": "liquidity UNKNOWN (failed validation)"
+     }
+    },
+    "TRANSACTION_ACCELERATION": {
+     "status": "NOT FIRED",
+     "points": 0.0,
+     "points_if_fired": 0.0,
+     "strength": 0.0,
+     "weight": 15,
+     "value": "0.86×",
+     "rule": "ratio>=1.8, now>=15, direction ok",
+     "raw": {
+      "now": 6,
+      "before_5m": 7,
+      "ratio": 0.857,
+      "buy_share_now": 0.667,
+      "mc_growth_5m": 3.33,
+      "direction_ok": true
+     }
+    },
+    "MC_ACCELERATION": {
+     "status": "NOT FIRED",
+     "points": 0.0,
+     "points_if_fired": 0.0,
+     "strength": 0.0,
+     "weight": 15,
+     "value": "-5.6% → +3.3%",
+     "rule": "growth_last_5m>=15% and > growth_prev_5m",
+     "raw": {
+      "mc_now": 12002.81,
+      "mc_5m_ago": 11615.79,
+      "mc_10m_ago": 12309.78,
+      "growth_last_5m": 3.33,
+      "growth_prev_5m": -5.64
+     }
+    },
+    "SMART_MONEY": {
+     "status": "UNKNOWN",
+     "source": "—",
+     "reason": "module not implemented - no data source",
+     "raw": {
+      "missing": "module not implemented - no data source"
+     }
+    },
+    "WHALE": {
+     "status": "UNKNOWN",
+     "source": "holder snapshots",
+     "reason": "Helius connected, token not holder-checked yet",
+     "raw": {
+      "missing": "Helius connected, token not holder-checked yet"
+     }
+    },
+    "SOCIAL_ACCELERATION": {
+     "status": "UNKNOWN",
+     "source": "—",
+     "reason": "module not implemented - no data source",
+     "raw": {
+      "missing": "module not implemented - no data source"
+     }
+    },
+    "NARRATIVE": {
+     "status": "UNKNOWN",
+     "source": "—",
+     "reason": "module not implemented - no data source",
+     "raw": {
+      "missing": "module not implemented - no data source"
+     }
+    }
+   }
+  },
+  {
+   "token": "$POND",
+   "mint": "84D3VopU3g5qo7jUwzQK4P4BnVPQWr2MzeaRCFkHpump",
+   "data_quality": "VALID",
+   "lifecycle": "DISTRIBUTION",
+   "age_min": 50.0,
+   "history_min": 29.9,
+   "EARLY_SIGNAL_SCORE": 16,
+   "is_early": false,
+   "fired_count": 2,
+   "coverage_pct": 100,
+   "denominator_weight": 110,
+   "suppressed_by": [
+    "rug risk: liquidity_shock"
+   ],
+   "data_breaks": 0,
+   "transition": {
+    "baseline_points": 60,
+    "baseline_median": 50360.35,
+    "current_vol_5m": 73876.13,
+    "multiple": 1.47,
+    "transition": false,
+    "rule": "median < $10,000 and now >= 3.0x median"
+   },
+   "holders": {
+    "status": "OK",
+    "holders": 878,
+    "top10_pct": 23.51,
+    "top20_pct": 33.95,
+    "source": "helius_das",
+    "snapshots": 8,
+    "growth_5m_pct": -7.08994708994709,
+    "growth_prev_5m_pct": 0.6389776357827476,
+    "holder_quality": "UNKNOWN",
+    "churn_pct": 16.666666666666668,
+    "whale_state": "DISTRIBUTION",
+    "whale_count": 16,
+    "whale_pct": 30.18,
+    "whale_delta_pct": -7.951
+   },
+   "components": {
+    "VOLUME_ACCELERATION": {
+     "status": "FIRED",
+     "points": 10.8,
+     "points_if_fired": 10.8,
+     "strength": 0.475,
+     "weight": 25,
+     "value": "3.16×",
+     "rule": "ratio>=2.0, now>=$2K, direction ok",
+     "raw": {
+      "now": 73876.13,
+      "before_5m": 23352.62,
+      "ratio": 3.164,
+      "buy_share_now": 0.576,
+      "mc_growth_5m": -44.03,
+      "direction_ok": true
+     }
+    },
+    "HOLDER_ACCELERATION": {
+     "status": "NOT FIRED",
+     "points": 0.0,
+     "points_if_fired": 0.0,
+     "strength": 0.0,
+     "weight": 20,
+     "value": "+0.6% → -7.1%",
+     "rule": "growth>=5%, > previous 5m, >= +10 holders, >= 50 holders",
+     "raw": {
+      "now": 878,
+      "abs_increase_5m": -67,
+      "growth_last_5m": -7.09,
+      "growth_prev_5m": 0.64
+     }
+    },
+    "BUY_PRESSURE": {
+     "status": "NOT FIRED",
+     "points": 0.0,
+     "points_if_fired": 0.0,
+     "strength": 0.0,
+     "weight": 15,
+     "value": "63% → 58%",
+     "rule": "buy share +>=10pp and >=55%",
+     "raw": {
+      "buys": 598,
+      "sells": 441,
+      "buy_share_now": 0.576,
+      "buy_share_5m_ago": 0.633,
+      "delta_pp": -5.7
+     }
+    },
+    "LIQUIDITY_GROWTH": {
+     "status": "NOT FIRED",
+     "points": 0.0,
+     "points_if_fired": 0.0,
+     "strength": 0.0,
+     "weight": 10,
+     "value": "-32.0%",
+     "rule": "change>=+10% same pair",
+     "raw": {
+      "now": 25062.64,
+      "before_10m": 36875.25,
+      "change_pct": -32.03,
+      "source_now": "dexscreener_amm"
+     }
+    },
+    "TRANSACTION_ACCELERATION": {
+     "status": "FIRED",
+     "points": 5.5,
+     "points_if_fired": 5.5,
+     "strength": 0.401,
+     "weight": 15,
+     "value": "2.38×",
+     "rule": "ratio>=1.8, now>=15, direction ok",
+     "raw": {
+      "now": 1039,
+      "before_5m": 436,
+      "ratio": 2.383,
+      "buy_share_now": 0.576,
+      "mc_growth_5m": -44.03,
+      "direction_ok": true
+     }
+    },
+    "MC_ACCELERATION": {
+     "status": "NOT FIRED",
+     "points": 0.0,
+     "points_if_fired": 0.0,
+     "strength": 0.0,
+     "weight": 15,
+     "value": "-15.6% → -44.0%",
+     "rule": "growth_last_5m>=15% and > growth_prev_5m",
+     "raw": {
+      "mc_now": 79347.0,
+      "mc_5m_ago": 141774.0,
+      "mc_10m_ago": 167929.0,
+      "growth_last_5m": -44.03,
+      "growth_prev_5m": -15.58
+     }
+    },
+    "SMART_MONEY": {
+     "status": "UNKNOWN",
+     "source": "—",
+     "reason": "module not implemented - no data source",
+     "raw": {
+      "missing": "module not implemented - no data source"
+     }
+    },
+    "WHALE": {
+     "status": "NOT FIRED",
+     "points": 0.0,
+     "points_if_fired": 0.0,
+     "strength": 0.0,
+     "weight": 10,
+     "value": "-7.95% supply",
+     "rule": "ACCUMULATION, >=50 holders, >= +10 holders, not suspicious",
+     "raw": {
+      "state": "DISTRIBUTION",
+      "delta_supply_pct": -7.951,
+      "holders": 878,
+      "holder_increase": -47
+     }
+    },
+    "SOCIAL_ACCELERATION": {
+     "status": "UNKNOWN",
+     "source": "—",
+     "reason": "module not implemented - no data source",
+     "raw": {
+      "missing": "module not implemented - no data source"
+     }
+    },
+    "NARRATIVE": {
+     "status": "UNKNOWN",
+     "source": "—",
+     "reason": "module not implemented - no data source",
+     "raw": {
+      "missing": "module not implemented - no data source"
+     }
+    }
+   }
+  },
+  {
+   "token": "$BULL",
+   "mint": "12aG5N52PF66xq1WMGWWAg7ENeiHaa1f1ZkDeSoPpump",
+   "data_quality": "VALID",
+   "lifecycle": "EARLY",
+   "age_min": 44.1,
+   "history_min": 29.5,
+   "EARLY_SIGNAL_SCORE": 12,
+   "is_early": false,
+   "fired_count": 1,
+   "coverage_pct": 100,
+   "denominator_weight": 110,
+   "suppressed_by": [],
+   "data_breaks": 0,
+   "transition": {
+    "baseline_points": 59,
+    "baseline_median": 2458.11,
+    "current_vol_5m": 422.09,
+    "multiple": 0.17,
+    "transition": false,
+    "rule": "median < $10,000 and now >= 3.0x median"
+   },
+   "holders": {
+    "status": "OK",
+    "holders": 144,
+    "top10_pct": 16.42,
+    "top20_pct": 27.22,
+    "source": "helius_das",
+    "snapshots": 8,
+    "growth_5m_pct": 4.3478260869565215,
+    "growth_prev_5m_pct": 2.985074626865672,
+    "holder_quality": "ORGANIC",
+    "churn_pct": 1.4598540145985401,
+    "whale_state": "NEUTRAL",
+    "whale_count": 26,
+    "whale_pct": 33.41,
+    "whale_delta_pct": 0.045
+   },
+   "components": {
+    "VOLUME_ACCELERATION": {
+     "status": "NOT FIRED",
+     "points": 0.0,
+     "points_if_fired": 10.2,
+     "strength": 0.447,
+     "weight": 25,
+     "value": "3.06×",
+     "rule": "ratio>=2.0, now>=$2K, direction ok",
+     "raw": {
+      "now": 422.09,
+      "before_5m": 137.74,
+      "ratio": 3.064,
+      "buy_share_now": 0.556,
+      "mc_growth_5m": -2.35,
+      "direction_ok": true
+     }
+    },
+    "HOLDER_ACCELERATION": {
+     "status": "NOT FIRED",
+     "points": 0.0,
+     "points_if_fired": 1.4,
+     "strength": 0.079,
+     "weight": 20,
+     "value": "+3.0% → +4.3%",
+     "rule": "growth>=5%, > previous 5m, >= +10 holders, >= 50 holders",
+     "raw": {
+      "now": 144,
+      "abs_increase_5m": 6,
+      "growth_last_5m": 4.35,
+      "growth_prev_5m": 2.99
+     }
+    },
+    "BUY_PRESSURE": {
+     "status": "NOT FIRED",
+     "points": 0.0,
+     "points_if_fired": 0.0,
+     "strength": 0.0,
+     "weight": 15,
+     "value": "100% → 56%",
+     "rule": "buy share +>=10pp and >=55%",
+     "raw": {
+      "buys": 10,
+      "sells": 8,
+      "buy_share_now": 0.556,
+      "buy_share_5m_ago": 1.0,
+      "delta_pp": -44.4
+     }
+    },
+    "LIQUIDITY_GROWTH": {
+     "status": "NOT FIRED",
+     "points": 0.0,
+     "points_if_fired": 0.0,
+     "strength": 0.0,
+     "weight": 10,
+     "value": "+0.2%",
+     "rule": "change>=+10% same pair",
+     "raw": {
+      "now": 6536.3376834855,
+      "before_10m": 6525.05594298336,
+      "change_pct": 0.17,
+      "source_now": "pumpfun_curve"
+     }
+    },
+    "TRANSACTION_ACCELERATION": {
+     "status": "FIRED",
+     "points": 11.6,
+     "points_if_fired": 11.6,
+     "strength": 0.852,
+     "weight": 15,
+     "value": "3.60×",
+     "rule": "ratio>=1.8, now>=15, direction ok",
+     "raw": {
+      "now": 18,
+      "before_5m": 5,
+      "ratio": 3.6,
+      "buy_share_now": 0.556,
+      "mc_growth_5m": -2.35,
+      "direction_ok": true
+     }
+    },
+    "MC_ACCELERATION": {
+     "status": "NOT FIRED",
+     "points": 0.0,
+     "points_if_fired": 0.0,
+     "strength": 0.0,
+     "weight": 15,
+     "value": "+2.8% → -2.3%",
+     "rule": "growth_last_5m>=15% and > growth_prev_5m",
+     "raw": {
+      "mc_now": 26676.31,
+      "mc_5m_ago": 27316.93,
+      "mc_10m_ago": 26582.93,
+      "growth_last_5m": -2.35,
+      "growth_prev_5m": 2.76
+     }
+    },
+    "SMART_MONEY": {
+     "status": "UNKNOWN",
+     "source": "—",
+     "reason": "module not implemented - no data source",
+     "raw": {
+      "missing": "module not implemented - no data source"
+     }
+    },
+    "WHALE": {
+     "status": "NOT FIRED",
+     "points": 0.0,
+     "points_if_fired": 0.0,
+     "strength": 0.0,
+     "weight": 10,
+     "value": "+0.04% supply",
+     "rule": "ACCUMULATION, >=50 holders, >= +10 holders, not suspicious",
+     "raw": {
+      "state": "NEUTRAL",
+      "delta_supply_pct": 0.045,
+      "holders": 144,
+      "holder_increase": 6
+     }
+    },
+    "SOCIAL_ACCELERATION": {
+     "status": "UNKNOWN",
+     "source": "—",
+     "reason": "module not implemented - no data source",
+     "raw": {
+      "missing": "module not implemented - no data source"
+     }
+    },
+    "NARRATIVE": {
+     "status": "UNKNOWN",
+     "source": "—",
+     "reason": "module not implemented - no data source",
+     "raw": {
+      "missing": "module not implemented - no data source"
+     }
+    }
+   }
+  },
+  {
+   "token": "$PROPANA",
+   "mint": "HJnaT5oeSH4L8TGJPLLBYQ1zzmpLbYuMAbTbpiBkpump",
+   "data_quality": "VALID",
+   "lifecycle": "MATURE",
+   "age_min": 184.7,
+   "history_min": 29.2,
+   "EARLY_SIGNAL_SCORE": 7,
+   "is_early": false,
+   "fired_count": 1,
+   "coverage_pct": 100,
+   "denominator_weight": 110,
+   "suppressed_by": [],
+   "data_breaks": 0,
+   "transition": {
+    "baseline_points": 58,
+    "baseline_median": 9984.56,
+    "current_vol_5m": 3756.09,
+    "multiple": 0.38,
+    "transition": false,
+    "rule": "median < $10,000 and now >= 3.0x median"
+   },
+   "holders": {
+    "status": "OK",
+    "holders": 378,
+    "top10_pct": 21.33,
+    "top20_pct": 31.77,
+    "source": "helius_das",
+    "snapshots": 8,
+    "growth_5m_pct": 2.4390243902439024,
+    "growth_prev_5m_pct": -3.90625,
+    "holder_quality": "ORGANIC",
+    "churn_pct": 2.1621621621621623,
+    "whale_state": "NEUTRAL",
+    "whale_count": 18,
+    "whale_pct": 30.08,
+    "whale_delta_pct": -0.667
+   },
+   "components": {
+    "VOLUME_ACCELERATION": {
+     "status": "NOT FIRED",
+     "points": 0.0,
+     "points_if_fired": 0.0,
+     "strength": 0.0,
+     "weight": 25,
+     "value": "0.73×",
+     "rule": "ratio>=2.0, now>=$2K, direction ok",
+     "raw": {
+      "now": 3756.09,
+      "before_5m": 5127.73,
+      "ratio": 0.733,
+      "buy_share_now": 0.5,
+      "mc_growth_5m": 11.68,
+      "direction_ok": true
+     }
+    },
+    "HOLDER_ACCELERATION": {
+     "status": "NOT FIRED",
+     "points": 0.0,
+     "points_if_fired": 0.0,
+     "strength": 0.0,
+     "weight": 20,
+     "value": "-3.9% → +2.4%",
+     "rule": "growth>=5%, > previous 5m, >= +10 holders, >= 50 holders",
+     "raw": {
+      "now": 378,
+      "abs_increase_5m": 9,
+      "growth_last_5m": 2.44,
+      "growth_prev_5m": -3.91
+     }
+    },
+    "BUY_PRESSURE": {
+     "status": "NOT FIRED",
+     "points": 0.0,
+     "points_if_fired": 0.0,
+     "strength": 0.0,
+     "weight": 15,
+     "value": "54% → 50%",
+     "rule": "buy share +>=10pp and >=55%",
+     "raw": {
+      "buys": 39,
+      "sells": 39,
+      "buy_share_now": 0.5,
+      "buy_share_5m_ago": 0.543,
+      "delta_pp": -4.3
+     }
+    },
+    "LIQUIDITY_GROWTH": {
+     "status": "FIRED",
+     "points": 7.0,
+     "points_if_fired": 7.0,
+     "strength": 0.767,
+     "weight": 10,
+     "value": "+39.5%",
+     "rule": "change>=+10% same pair",
+     "raw": {
+      "now": 15045.52,
+      "before_10m": 10784.47,
+      "change_pct": 39.51,
+      "source_now": "dexscreener_amm"
+     }
+    },
+    "TRANSACTION_ACCELERATION": {
+     "status": "NOT FIRED",
+     "points": 0.0,
+     "points_if_fired": 0.0,
+     "strength": 0.0,
+     "weight": 15,
+     "value": "0.74×",
+     "rule": "ratio>=1.8, now>=15, direction ok",
+     "raw": {
+      "now": 78,
+      "before_5m": 105,
+      "ratio": 0.743,
+      "buy_share_now": 0.5,
+      "mc_growth_5m": 11.68,
+      "direction_ok": true
+     }
+    },
+    "MC_ACCELERATION": {
+     "status": "NOT FIRED",
+     "points": 0.0,
+     "points_if_fired": 0.5,
+     "strength": 0.034,
+     "weight": 15,
+     "value": "+58.5% → +11.7%",
+     "rule": "growth_last_5m>=15% and > growth_prev_5m",
+     "raw": {
+      "mc_now": 34910.0,
+      "mc_5m_ago": 31259.0,
+      "mc_10m_ago": 19721.0,
+      "growth_last_5m": 11.68,
+      "growth_prev_5m": 58.51
+     }
+    },
+    "SMART_MONEY": {
+     "status": "UNKNOWN",
+     "source": "—",
+     "reason": "module not implemented - no data source",
+     "raw": {
+      "missing": "module not implemented - no data source"
+     }
+    },
+    "WHALE": {
+     "status": "NOT FIRED",
+     "points": 0.0,
+     "points_if_fired": 0.0,
+     "strength": 0.0,
+     "weight": 10,
+     "value": "-0.67% supply",
+     "rule": "ACCUMULATION, >=50 holders, >= +10 holders, not suspicious",
+     "raw": {
+      "state": "NEUTRAL",
+      "delta_supply_pct": -0.667,
+      "holders": 378,
+      "holder_increase": 7
+     }
+    },
+    "SOCIAL_ACCELERATION": {
+     "status": "UNKNOWN",
+     "source": "—",
+     "reason": "module not implemented - no data source",
+     "raw": {
+      "missing": "module not implemented - no data source"
+     }
+    },
+    "NARRATIVE": {
+     "status": "UNKNOWN",
+     "source": "—",
+     "reason": "module not implemented - no data source",
+     "raw": {
+      "missing": "module not implemented - no data source"
+     }
+    }
+   }
+  },
+  {
+   "token": "$SPATCAT",
+   "mint": "6a1XWrNgSvzq2gyiX8uhHeJh2pVuiRgCZSx3ruDppump",
+   "data_quality": "INVALID",
+   "lifecycle": "EARLY",
+   "age_min": 13.3,
+   "history_min": 12.4,
+   "EARLY_SIGNAL_SCORE": 7,
+   "is_early": false,
+   "fired_count": 1,
+   "coverage_pct": 64,
+   "denominator_weight": 70,
+   "suppressed_by": [],
+   "data_breaks": 0,
+   "transition": {
+    "baseline_points": 8,
+    "baseline_median": 767.65,
+    "current_vol_5m": 245.37,
+    "multiple": 0.32,
+    "transition": false,
+    "rule": "median < $10,000 and now >= 3.0x median"
+   },
+   "holders": {
+    "status": "UNKNOWN",
+    "holder_status": "pending",
+    "reason": "pending",
+    "snapshots": 0
+   },
+   "components": {
+    "VOLUME_ACCELERATION": {
+     "status": "NOT FIRED",
+     "points": 0.0,
+     "points_if_fired": 35.7,
+     "strength": 1.0,
+     "weight": 25,
+     "value": "6.41×",
+     "rule": "ratio>=2.0, now>=$2K, direction ok",
+     "raw": {
+      "now": 245.37,
+      "before_5m": 38.29,
+      "ratio": 6.408,
+      "buy_share_now": 0.571,
+      "mc_growth_5m": 7.48,
+      "direction_ok": true
+     }
+    },
+    "HOLDER_ACCELERATION": {
+     "status": "UNKNOWN",
+     "source": "Helius DAS snapshots",
+     "reason": "Helius connected, token not holder-checked yet",
+     "raw": {
+      "missing": "Helius connected, token not holder-checked yet"
+     }
+    },
+    "BUY_PRESSURE": {
+     "status": "FIRED",
+     "points": 7.2,
+     "points_if_fired": 7.2,
+     "strength": 0.336,
+     "weight": 15,
+     "value": "44% → 57%",
+     "rule": "buy share +>=10pp and >=55%",
+     "raw": {
+      "buys": 8,
+      "sells": 6,
+      "buy_share_now": 0.571,
+      "buy_share_5m_ago": 0.438,
+      "delta_pp": 13.4
+     }
+    },
+    "LIQUIDITY_GROWTH": {
+     "status": "UNKNOWN",
+     "source": "snapshots (DexScreener)",
+     "reason": "liquidity UNKNOWN (failed validation)",
+     "raw": {
+      "now": null,
+      "before_10m": 240.2134824512,
+      "missing": "liquidity UNKNOWN (failed validation)"
+     }
+    },
+    "TRANSACTION_ACCELERATION": {
+     "status": "NOT FIRED",
+     "points": 0.0,
+     "points_if_fired": 0.0,
+     "strength": 0.0,
+     "weight": 15,
+     "value": "0.88×",
+     "rule": "ratio>=1.8, now>=15, direction ok",
+     "raw": {
+      "now": 14,
+      "before_5m": 16,
+      "ratio": 0.875,
+      "buy_share_now": 0.571,
+      "mc_growth_5m": 7.48,
+      "direction_ok": true
+     }
+    },
+    "MC_ACCELERATION": {
+     "status": "NOT FIRED",
+     "points": 0.0,
+     "points_if_fired": 0.0,
+     "strength": 0.0,
+     "weight": 15,
+     "value": "-2.0% → +7.5%",
+     "rule": "growth_last_5m>=15% and > growth_prev_5m",
+     "raw": {
+      "mc_now": 4004.21,
+      "mc_5m_ago": 3725.39,
+      "mc_10m_ago": 3800.26,
+      "growth_last_5m": 7.48,
+      "growth_prev_5m": -1.97
+     }
+    },
+    "SMART_MONEY": {
+     "status": "UNKNOWN",
+     "source": "—",
+     "reason": "module not implemented - no data source",
+     "raw": {
+      "missing": "module not implemented - no data source"
+     }
+    },
+    "WHALE": {
+     "status": "UNKNOWN",
+     "source": "holder snapshots",
+     "reason": "Helius connected, token not holder-checked yet",
+     "raw": {
+      "missing": "Helius connected, token not holder-checked yet"
+     }
+    },
+    "SOCIAL_ACCELERATION": {
+     "status": "UNKNOWN",
+     "source": "—",
+     "reason": "module not implemented - no data source",
+     "raw": {
+      "missing": "module not implemented - no data source"
+     }
+    },
+    "NARRATIVE": {
+     "status": "UNKNOWN",
+     "source": "—",
+     "reason": "module not implemented - no data source",
+     "raw": {
+      "missing": "module not implemented - no data source"
+     }
+    }
+   }
+  },
+  {
+   "token": "$K/acc",
+   "mint": "3JBcBwcZ5psDu4Qy58YBqbMn2Nk4QKzDiqii4gpAwqei",
+   "data_quality": "VALID",
+   "lifecycle": "MATURE",
+   "age_min": 199.6,
+   "history_min": 29.9,
+   "EARLY_SIGNAL_SCORE": 5,
+   "is_early": false,
+   "fired_count": 2,
+   "coverage_pct": 100,
+   "denominator_weight": 110,
+   "suppressed_by": [],
+   "data_breaks": 0,
+   "transition": {
+    "baseline_points": 60,
+    "baseline_median": 2040.1,
+    "current_vol_5m": 2648.27,
+    "multiple": 1.3,
+    "transition": false,
+    "rule": "median < $10,000 and now >= 3.0x median"
+   },
+   "holders": {
+    "status": "OK",
+    "holders": 1015,
+    "top10_pct": 16.67,
+    "top20_pct": 23.86,
+    "source": "helius_das",
+    "snapshots": 8,
+    "growth_5m_pct": -0.0984251968503937,
+    "growth_prev_5m_pct": 0.19723865877712032,
+    "holder_quality": "UNKNOWN",
+    "churn_pct": 1.2820512820512822,
+    "whale_state": "NEUTRAL",
+    "whale_count": 10,
+    "whale_pct": 16.67,
+    "whale_delta_pct": 0.0
+   },
+   "components": {
+    "VOLUME_ACCELERATION": {
+     "status": "NOT FIRED",
+     "points": 0.0,
+     "points_if_fired": 1.5,
+     "strength": 0.066,
+     "weight": 25,
+     "value": "1.73×",
+     "rule": "ratio>=2.0, now>=$2K, direction ok",
+     "raw": {
+      "now": 2648.27,
+      "before_5m": 1530.21,
+      "ratio": 1.731,
+      "buy_share_now": 0.545,
+      "mc_growth_5m": 20.4,
+      "direction_ok": true
+     }
+    },
+    "HOLDER_ACCELERATION": {
+     "status": "NOT FIRED",
+     "points": 0.0,
+     "points_if_fired": 0.0,
+     "strength": 0.0,
+     "weight": 20,
+     "value": "+0.2% → -0.1%",
+     "rule": "growth>=5%, > previous 5m, >= +10 holders, >= 50 holders",
+     "raw": {
+      "now": 1015,
+      "abs_increase_5m": -1,
+      "growth_last_5m": -0.1,
+      "growth_prev_5m": 0.2
+     }
+    },
+    "BUY_PRESSURE": {
+     "status": "NOT FIRED",
+     "points": 0.0,
+     "points_if_fired": 0.0,
+     "strength": 0.0,
+     "weight": 15,
+     "value": "52% → 55%",
+     "rule": "buy share +>=10pp and >=55%",
+     "raw": {
+      "buys": 30,
+      "sells": 25,
+      "buy_share_now": 0.545,
+      "buy_share_5m_ago": 0.522,
+      "delta_pp": 2.4
+     }
+    },
+    "LIQUIDITY_GROWTH": {
+     "status": "FIRED",
+     "points": 2.2,
+     "points_if_fired": 2.2,
+     "strength": 0.24,
+     "weight": 10,
+     "value": "+15.8%",
+     "rule": "change>=+10% same pair",
+     "raw": {
+      "now": 24360.64,
+      "before_10m": 21040.34,
+      "change_pct": 15.78,
+      "source_now": "dexscreener_amm"
+     }
+    },
+    "TRANSACTION_ACCELERATION": {
+     "status": "NOT FIRED",
+     "points": 0.0,
+     "points_if_fired": 0.0,
+     "strength": 0.0,
+     "weight": 15,
+     "value": "1.20×",
+     "rule": "ratio>=1.8, now>=15, direction ok",
+     "raw": {
+      "now": 55,
+      "before_5m": 46,
+      "ratio": 1.196,
+      "buy_share_now": 0.545,
+      "mc_growth_5m": 20.4,
+      "direction_ok": true
+     }
+    },
+    "MC_ACCELERATION": {
+     "status": "FIRED",
+     "points": 2.8,
+     "points_if_fired": 2.8,
+     "strength": 0.208,
+     "weight": 15,
+     "value": "+8.5% → +20.4%",
+     "rule": "growth_last_5m>=15% and > growth_prev_5m",
+     "raw": {
+      "mc_now": 72912.0,
+      "mc_5m_ago": 60558.0,
+      "mc_10m_ago": 55813.0,
+      "growth_last_5m": 20.4,
+      "growth_prev_5m": 8.5
+     }
+    },
+    "SMART_MONEY": {
+     "status": "UNKNOWN",
+     "source": "—",
+     "reason": "module not implemented - no data source",
+     "raw": {
+      "missing": "module not implemented - no data source"
+     }
+    },
+    "WHALE": {
+     "status": "NOT FIRED",
+     "points": 0.0,
+     "points_if_fired": 0.0,
+     "strength": 0.0,
+     "weight": 10,
+     "value": "+0.00% supply",
+     "rule": "ACCUMULATION, >=50 holders, >= +10 holders, not suspicious",
+     "raw": {
+      "state": "NEUTRAL",
+      "delta_supply_pct": 0.0,
+      "holders": 1015,
+      "holder_increase": 0
+     }
+    },
+    "SOCIAL_ACCELERATION": {
+     "status": "UNKNOWN",
+     "source": "—",
+     "reason": "module not implemented - no data source",
+     "raw": {
+      "missing": "module not implemented - no data source"
+     }
+    },
+    "NARRATIVE": {
+     "status": "UNKNOWN",
+     "source": "—",
+     "reason": "module not implemented - no data source",
+     "raw": {
+      "missing": "module not implemented - no data source"
+     }
+    }
+   }
+  },
+  {
+   "token": "$DAWS",
+   "mint": "AnkwZTqaxdbgD1h9bJYCbAg4MVMdW5v7d24fxKpQpump",
+   "data_quality": "VALID",
+   "lifecycle": "MATURE",
+   "age_min": 211.0,
+   "history_min": 21.6,
+   "EARLY_SIGNAL_SCORE": 4,
+   "is_early": false,
+   "fired_count": 1,
+   "coverage_pct": 100,
+   "denominator_weight": 110,
+   "suppressed_by": [],
+   "data_breaks": 0,
+   "transition": {
+    "baseline_points": 35,
+    "baseline_median": 199.79,
+    "current_vol_5m": 404.19,
+    "multiple": 2.02,
+    "transition": false,
+    "rule": "median < $10,000 and now >= 3.0x median"
+   },
+   "holders": {
+    "status": "OK",
+    "holders": 2007,
+    "top10_pct": 0.85,
+    "top20_pct": 1.69,
+    "source": "helius_das",
+    "snapshots": 8,
+    "growth_5m_pct": 0.0,
+    "growth_prev_5m_pct": 0.0,
+    "holder_quality": "UNKNOWN",
+    "churn_pct": 0.0,
+    "whale_state": "NEUTRAL",
+    "whale_count": 0,
+    "whale_pct": 0,
+    "whale_delta_pct": 0
+   },
+   "components": {
+    "VOLUME_ACCELERATION": {
+     "status": "NOT FIRED",
+     "points": 0.0,
+     "points_if_fired": 7.1,
+     "strength": 0.312,
+     "weight": 25,
+     "value": "2.59×",
+     "rule": "ratio>=2.0, now>=$2K, direction ok",
+     "raw": {
+      "now": 404.19,
+      "before_5m": 155.9,
+      "ratio": 2.593,
+      "buy_share_now": 0.708,
+      "mc_growth_5m": 0.36,
+      "direction_ok": true
+     }
+    },
+    "HOLDER_ACCELERATION": {
+     "status": "NOT FIRED",
+     "points": 0.0,
+     "points_if_fired": 0.0,
+     "strength": 0.0,
+     "weight": 20,
+     "value": "+0.0% → +0.0%",
+     "rule": "growth>=5%, > previous 5m, >= +10 holders, >= 50 holders",
+     "raw": {
+      "now": 2007,
+      "abs_increase_5m": 0,
+      "growth_last_5m": 0.0,
+      "growth_prev_5m": 0.0
+     }
+    },
+    "BUY_PRESSURE": {
+     "status": "NOT FIRED",
+     "points": 0.0,
+     "points_if_fired": 0.0,
+     "strength": 0.0,
+     "weight": 15,
+     "value": "73% → 71%",
+     "rule": "buy share +>=10pp and >=55%",
+     "raw": {
+      "buys": 17,
+      "sells": 7,
+      "buy_share_now": 0.708,
+      "buy_share_5m_ago": 0.727,
+      "delta_pp": -1.9
+     }
+    },
+    "LIQUIDITY_GROWTH": {
+     "status": "NOT FIRED",
+     "points": 0.0,
+     "points_if_fired": 0.0,
+     "strength": 0.0,
+     "weight": 10,
+     "value": "+0.8%",
+     "rule": "change>=+10% same pair",
+     "raw": {
+      "now": 138964.46,
+      "before_10m": 137908.17,
+      "change_pct": 0.77,
+      "source_now": "dexscreener_amm"
+     }
+    },
+    "TRANSACTION_ACCELERATION": {
+     "status": "FIRED",
+     "points": 4.5,
+     "points_if_fired": 4.5,
+     "strength": 0.327,
+     "weight": 15,
+     "value": "2.18×",
+     "rule": "ratio>=1.8, now>=15, direction ok",
+     "raw": {
+      "now": 24,
+      "before_5m": 11,
+      "ratio": 2.182,
+      "buy_share_now": 0.708,
+      "mc_growth_5m": 0.36,
+      "direction_ok": true
+     }
+    },
+    "MC_ACCELERATION": {
+     "status": "NOT FIRED",
+     "points": 0.0,
+     "points_if_fired": 0.0,
+     "strength": 0.0,
+     "weight": 15,
+     "value": "+1.1% → +0.4%",
+     "rule": "growth_last_5m>=15% and > growth_prev_5m",
+     "raw": {
+      "mc_now": 2362100.0,
+      "mc_5m_ago": 2353554.0,
+      "mc_10m_ago": 2327051.0,
+      "growth_last_5m": 0.36,
+      "growth_prev_5m": 1.14
+     }
+    },
+    "SMART_MONEY": {
+     "status": "UNKNOWN",
+     "source": "—",
+     "reason": "module not implemented - no data source",
+     "raw": {
+      "missing": "module not implemented - no data source"
+     }
+    },
+    "WHALE": {
+     "status": "NOT FIRED",
+     "points": 0.0,
+     "points_if_fired": 0.0,
+     "strength": 0.0,
+     "weight": 10,
+     "value": "+0.00% supply",
+     "rule": "ACCUMULATION, >=50 holders, >= +10 holders, not suspicious",
+     "raw": {
+      "state": "NEUTRAL",
+      "delta_supply_pct": 0,
+      "holders": 2007,
+      "holder_increase": 0
+     }
+    },
+    "SOCIAL_ACCELERATION": {
+     "status": "UNKNOWN",
+     "source": "—",
+     "reason": "module not implemented - no data source",
+     "raw": {
+      "missing": "module not implemented - no data source"
+     }
+    },
+    "NARRATIVE": {
+     "status": "UNKNOWN",
+     "source": "—",
+     "reason": "module not implemented - no data source",
+     "raw": {
+      "missing": "module not implemented - no data source"
+     }
+    }
+   }
+  },
+  {
+   "token": "$HODL",
+   "mint": "5BzMG8pmZyjPBFkaPSYZK2qRgTsViMqMWV9SmyDQpump",
+   "data_quality": "VALID",
+   "lifecycle": "MATURE",
+   "age_min": 103.8,
+   "history_min": 29.2,
+   "EARLY_SIGNAL_SCORE": 3,
+   "is_early": false,
+   "fired_count": 1,
+   "coverage_pct": 100,
+   "denominator_weight": 110,
+   "suppressed_by": [],
+   "data_breaks": 0,
+   "transition": {
+    "baseline_points": 58,
+    "baseline_median": 6272.56,
+    "current_vol_5m": 5936.11,
+    "multiple": 0.95,
+    "transition": false,
+    "rule": "median < $10,000 and now >= 3.0x median"
+   },
+   "holders": {
+    "status": "OK",
+    "holders": 2080,
+    "top10_pct": 13.94,
+    "top20_pct": 26.18,
+    "source": "helius_das",
+    "snapshots": 8,
+    "growth_5m_pct": -0.14402304368698993,
+    "growth_prev_5m_pct": 0.09610764055742431,
+    "holder_quality": "UNKNOWN",
+    "churn_pct": 0.4320691310609698,
+    "whale_state": "NEUTRAL",
+    "whale_count": 31,
+    "whale_pct": 37.76,
+    "whale_delta_pct": 0.593
+   },
+   "components": {
+    "VOLUME_ACCELERATION": {
+     "status": "NOT FIRED",
+     "points": 0.0,
+     "points_if_fired": 0.0,
+     "strength": 0.0,
+     "weight": 25,
+     "value": "1.18×",
+     "rule": "ratio>=2.0, now>=$2K, direction ok",
+     "raw": {
+      "now": 5936.11,
+      "before_5m": 5033.12,
+      "ratio": 1.179,
+      "buy_share_now": 0.601,
+      "mc_growth_5m": 14.52,
+      "direction_ok": true
+     }
+    },
+    "HOLDER_ACCELERATION": {
+     "status": "NOT FIRED",
+     "points": 0.0,
+     "points_if_fired": 0.0,
+     "strength": 0.0,
+     "weight": 20,
+     "value": "+0.1% → -0.1%",
+     "rule": "growth>=5%, > previous 5m, >= +10 holders, >= 50 holders",
+     "raw": {
+      "now": 2080,
+      "abs_increase_5m": -3,
+      "growth_last_5m": -0.14,
+      "growth_prev_5m": 0.1
+     }
+    },
+    "BUY_PRESSURE": {
+     "status": "NOT FIRED",
+     "points": 0.0,
+     "points_if_fired": 0.0,
+     "strength": 0.0,
+     "weight": 15,
+     "value": "61% → 60%",
+     "rule": "buy share +>=10pp and >=55%",
+     "raw": {
+      "buys": 86,
+      "sells": 57,
+      "buy_share_now": 0.601,
+      "buy_share_5m_ago": 0.606,
+      "delta_pp": -0.5
+     }
+    },
+    "LIQUIDITY_GROWTH": {
+     "status": "FIRED",
+     "points": 2.7,
+     "points_if_fired": 2.7,
+     "strength": 0.296,
+     "weight": 10,
+     "value": "+18.3%",
+     "rule": "change>=+10% same pair",
+     "raw": {
+      "now": 27863.05,
+      "before_10m": 23548.39,
+      "change_pct": 18.32,
+      "source_now": "dexscreener_amm"
+     }
+    },
+    "TRANSACTION_ACCELERATION": {
+     "status": "NOT FIRED",
+     "points": 0.0,
+     "points_if_fired": 0.0,
+     "strength": 0.0,
+     "weight": 15,
+     "value": "1.08×",
+     "rule": "ratio>=1.8, now>=15, direction ok",
+     "raw": {
+      "now": 143,
+      "before_5m": 132,
+      "ratio": 1.083,
+      "buy_share_now": 0.601,
+      "mc_growth_5m": 14.52,
+      "direction_ok": true
+     }
+    },
+    "MC_ACCELERATION": {
+     "status": "NOT FIRED",
+     "points": 0.0,
+     "points_if_fired": 1.2,
+     "strength": 0.09,
+     "weight": 15,
+     "value": "+18.9% → +14.5%",
+     "rule": "growth_last_5m>=15% and > growth_prev_5m",
+     "raw": {
+      "mc_now": 97483.0,
+      "mc_5m_ago": 85122.0,
+      "mc_10m_ago": 71573.0,
+      "growth_last_5m": 14.52,
+      "growth_prev_5m": 18.93
+     }
+    },
+    "SMART_MONEY": {
+     "status": "UNKNOWN",
+     "source": "—",
+     "reason": "module not implemented - no data source",
+     "raw": {
+      "missing": "module not implemented - no data source"
+     }
+    },
+    "WHALE": {
+     "status": "NOT FIRED",
+     "points": 0.0,
+     "points_if_fired": 0.0,
+     "strength": 0.0,
+     "weight": 10,
+     "value": "+0.59% supply",
+     "rule": "ACCUMULATION, >=50 holders, >= +10 holders, not suspicious",
+     "raw": {
+      "state": "NEUTRAL",
+      "delta_supply_pct": 0.593,
+      "holders": 2080,
+      "holder_increase": -4
+     }
+    },
+    "SOCIAL_ACCELERATION": {
+     "status": "UNKNOWN",
+     "source": "—",
+     "reason": "module not implemented - no data source",
+     "raw": {
+      "missing": "module not implemented - no data source"
+     }
+    },
+    "NARRATIVE": {
+     "status": "UNKNOWN",
+     "source": "—",
+     "reason": "module not implemented - no data source",
+     "raw": {
+      "missing": "module not implemented - no data source"
+     }
+    }
+   }
+  },
+  {
+   "token": "$dds",
+   "mint": "DYqwtXYBdoH8LV4GB2eUdaaof679fVA6AxnYJdtkpump",
+   "data_quality": "INVALID",
+   "lifecycle": "EARLY",
+   "age_min": 30.3,
+   "history_min": 29.2,
+   "EARLY_SIGNAL_SCORE": 0,
+   "is_early": false,
+   "fired_count": 0,
+   "coverage_pct": 14,
+   "denominator_weight": 15,
+   "suppressed_by": [],
+   "data_breaks": 0,
+   "transition": {
+    "baseline_points": 33,
+    "baseline_median": 130.62,
+    "current_vol_5m": null,
+    "multiple": null,
+    "transition": false,
+    "rule": "median < $10,000 and now >= 3.0x median"
+   },
+   "holders": {
+    "status": "UNKNOWN",
+    "holder_status": "pending",
+    "reason": "pending",
+    "snapshots": 0
+   },
+   "components": {
+    "VOLUME_ACCELERATION": {
+     "status": "UNKNOWN",
+     "source": "snapshots (DexScreener)",
+     "reason": "volume missing/zero 5m ago",
+     "raw": {
+      "now": null,
+      "before_5m": null,
+      "missing": "volume missing/zero 5m ago"
+     }
+    },
+    "HOLDER_ACCELERATION": {
+     "status": "UNKNOWN",
+     "source": "Helius DAS snapshots",
+     "reason": "Helius connected, token not holder-checked yet",
+     "raw": {
+      "missing": "Helius connected, token not holder-checked yet"
+     }
+    },
+    "BUY_PRESSURE": {
+     "status": "UNKNOWN",
+     "source": "snapshots (DexScreener)",
+     "reason": "no transactions now or 5m ago",
+     "raw": {
+      "buys": 0,
+      "sells": 0,
+      "missing": "no transactions now or 5m ago"
+     }
+    },
+    "LIQUIDITY_GROWTH": {
+     "status": "UNKNOWN",
+     "source": "snapshots (DexScreener)",
+     "reason": "liquidity UNKNOWN (failed validation)",
+     "raw": {
+      "now": null,
+      "before_10m": null,
+      "missing": "liquidity UNKNOWN (failed validation)"
+     }
+    },
+    "TRANSACTION_ACCELERATION": {
+     "status": "UNKNOWN",
+     "source": "snapshots (DexScreener)",
+     "reason": "txn missing/zero 5m ago",
+     "raw": {
+      "now": 0,
+      "before_5m": 0,
+      "missing": "txn missing/zero 5m ago"
+     }
+    },
+    "MC_ACCELERATION": {
+     "status": "NOT FIRED",
+     "points": 0.0,
+     "points_if_fired": 0.0,
+     "strength": 0.0,
+     "weight": 15,
+     "value": "+0.0% → +0.0%",
+     "rule": "growth_last_5m>=15% and > growth_prev_5m",
+     "raw": {
+      "mc_now": 5451.4,
+      "mc_5m_ago": 5451.4,
+      "mc_10m_ago": 5451.4,
+      "growth_last_5m": 0.0,
+      "growth_prev_5m": 0.0
+     }
+    },
+    "SMART_MONEY": {
+     "status": "UNKNOWN",
+     "source": "—",
+     "reason": "module not implemented - no data source",
+     "raw": {
+      "missing": "module not implemented - no data source"
+     }
+    },
+    "WHALE": {
+     "status": "UNKNOWN",
+     "source": "holder snapshots",
+     "reason": "Helius connected, token not holder-checked yet",
+     "raw": {
+      "missing": "Helius connected, token not holder-checked yet"
+     }
+    },
+    "SOCIAL_ACCELERATION": {
+     "status": "UNKNOWN",
+     "source": "—",
+     "reason": "module not implemented - no data source",
+     "raw": {
+      "missing": "module not implemented - no data source"
+     }
+    },
+    "NARRATIVE": {
+     "status": "UNKNOWN",
+     "source": "—",
+     "reason": "module not implemented - no data source",
+     "raw": {
+      "missing": "module not implemented - no data source"
+     }
+    }
+   }
+  },
+  {
+   "token": "$DICKNADO",
+   "mint": "CN5Md2ZKwy4k2mT2jtrLKJa3oWo74jYg8a4hdw9opump",
+   "data_quality": "INVALID",
+   "lifecycle": "EARLY",
+   "age_min": 30.4,
+   "history_min": 29.2,
+   "EARLY_SIGNAL_SCORE": 0,
+   "is_early": false,
+   "fired_count": 0,
+   "coverage_pct": 27,
+   "denominator_weight": 30,
+   "suppressed_by": [],
+   "data_breaks": 0,
+   "transition": {
+    "baseline_points": 16,
+    "baseline_median": 583.9,
+    "current_vol_5m": null,
+    "multiple": null,
+    "transition": false,
+    "rule": "median < $10,000 and now >= 3.0x median"
+   },
+   "holders": {
+    "status": "UNKNOWN",
+    "holder_status": "pending",
+    "reason": "pending",
+    "snapshots": 0
+   },
+   "components": {
+    "VOLUME_ACCELERATION": {
+     "status": "UNKNOWN",
+     "source": "snapshots (DexScreener)",
+     "reason": "volume missing/zero 5m ago",
+     "raw": {
+      "now": null,
+      "before_5m": 333.76,
+      "missing": "volume missing/zero 5m ago"
+     }
+    },
+    "HOLDER_ACCELERATION": {
+     "status": "UNKNOWN",
+     "source": "Helius DAS snapshots",
+     "reason": "Helius connected, token not holder-checked yet",
+     "raw": {
+      "missing": "Helius connected, token not holder-checked yet"
+     }
+    },
+    "BUY_PRESSURE": {
+     "status": "UNKNOWN",
+     "source": "snapshots (DexScreener)",
+     "reason": "no transactions now or 5m ago",
+     "raw": {
+      "buys": 0,
+      "sells": 0,
+      "missing": "no transactions now or 5m ago"
+     }
+    },
+    "LIQUIDITY_GROWTH": {
+     "status": "UNKNOWN",
+     "source": "snapshots (DexScreener)",
+     "reason": "liquidity UNKNOWN (failed validation)",
+     "raw": {
+      "now": null,
+      "before_10m": null,
+      "missing": "liquidity UNKNOWN (failed validation)"
+     }
+    },
+    "TRANSACTION_ACCELERATION": {
+     "status": "NOT FIRED",
+     "points": 0.0,
+     "points_if_fired": 0.0,
+     "strength": 0.0,
+     "weight": 15,
+     "value": "0.00×",
+     "rule": "ratio>=1.8, now>=15, direction ok",
+     "raw": {
+      "now": 0,
+      "before_5m": 4,
+      "ratio": 0.0,
+      "buy_share_now": null,
+      "mc_growth_5m": 0.0,
+      "direction_ok": true
+     }
+    },
+    "MC_ACCELERATION": {
+     "status": "NOT FIRED",
+     "points": 0.0,
+     "points_if_fired": 0.0,
+     "strength": 0.0,
+     "weight": 15,
+     "value": "+0.0% → +0.0%",
+     "rule": "growth_last_5m>=15% and > growth_prev_5m",
+     "raw": {
+      "mc_now": 12840.17,
+      "mc_5m_ago": 12840.17,
+      "mc_10m_ago": 12836.94,
+      "growth_last_5m": 0.0,
+      "growth_prev_5m": 0.03
+     }
+    },
+    "SMART_MONEY": {
+     "status": "UNKNOWN",
+     "source": "—",
+     "reason": "module not implemented - no data source",
+     "raw": {
+      "missing": "module not implemented - no data source"
+     }
+    },
+    "WHALE": {
+     "status": "UNKNOWN",
+     "source": "holder snapshots",
+     "reason": "Helius connected, token not holder-checked yet",
+     "raw": {
+      "missing": "Helius connected, token not holder-checked yet"
+     }
+    },
+    "SOCIAL_ACCELERATION": {
+     "status": "UNKNOWN",
+     "source": "—",
+     "reason": "module not implemented - no data source",
+     "raw": {
+      "missing": "module not implemented - no data source"
+     }
+    },
+    "NARRATIVE": {
+     "status": "UNKNOWN",
+     "source": "—",
+     "reason": "module not implemented - no data source",
+     "raw": {
+      "missing": "module not implemented - no data source"
+     }
+    }
+   }
+  },
+  {
+   "token": "$Country",
+   "mint": "5rEYGEFyHqAqFPwVsZKTqFgrQCUwj2SwKkcnwKFqpump",
+   "data_quality": "INVALID",
+   "lifecycle": "EARLY",
+   "age_min": 30.4,
+   "history_min": 29.2,
+   "EARLY_SIGNAL_SCORE": 0,
+   "is_early": false,
+   "fired_count": 0,
+   "coverage_pct": 14,
+   "denominator_weight": 15,
+   "suppressed_by": [],
+   "data_breaks": 0,
+   "transition": {
+    "baseline_points": 14,
+    "baseline_median": 374.67,
+    "current_vol_5m": null,
+    "multiple": null,
+    "transition": false,
+    "rule": "median < $10,000 and now >= 3.0x median"
+   },
+   "holders": {
+    "status": "UNKNOWN",
+    "holder_status": "pending",
+    "reason": "pending",
+    "snapshots": 0
+   },
+   "components": {
+    "VOLUME_ACCELERATION": {
+     "status": "UNKNOWN",
+     "source": "snapshots (DexScreener)",
+     "reason": "volume missing/zero 5m ago",
+     "raw": {
+      "now": null,
+      "before_5m": null,
+      "missing": "volume missing/zero 5m ago"
+     }
+    },
+    "HOLDER_ACCELERATION": {
+     "status": "UNKNOWN",
+     "source": "Helius DAS snapshots",
+     "reason": "Helius connected, token not holder-checked yet",
+     "raw": {
+      "missing": "Helius connected, token not holder-checked yet"
+     }
+    },
+    "BUY_PRESSURE": {
+     "status": "UNKNOWN",
+     "source": "snapshots (DexScreener)",
+     "reason": "no transactions now or 5m ago",
+     "raw": {
+      "buys": 0,
+      "sells": 0,
+      "missing": "no transactions now or 5m ago"
+     }
+    },
+    "LIQUIDITY_GROWTH": {
+     "status": "UNKNOWN",
+     "source": "snapshots (DexScreener)",
+     "reason": "liquidity UNKNOWN (failed validation)",
+     "raw": {
+      "now": null,
+      "before_10m": null,
+      "missing": "liquidity UNKNOWN (failed validation)"
+     }
+    },
+    "TRANSACTION_ACCELERATION": {
+     "status": "UNKNOWN",
+     "source": "snapshots (DexScreener)",
+     "reason": "txn missing/zero 5m ago",
+     "raw": {
+      "now": 0,
+      "before_5m": 0,
+      "missing": "txn missing/zero 5m ago"
+     }
+    },
+    "MC_ACCELERATION": {
+     "status": "NOT FIRED",
+     "points": 0.0,
+     "points_if_fired": 0.0,
+     "strength": 0.0,
+     "weight": 15,
+     "value": "+0.0% → +0.0%",
+     "rule": "growth_last_5m>=15% and > growth_prev_5m",
+     "raw": {
+      "mc_now": 18324.16,
+      "mc_5m_ago": 18324.16,
+      "mc_10m_ago": 18324.16,
+      "growth_last_5m": 0.0,
+      "growth_prev_5m": 0.0
+     }
+    },
+    "SMART_MONEY": {
+     "status": "UNKNOWN",
+     "source": "—",
+     "reason": "module not implemented - no data source",
+     "raw": {
+      "missing": "module not implemented - no data source"
+     }
+    },
+    "WHALE": {
+     "status": "UNKNOWN",
+     "source": "holder snapshots",
+     "reason": "Helius connected, token not holder-checked yet",
+     "raw": {
+      "missing": "Helius connected, token not holder-checked yet"
+     }
+    },
+    "SOCIAL_ACCELERATION": {
+     "status": "UNKNOWN",
+     "source": "—",
+     "reason": "module not implemented - no data source",
+     "raw": {
+      "missing": "module not implemented - no data source"
+     }
+    },
+    "NARRATIVE": {
+     "status": "UNKNOWN",
+     "source": "—",
+     "reason": "module not implemented - no data source",
+     "raw": {
+      "missing": "module not implemented - no data source"
+     }
+    }
+   }
+  },
+  {
+   "token": "$Nyctereutes",
+   "mint": "26Z7RA7jk571vcqjo8Qj6zbxK76BrMvrGnWXoSYJc4fF",
+   "data_quality": "INVALID",
+   "lifecycle": "EARLY",
+   "age_min": 31.0,
+   "history_min": 29.9,
+   "EARLY_SIGNAL_SCORE": 0,
+   "is_early": false,
+   "fired_count": 0,
+   "coverage_pct": 14,
+   "denominator_weight": 15,
+   "suppressed_by": [],
+   "data_breaks": 0,
+   "transition": {
+    "baseline_points": 60,
+    "baseline_median": 4227.200000000001,
+    "current_vol_5m": null,
+    "multiple": null,
+    "transition": false,
+    "rule": "median < $10,000 and now >= 3.0x median"
+   },
+   "holders": {
+    "status": "UNKNOWN",
+    "holder_status": "invalid",
+    "reason": "holder count 71 -> 16 (-77%) in 4.6 min",
+    "snapshots": 3
+   },
+   "components": {
+    "VOLUME_ACCELERATION": {
+     "status": "UNKNOWN",
+     "source": "snapshots (DexScreener)",
+     "reason": "volume missing/zero 5m ago",
+     "raw": {
+      "now": null,
+      "before_5m": null,
+      "missing": "volume missing/zero 5m ago"
+     }
+    },
+    "HOLDER_ACCELERATION": {
+     "status": "UNKNOWN",
+     "source": "Helius DAS snapshots",
+     "reason": "holder data INVALID: holder count 71 -> 16 (-77%) in 4.6 min",
+     "raw": {
+      "missing": "holder data INVALID: holder count 71 -> 16 (-77%) in 4.6 min"
+     }
+    },
+    "BUY_PRESSURE": {
+     "status": "UNKNOWN",
+     "source": "snapshots (DexScreener)",
+     "reason": "no transactions now or 5m ago",
+     "raw": {
+      "buys": 0,
+      "sells": 0,
+      "missing": "no transactions now or 5m ago"
+     }
+    },
+    "LIQUIDITY_GROWTH": {
+     "status": "UNKNOWN",
+     "source": "snapshots (DexScreener)",
+     "reason": "liquidity UNKNOWN (failed validation)",
+     "raw": {
+      "now": null,
+      "before_10m": null,
+      "missing": "liquidity UNKNOWN (failed validation)"
+     }
+    },
+    "TRANSACTION_ACCELERATION": {
+     "status": "UNKNOWN",
+     "source": "snapshots (DexScreener)",
+     "reason": "txn missing/zero 5m ago",
+     "raw": {
+      "now": 0,
+      "before_5m": 0,
+      "missing": "txn missing/zero 5m ago"
+     }
+    },
+    "MC_ACCELERATION": {
+     "status": "NOT FIRED",
+     "points": 0.0,
+     "points_if_fired": 0.0,
+     "strength": 0.0,
+     "weight": 15,
+     "value": "+0.0% → +0.0%",
+     "rule": "growth_last_5m>=15% and > growth_prev_5m",
+     "raw": {
+      "mc_now": 3919.82,
+      "mc_5m_ago": 3919.82,
+      "mc_10m_ago": 3919.82,
+      "growth_last_5m": 0.0,
+      "growth_prev_5m": 0.0
+     }
+    },
+    "SMART_MONEY": {
+     "status": "UNKNOWN",
+     "source": "—",
+     "reason": "module not implemented - no data source",
+     "raw": {
+      "missing": "module not implemented - no data source"
+     }
+    },
+    "WHALE": {
+     "status": "UNKNOWN",
+     "source": "holder snapshots",
+     "reason": "holder data INVALID: holder count 71 -> 16 (-77%) in 4.6 min",
+     "raw": {
+      "missing": "holder data INVALID: holder count 71 -> 16 (-77%) in 4.6 min"
+     }
+    },
+    "SOCIAL_ACCELERATION": {
+     "status": "UNKNOWN",
+     "source": "—",
+     "reason": "module not implemented - no data source",
+     "raw": {
+      "missing": "module not implemented - no data source"
+     }
+    },
+    "NARRATIVE": {
+     "status": "UNKNOWN",
+     "source": "—",
+     "reason": "module not implemented - no data source",
+     "raw": {
+      "missing": "module not implemented - no data source"
+     }
+    }
+   }
+  }
+ ]
+}
