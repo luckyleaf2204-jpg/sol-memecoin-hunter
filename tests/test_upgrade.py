@@ -4,6 +4,7 @@ Also proves that refreshing faster does NOT change Early Signal (D1–D8) result
 same ~20s anchor points, so a 5s-cadence feed and a 20s-cadence feed give identical Early Signal output.
 """
 import asyncio
+import json
 import time
 
 import httpx
@@ -12,7 +13,7 @@ from fastapi.testclient import TestClient
 
 from conftest import SOL_USD, build_series, build_state, dex_pair, default_info, good_holders
 from core.config import ApiKeys, Settings
-from core.http import COOLDOWN_BASE_S, HttpClient
+from core.http import COOLDOWN_AFTER, COOLDOWN_BASE_S, HttpClient
 from core.models import EarlySignal, Issue, McTrack, RiskFactor, RiskResult, TokenInfo, TokenState
 from database.db import Database
 from dex.dexscreener import parse_pair
@@ -50,17 +51,23 @@ def test_tier_clock_cadence_backoff_and_measured_interval():
         c.t += 9.5                           # next start exactly 10s after the previous start
         assert tc.due("market")
     assert tc.stats()["market"]["measured_s"] == 10.0
-    # failures back off exponentially: 20s, 40s, ... capped
+    # failures back off exponentially: 20s, then capped at 30s for live-data tiers (never stall for minutes)
     tc.start("market")
     assert tc.done("market", ok=False) == 20.0
     tc.start("market")
-    assert tc.done("market", ok=False) == 40.0
+    assert tc.done("market", ok=False) == sch.TIER_MAX_BACKOFF_S["market"] == 30.0
     for _ in range(10):
         tc.start("market")
         d = tc.done("market", ok=False)
-    assert d == sch.MAX_BACKOFF_S
+    assert d == 30.0
     tc.start("market")
     assert tc.done("market", ok=True) == 10.0 and tc.tiers["market"].failures == 0
+    # other tiers keep the long cap
+    other = sch.TierClock({"persist": 20.0}, clock=c)
+    for _ in range(10):
+        other.start("persist")
+        d = other.done("persist", ok=False)
+    assert d == sch.MAX_BACKOFF_S
 
 
 def _st(mint, *, age_s=7200, vol5=5_000, txns=(40, 30), pc5=1.0, watch=False, seen_ago=3600):
@@ -318,15 +325,19 @@ def test_timeout_returns_none_and_trips_cooldown():
     async def go():
         c = _client(handler)
         r1 = await c.get_json("https://api.example.com/x", source="ex", retries=1, timeout=0.5)
+        one = c.health.cooling("ex")                                          # 1 failure: no cooldown yet
+        for _ in range(COOLDOWN_AFTER - 1):
+            await c.get_json("https://api.example.com/x", source="ex", retries=0, timeout=0.5)
         n = len(calls)
         r2 = await c.get_json("https://api.example.com/x", source="ex")      # inside cooldown: no network call
         st = c.health.get("ex")
         await c.aclose()
-        return r1, r2, n, st
-    r1, r2, n, st = asyncio.run(go())
-    assert r1 is None and r2 is None and n == 2 and len(calls) == 2
+        return r1, r2, n, st, one
+    r1, r2, n, st, one = asyncio.run(go())
+    assert r1 is None and r2 is None and one == 0
+    assert n == 2 + (COOLDOWN_AFTER - 1) and len(calls) == n                 # the skipped call never hit the network
     assert not st.ok and "ReadTimeout" in st.last_error and st.skipped == 1
-    assert st.consecutive_failures == 1
+    assert st.consecutive_failures == COOLDOWN_AFTER
 
 
 def test_rate_limit_backoff_then_success_and_cooldown_grows():
@@ -339,15 +350,15 @@ def test_rate_limit_backoff_then_success_and_cooldown_grows():
     async def go():
         c = _client(handler)
         ok = await c.get_json("https://api.example.com/a", source="ex")          # 429, 429, 200 -> data
-        bad = await c.get_json("https://api.example.com/a", source="ex", retries=0)   # 503 -> None + cooldown
-        d1 = c.health.cooling("ex")
+        bad = [await c.get_json("https://api.example.com/a", source="ex", retries=0) for _ in range(COOLDOWN_AFTER)]
+        d1 = c.health.cooling("ex")                                              # opened after 3 failures in a row
         c.health.get("ex").cooldown_until = 0                                    # expire, fail again
         await c.get_json("https://api.example.com/a", source="ex", retries=0)
         d2 = c.health.cooling("ex")
         await c.aclose()
         return ok, bad, d1, d2
     ok, bad, d1, d2 = asyncio.run(go())
-    assert ok == {"ok": True} and bad is None
+    assert ok == {"ok": True} and bad == [None] * COOLDOWN_AFTER
     assert COOLDOWN_BASE_S - 1 < d1 <= COOLDOWN_BASE_S and 2 * COOLDOWN_BASE_S - 1 < d2 <= 2 * COOLDOWN_BASE_S
 
 
@@ -602,7 +613,8 @@ def test_cooldown_is_per_source_and_throttle_spaces_calls():
     async def go():
         c = _client(handler)
         c.set_rate("up.example.com", 600)                       # 1 call / 0.1s
-        await c.get_json("https://down.example.com/x", source="down", retries=0)
+        for _ in range(COOLDOWN_AFTER):
+            await c.get_json("https://down.example.com/x", source="down", retries=0)
         assert c.health.cooling("down") > 0
         a = await c.get_json("https://up.example.com/x", source="up")
         b = await c.get_json("https://up.example.com/x", source="up")
@@ -677,3 +689,148 @@ def test_s1_s4_early_signal_golden_values():
         e = got[name].early
         assert (e.strength, e.is_early, e.fired_count, e.groups_computable, len(e.suppressed)) == \
                (strength, is_early, fired, groups, n_supp), name
+
+
+# ---------------------------------------------------------------- production incident: Render, 0 tokens (2026-09-30)
+def _dex_client(p429, seed=7):
+    import random
+    rnd = random.Random(seed)
+
+    def handler(req):
+        if rnd.random() < p429:
+            return httpx.Response(429, headers={"retry-after": "0"})
+        chunk = req.url.path.rsplit("/", 1)[1].split(",")
+        return httpx.Response(200, json=[{"chainId": "solana", "dexId": "pumpswap", "pairAddress": "P" + m,
+                                          "baseToken": {"address": m, "symbol": "T"}, "quoteToken": {"symbol": "SOL"},
+                                          "priceUsd": "0.0001", "marketCap": 100000} for m in chunk])
+    from dex.dexscreener import DexScreenerClient
+    h = HttpClient(transport=httpx.MockTransport(handler), backoff_base=0.0)
+    d = DexScreenerClient(h)
+    h._min_interval.clear(), h._base_interval.clear()          # no real sleeping in the test
+    return h, d
+
+
+def test_dexscreener_survives_intermittent_429_like_a_shared_cloud_ip(monkeypatch):
+    """Before the fix one 429 opened the cooldown and skipped every other chunk: at 40 % 429s only ~35 % of
+    tokens got market data per round and half the rounds had none (web-1: ~91 %). Now: web-1 level again."""
+    import core.http as ch
+    monkeypatch.setattr(ch, "COOLDOWN_BASE_S", 0.05)            # time scaled 100×: rounds 5 s apart -> 0.05 s
+    mints = [f"M{i:040d}" for i in range(150)]                 # 5 chunks
+
+    async def go():
+        h, d = _dex_client(0.4)
+        cov = []
+        for _ in range(30):
+            r = await d.tokens(mints)
+            cov.append(len(r or {}) / len(mints))
+            await asyncio.sleep(0.05)
+        await h.aclose()
+        return cov
+    cov = asyncio.run(go())
+    assert sum(cov) / len(cov) >= 0.85 and sum(1 for c in cov if c == 0) <= 2   # before the fix: ~50 % empty rounds
+
+
+def test_one_failed_chunk_never_aborts_the_rest_of_the_round():
+    mints = [f"N{i:040d}" for i in range(90)]                  # 3 chunks; the first one fails completely
+    first = {"n": 0}
+
+    def handler(req):
+        chunk = req.url.path.rsplit("/", 1)[1].split(",")
+        if chunk[0] == mints[0]:
+            first["n"] += 1
+            return httpx.Response(503)
+        return httpx.Response(200, json=[{"chainId": "solana", "dexId": "pumpswap", "pairAddress": "P" + m,
+                                          "baseToken": {"address": m}, "quoteToken": {"symbol": "SOL"},
+                                          "priceUsd": "0.0001", "marketCap": 100000} for m in chunk])
+    from dex.dexscreener import DexScreenerClient
+
+    async def go():
+        h = HttpClient(transport=httpx.MockTransport(handler), backoff_base=0.0)
+        d = DexScreenerClient(h)
+        h._min_interval.clear(), h._base_interval.clear()
+        r = await d.tokens(mints)
+        await h.aclose()
+        return r
+    r = asyncio.run(go())
+    assert len(r) == 60 and first["n"] == 3                   # chunk 1 retried then given up, chunks 2-3 delivered
+
+
+def test_429_slows_the_host_down_and_success_recovers():
+    seq = [429, 200, 200, 200, 200, 200, 200, 200, 200, 200, 200, 200, 200, 200, 200, 200]
+
+    async def go():
+        h = HttpClient(transport=httpx.MockTransport(lambda req: httpx.Response(seq.pop(0), json={}, headers={"retry-after": "0"})),
+                       backoff_base=0.0)
+        h.set_rate("api.example.com", 6000)
+        base = h.rate_per_min("api.example.com")
+        await h.get_json("https://api.example.com/a", source="ex")   # 429 then 200
+        slowed = []
+        for _ in range(14):
+            await h.get_json("https://api.example.com/a", source="ex")
+            slowed.append(h.rate_per_min("api.example.com"))
+        await h.aclose()
+        return base, slowed
+    base, rates = asyncio.run(go())
+    assert rates[0] < base and rates[-1] == base                # halved on 429, back to normal after successes
+
+
+def test_discovery_falls_back_to_dexscreener_when_pumpfun_and_ws_are_down(tmp_path):
+    eng = ScannerEngine(Settings(), Database(tmp_path / "fb.db"), keys=ApiKeys(), on_log=lambda m: None)
+
+    async def down(*a, **k):
+        return None
+
+    async def profiles():
+        return ["FALLBACK1111111111111111111111111111111111"]
+    eng.pump.latest = eng.pump.recently_traded = down
+    eng.dex.latest_profiles = profiles
+    asyncio.run(eng.discover(full=True))
+    assert "FALLBACK1111111111111111111111111111111111" in eng.tracked
+    # a later round where only ONE Pump.fun list is due still knows both are down (old bug: never fell back)
+    eng.tracked.clear()
+    eng._pump_at["fallback"] = 0
+    eng._pump_at["latest"] = 0                                  # latest due ...
+    eng._pump_at["active"] = time.monotonic()                   # ... recently-traded not due
+    asyncio.run(eng.discover())
+    assert "FALLBACK1111111111111111111111111111111111" in eng.tracked
+
+
+def test_feeds_diagnostics_in_status_and_log(tmp_path):
+    eng = ScannerEngine(Settings(), Database(tmp_path / "fd.db"), keys=ApiKeys(helius=SECRET), on_log=lambda m: None)
+    from pumpfun.stream import PumpPortalStream
+    eng.stream = PumpPortalStream(asyncio.Queue(), eng.http.health)
+    eng.stream.connected, eng.stream.events_total = True, 12
+    eng.stream.event_times = [time.time() - 5] * 12
+    eng.http.health.fail("dexscreener", "HTTP 429")
+    f = eng.feeds()
+    assert f["pumpportal"]["connected"] and f["pumpportal"]["events_last_min"] == 12
+    assert f["dexscreener"]["errors"] == 1 and f["tracked"] == 0 and f["with_market"] == 0
+    line = eng.feeds_line()
+    assert line.startswith("FEEDS: PumpPortal WS CONNECTED (12 events/min") and "DexScreener" in line
+    eng.published = []
+    with TestClient(create_app(engine=eng, start_scanner=False, access_code=CODE)) as c:
+        st = c.get("/api/status", headers=H).json()
+    assert st["feeds"]["pumpportal"]["connected"] is True and "with_market" in st["feeds"]
+    assert SECRET not in json.dumps(st) and SECRET not in line
+
+
+def test_pumpportal_stream_logs_and_counts_events():
+    from pumpfun.stream import PumpPortalStream
+    logs = []
+    s = PumpPortalStream(asyncio.Queue(), HttpClient().health, on_log=logs.append)
+    assert s.events_last_min() == 0 and s.connects == 0 and s.last_event_at is None
+
+
+def test_new_list_shows_discovered_tokens_even_without_market_data(tmp_path):
+    """DexScreener blocked / rate-limited: tokens are still listed (market values UNKNOWN, never invented)."""
+    eng = ScannerEngine(Settings(), Database(tmp_path / "nl.db"), keys=ApiKeys(), on_log=lambda m: None)
+    fresh = TokenState(info=TokenInfo(mint="NoMkt111111111111111111111111111111111111", symbol="NEW",
+                                      created_at=time.time() - 60))
+    priced = _st("Priced11111111111111111111111111111111111")
+    eng.tracked = {fresh.mint: fresh, priced.mint: priced}
+    eng.published = [fresh, priced]
+    with TestClient(create_app(engine=eng, start_scanner=False, access_code=CODE)) as c:
+        items = c.get("/api/list/new", headers=H).json()["items"]
+    assert [x["mint"] for x in items] == [fresh.mint, priced.mint]          # newest first, both listed
+    nm = items[0]
+    assert nm["mc"] is None and nm["opp"] is None and nm["dq"] == "INVALID" and nm["mc_label"] != "$0.00"

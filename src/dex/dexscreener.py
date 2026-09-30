@@ -97,10 +97,13 @@ class DexScreenerClient:
         """Returns {mint: (MarketData, socials)}; None only if every batch failed."""
         out: dict[str, tuple[MarketData, dict]] = {}
         any_ok = False
+        if mints and self.http.health.cooling(SOURCE) > 0:     # checked once per round, not per chunk
+            self.http.health.get(SOURCE).skipped += 1
+            return None
         for i in range(0, len(mints), BATCH):
             chunk = mints[i:i + BATCH]
             data = await self.http.get_json(f"{self.base}/tokens/v1/{CHAIN}/{','.join(chunk)}", source=SOURCE,
-                                            timeout=8.0, retries=1)
+                                            timeout=8.0, retries=2, respect_cooldown=False)
             if not isinstance(data, list):
                 continue
             any_ok = True

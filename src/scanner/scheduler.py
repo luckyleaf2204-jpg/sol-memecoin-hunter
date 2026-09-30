@@ -34,6 +34,7 @@ NEW_TOKEN_MIN = 15
 QUIET_VOL_5M, QUIET_TXNS_5M = 500.0, 10
 TOLERANCE_S = 1.0          # a token due in < 1s is refreshed now (keeps batches aligned)
 MAX_BACKOFF_S = 120.0
+TIER_MAX_BACKOFF_S = {"discovery": 30.0, "market": 30.0}   # live data: a failure must not stall them for minutes
 
 # (reason, weight) — weights follow the order requested in the spec
 PRIORITY = {"new": 7, "mc_rising": 6, "vol_rising": 5, "buy_rising": 4, "holders_rising": 3,
@@ -163,7 +164,7 @@ class TierClock:
             delay = t.interval
         else:
             t.failures += 1
-            delay = min(MAX_BACKOFF_S, t.interval * 2 ** t.failures)
+            delay = min(TIER_MAX_BACKOFF_S.get(name, MAX_BACKOFF_S), t.interval * 2 ** t.failures)
         # next run is measured from the START of this run so a slow round does not stretch the cadence
         t.next_at = max(now, t.last_start + delay) if ok else now + delay
         return delay

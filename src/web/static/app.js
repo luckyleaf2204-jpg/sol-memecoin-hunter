@@ -83,7 +83,9 @@ async function refreshStatus() {
     const s = await api("/api/status");
     S.lastStatus = s;
     const sc = $("#pill-scanner"), he = $("#pill-helius");
-    if (s.scanner.running) { sc.className = "pill ok"; sc.textContent = t("web.status.running") + " · " + ago(s.scanner.last_cycle_age_s); }
+    const noData = s.feeds && s.scanner.uptime_s > 120 && s.feeds.with_market === 0;
+    if (s.scanner.running && noData) { sc.className = "pill warn"; sc.textContent = t("web.status.no_data"); }
+    else if (s.scanner.running) { sc.className = "pill ok"; sc.textContent = t("web.status.running") + " · " + ago(s.scanner.last_cycle_age_s); }
     else if (s.scanner.starting) { sc.className = "pill warn"; sc.textContent = t("web.status.starting"); }
     else { sc.className = "pill bad"; sc.textContent = t("web.status.stopped"); }
     const st = s.helius.state;
@@ -567,9 +569,22 @@ async function renderStatus(silent) {
     ${kv("VALID / PARTIAL / INVALID", `${s.data_quality.VALID} / ${s.data_quality.PARTIAL} / ${s.data_quality.INVALID}`)}
     ${kv("EARLY = TRUE", s.early_true)}${kv("SOL", usd(s.sol_usd))}
     ${kv(t("web.status.uptime"), ago(s.scanner.uptime_s))}${kv(t("web.status.version"), s.version)}
-  </div>${refreshTable(s.refresh)}<div class="disclaimer">${esc(t("web.status.note"))}</div>`;
+  </div>${feedsTable(s.feeds)}${refreshTable(s.refresh)}<div class="disclaimer">${esc(t("web.status.note"))}</div>`;
 }
 
+function feedsTable(f) {
+  if (!f || !f.pumpportal) return "";
+  const row = (k, v, ok) => `<div class="kv"><span class="k">${esc(k)}</span><span class="v ${ok === true ? "c-green" : ok === false ? "c-red" : "c-muted"}">${esc(v)}</span></div>`;
+  const http = (x) => (x.requests ? "HTTP " + (x.last_status ?? "—") + " · " + x.errors + "/" + x.requests + " " + t("web.feed.errors") : t("web.feed.no_calls")) +
+    (x.cooldown_s ? " · cooldown " + x.cooldown_s + "s" : "") + (x.last_error && !x.ok ? " · " + x.last_error.slice(0, 80) : "");
+  const pp = f.pumpportal;
+  return `<h2>${esc(t("web.feed.title"))}</h2><div class="token-head">
+    ${row("PumpPortal WS", (pp.connected ? t("web.feed.connected") : t("web.feed.disconnected")) + " · " + t("web.feed.events", { n: pp.events_last_min }) + (pp.last_error && !pp.connected ? " · " + pp.last_error.slice(0, 80) : ""), pp.connected)}
+    ${row("Pump.fun", http(f.pumpfun), f.pumpfun.ok)}
+    ${row("DexScreener", http(f.dexscreener), f.dexscreener.ok)}
+    ${row(t("web.feed.with_market"), f.with_market + " / " + f.tracked, f.with_market > 0)}
+  </div>`;
+}
 function refreshTable(r) {
   if (!r || !r.tiers) return "";
   const row = (k, target, tier) => `<div class="kv"><span class="k">${esc(t("web.rf." + k))}</span><span class="v">${esc(target)}${tier && tier.measured_s !== null ? " · " + esc(t("web.rf.measured", { s: tier.measured_s })) : ""}${tier && tier.failures ? " · ⚠ " + esc(tier.failures) : ""}</span></div>`;

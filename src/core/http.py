@@ -4,9 +4,12 @@ Every data-source adapter goes through this client, so a failing source only mar
 itself unhealthy and returns None — it never crashes the scanner.
 
 Resilience: per-request timeout, retries with exponential backoff (honours Retry-After on 429),
-per-host throttling, and a per-source COOLDOWN (circuit breaker): after a request exhausted its retries on
-429 / 5xx / network errors / timeouts, further calls to that source return None immediately for
-5s, 10s, 20s ... (max COOLDOWN_MAX_S) until one succeeds. HTTP 4xx (e.g. unknown token) never trips it.
+per-host throttling with ADAPTIVE rate (a 429 halves the host's request rate, down to MIN_RATE_FACTOR of
+the configured rate; every success restores it by RATE_RECOVERY), and a per-source COOLDOWN (circuit
+breaker) that only opens after COOLDOWN_AFTER consecutive failed requests (retries exhausted on 429 / 5xx /
+network errors / timeouts): calls then return None immediately for 5s, 10s, 20s ... (max COOLDOWN_MAX_S)
+until one succeeds. HTTP 4xx (e.g. unknown token) never trips it. A single transient failure — normal on
+a shared cloud IP — therefore never blocks a whole source (production incident 2026-09-30: Render).
 """
 from __future__ import annotations
 
@@ -20,6 +23,8 @@ from urllib.parse import urlparse
 import httpx
 
 COOLDOWN_BASE_S, COOLDOWN_MAX_S = 5.0, 120.0
+COOLDOWN_AFTER = 3                 # consecutive failed requests before a source is put on cooldown
+MIN_RATE_FACTOR, RATE_RECOVERY = 0.25, 1.1
 USER_AGENT = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) SOLMemecoinHunter/1.0"
 _SECRET_RE = re.compile(r"(api-key=|api_key=|bot)[A-Za-z0-9:_\-]{8,}")
 
@@ -83,7 +88,9 @@ class Health:
         """Transient failure after all retries -> exponential cooldown. Returns the cooldown in seconds."""
         s = self._get(source)
         s.consecutive_failures += 1
-        delay = min(COOLDOWN_MAX_S, COOLDOWN_BASE_S * 2 ** (s.consecutive_failures - 1))
+        if s.consecutive_failures < COOLDOWN_AFTER:
+            return 0.0
+        delay = min(COOLDOWN_MAX_S, COOLDOWN_BASE_S * 2 ** (s.consecutive_failures - COOLDOWN_AFTER))
         s.cooldown_until = time.monotonic() + delay
         return delay
 
@@ -104,11 +111,27 @@ class HttpClient:
         self.backoff_base = backoff_base
         self.health = Health()
         self._min_interval: dict[str, float] = {}
+        self._base_interval: dict[str, float] = {}
         self._last: dict[str, float] = {}
         self._locks: dict[str, asyncio.Lock] = {}
 
     def set_rate(self, host: str, per_minute: float) -> None:
-        self._min_interval[host] = 60.0 / per_minute
+        self._base_interval[host] = self._min_interval[host] = 60.0 / per_minute
+
+    def _slow_down(self, host: str) -> None:
+        """429 -> halve this host's request rate (never below MIN_RATE_FACTOR of the configured rate)."""
+        base = self._base_interval.get(host)
+        if base:
+            self._min_interval[host] = min(base / MIN_RATE_FACTOR, self._min_interval.get(host, base) * 2)
+
+    def _speed_up(self, host: str) -> None:
+        base = self._base_interval.get(host)
+        if base and self._min_interval.get(host, base) > base:
+            self._min_interval[host] = max(base, self._min_interval[host] / RATE_RECOVERY)
+
+    def rate_per_min(self, host: str) -> float | None:
+        iv = self._min_interval.get(host)
+        return round(60.0 / iv, 1) if iv else None
 
     async def _throttle(self, host: str) -> None:
         interval = self._min_interval.get(host)
@@ -122,11 +145,12 @@ class HttpClient:
             self._last[host] = time.monotonic()
 
     async def request_json(self, method: str, url: str, *, source: str, params=None,
-                           json=None, headers=None, retries: int = 2, timeout: float | None = None):
+                           json=None, headers=None, retries: int = 2, timeout: float | None = None,
+                           respect_cooldown: bool = True):
         host = urlparse(url).netloc
         endpoint = safe_endpoint(url)
         call = json.get("method", "") if isinstance(json, dict) else method
-        if self.health.cooling(source) > 0:
+        if respect_cooldown and self.health.cooling(source) > 0:
             self.health.get(source).skipped += 1
             return None
         err = ""
@@ -144,6 +168,8 @@ class HttpClient:
                 continue
             self.health.mark(source, status=r.status_code, endpoint=endpoint, call=call,
                              ms=round((time.monotonic() - t0) * 1000))
+            if r.status_code == 429:
+                self._slow_down(host)
             if r.status_code == 429 or r.status_code >= 500:
                 err = f"HTTP {r.status_code}"
                 retry_after = r.headers.get("retry-after")
@@ -160,15 +186,16 @@ class HttpClient:
                 self.health.fail(source, "invalid JSON")
                 return None
             self.health.ok(source)
+            self._speed_up(host)
             return data
         self.health.fail(source, err or "request failed")
         self.health.trip(source)
         return None
 
     async def get_json(self, url: str, *, source: str, params=None, headers=None, retries: int = 2,
-                       timeout: float | None = None):
+                       timeout: float | None = None, respect_cooldown: bool = True):
         return await self.request_json("GET", url, source=source, params=params, headers=headers, retries=retries,
-                                       timeout=timeout)
+                                       timeout=timeout, respect_cooldown=respect_cooldown)
 
     async def post_json(self, url: str, payload, *, source: str, headers=None, retries: int = 2,
                         timeout: float | None = None):

@@ -87,7 +87,10 @@ class ScannerEngine:
         self.helius_state: dict = {"state": "NO_KEY" if not self.keys.helius else "UNCHECKED"}
         self._helius_checked_at = 0.0
         self.clock = TierClock()
-        self._pump_at = {"latest": 0.0, "active": 0.0, "curve": 0.0}
+        self._pump_at = {"latest": 0.0, "active": 0.0, "curve": 0.0, "fallback": 0.0}
+        self._pump_last: dict[str, bool | None] = {"latest": None, "active": None}   # last call returned data?
+        self._started_at = time.time()
+        self._feeds_logged = False
         self._deep_times: list[float] = []
         self._logged_at = 0.0
         self._round_new = 0
@@ -105,7 +108,7 @@ class ScannerEngine:
         self._queue = asyncio.Queue(maxsize=5000)
         tasks = [asyncio.create_task(self._deep_worker())]
         if self.settings.use_pumpportal_ws:
-            self.stream = PumpPortalStream(self._queue, self.http.health)
+            self.stream = PumpPortalStream(self._queue, self.http.health, on_log=self.log)
             tasks.append(asyncio.create_task(self.stream.run(self._stop)))
         for m in self.watch:
             self.tracked.setdefault(m, TokenState(info=TokenInfo(mint=m), watch=True))
@@ -223,7 +226,53 @@ class ScannerEngine:
             self.log(f"round {self.cycle_no}: +{self._round_new} new, tracking {len(self.tracked)} ({hot} hot), "
                      f"market tick {stats['market']['measured_s']}s, SOL ${self.sol_price or 0:.2f}")
             self._round_new = 0
+            self.log(self.feeds_line())                   # every 60 s, next to the round line
+        elif not self._feeds_logged and now - self._started_at >= 30:
+            self._feeds_logged = True                     # early snapshot so a broken feed shows up fast
+            self.log(self.feeds_line())
         return True
+
+    def feeds(self) -> dict:
+        """Live state of every data feed — for logs and /api/status. No keys (endpoints are query-stripped)."""
+        now = time.time()
+        h = self.http.health
+
+        def src(name: str, host: str = "") -> dict:
+            s = h.get(name)
+            return {"ok": s.ok if s.requests else None, "requests": s.requests, "errors": s.errors,
+                    "last_status": s.last_status, "last_error": s.last_error or None,
+                    "last_ok_age_s": round(now - s.last_ok) if s.last_ok else None,
+                    "cooldown_s": round(h.cooling(name), 1), "skipped": s.skipped,
+                    "rate_per_min": self.http.rate_per_min(host) if host else None}
+        st = self.stream
+        return {
+            "pumpportal": {"enabled": bool(self.settings.use_pumpportal_ws), "connected": bool(st and st.connected),
+                           "connects": st.connects if st else 0, "events_total": st.events_total if st else 0,
+                           "events_last_min": st.events_last_min() if st else 0,
+                           "last_event_age_s": round(now - st.last_event_at) if st and st.last_event_at else None,
+                           "last_error": (st.last_error or None) if st else None},
+            "pumpfun": src("pumpfun", "frontend-api-v3.pump.fun") | {
+                "latest_ok": self._pump_last["latest"], "active_ok": self._pump_last["active"]},
+            "dexscreener": src("dexscreener", "api.dexscreener.com"),
+            "helius": {"state": self.helius_state.get("state")},
+            "tracked": len(self.tracked),
+            "with_market": sum(1 for s in self.tracked.values() if s.market),
+        }
+
+    def feeds_line(self) -> str:
+        f = self.feeds()
+        pp, pf, dx = f["pumpportal"], f["pumpfun"], f["dexscreener"]
+
+        def http_part(x):
+            return (f"HTTP {x['last_status'] if x['last_status'] is not None else '—'}"
+                    + (f", errors {x['errors']}/{x['requests']}" if x["errors"] else f", {x['requests']} req")
+                    + (f", COOLDOWN {x['cooldown_s']}s" if x["cooldown_s"] else "")
+                    + (f", last error: {x['last_error'][:120]}" if x["last_error"] and not x["ok"] else ""))
+        return (f"FEEDS: PumpPortal WS {'CONNECTED' if pp['connected'] else 'DISCONNECTED'} "
+                f"({pp['events_last_min']} events/min, {pp['events_total']} total"
+                + (f", last error: {pp['last_error'][:120]}" if pp["last_error"] and not pp["connected"] else "") + ")"
+                f" | Pump.fun {http_part(pf)} | DexScreener {http_part(dx)}"
+                f" | tracked {f['tracked']}, with market data {f['with_market']}")
 
     def publish(self) -> None:
         """Shallow copies are enough: evaluate() replaces result objects instead of mutating them."""
@@ -314,13 +363,17 @@ class ScannerEngine:
                                               self.pump.recently_traded(50) if want_active else skip())
         if want_latest:
             self._pump_at["latest"] = now
+            self._pump_last["latest"] = latest is not None
         if want_active:
             self._pump_at["active"] = now
+            self._pump_last["active"] = active is not None
         for batch in (latest, active):
             for info in batch or []:
                 added += self._add(info)
         self._save_mc()
-        if latest is None and active is None and not (self.stream and self.stream.connected):
+        pump_down = not any(self._pump_last.values())          # both Pump.fun lists failed on their last call
+        if pump_down and not (self.stream and self.stream.connected) and (full or now - self._pump_at["fallback"] >= 20):
+            self._pump_at["fallback"] = now
             mints = await self.dex.latest_profiles() or []
             for m in mints:
                 added += self._add(TokenInfo(mint=m, sources={"dexscreener"}))

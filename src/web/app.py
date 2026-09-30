@@ -154,6 +154,7 @@ def create_app(engine: ScannerEngine | None = None, start_scanner: bool = True,
             "early_true": sum(1 for s in sts if s.early and s.early.is_early),
             "sol_usd": e.sol_price if e else None,
             "refresh": _refresh_info(e),
+            "feeds": e.feeds() if e else {},
             "server_time": now,
             "version": VERSION,
         }
@@ -184,7 +185,11 @@ def create_app(engine: ScannerEngine | None = None, start_scanner: bool = True,
         elif kind == "early":
             rows = rank_early(sts)
         elif kind == "new":
-            rows = sorted((s for s in sts if s.market), key=lambda s: s.age_minutes if s.age_minutes is not None else 1e9)
+            # every discovered token, newest first — also the ones DexScreener has not priced yet (rate-limited,
+            # not indexed): they show UNKNOWN market values instead of disappearing (production incident, Render)
+            def age_key(s):
+                return s.age_minutes if s.age_minutes is not None else (time.time() - s.info.discovered_at) / 60
+            rows = sorted(sts, key=age_key)
         elif kind == "whales":
             rows = [s for s in sts if s.holders]
         elif kind == "dev":

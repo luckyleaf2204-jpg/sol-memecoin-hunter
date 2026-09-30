@@ -37,10 +37,21 @@ def parse_event(d: dict) -> TokenInfo | None:
 
 
 class PumpPortalStream:
-    def __init__(self, queue: asyncio.Queue, health: Health):
+    def __init__(self, queue: asyncio.Queue, health: Health, on_log=None):
         self.queue = queue
         self.health = health
         self.connected = False
+        self.on_log = on_log or (lambda m: None)
+        self.events_total = 0
+        self.event_times: list[float] = []     # receive times of the last minute (diagnostics)
+        self.last_event_at: float | None = None
+        self.connects = 0
+        self.last_error = ""
+
+    def events_last_min(self) -> int:
+        now = time.time()
+        self.event_times = [t for t in self.event_times if now - t < 60]
+        return len(self.event_times)
 
     async def run(self, stop: asyncio.Event) -> None:
         import websockets  # imported lazily so the module can be tested without it
@@ -51,7 +62,9 @@ class PumpPortalStream:
                 async with websockets.connect(WS_URL, ping_interval=20, open_timeout=15) as ws:
                     await ws.send(json.dumps({"method": "subscribeNewToken"}))
                     self.connected, backoff = True, 2
+                    self.connects += 1
                     self.health.ok(SOURCE)
+                    self.on_log(f"PumpPortal WS connected ({WS_URL}, subscribeNewToken, connection #{self.connects})")
                     while not stop.is_set():
                         try:
                             raw = await asyncio.wait_for(ws.recv(), timeout=60)
@@ -63,12 +76,22 @@ class PumpPortalStream:
                             continue
                         if info:
                             self.health.ok(SOURCE)
+                            now = time.time()
+                            self.events_total += 1
+                            self.last_event_at = now
+                            self.event_times.append(now)
+                            if len(self.event_times) > 2000:
+                                del self.event_times[:1000]
                             try:
                                 self.queue.put_nowait(info)
                             except asyncio.QueueFull:
                                 pass
             except Exception as e:  # network errors must never kill the scanner
-                self.health.fail(SOURCE, f"{type(e).__name__}: {e}")
+                self.last_error = f"{type(e).__name__}: {e}"[:300]
+                self.health.fail(SOURCE, self.last_error)
+                self.on_log(f"PumpPortal WS error: {self.last_error} — reconnect in {backoff}s")
+            if self.connected:
+                self.on_log(f"PumpPortal WS disconnected — reconnect in {backoff}s")
             self.connected = False
             if not stop.is_set():
                 try:
