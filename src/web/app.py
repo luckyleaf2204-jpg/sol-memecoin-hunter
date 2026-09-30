@@ -171,8 +171,11 @@ def create_app(engine: ScannerEngine | None = None, start_scanner: bool = True,
         buckets["watch"].sort(key=lambda s: (-(s.early.fired_count if s.early else 0), newest(s)))
         buckets["nodata"].sort(key=newest)
         buckets["excluded"].sort(key=newest)
+        pre = sorted((s for s in sts if s.pre_early is not None and s.pre_early.is_pre_early),
+                     key=lambda s: (-s.pre_early.fired, s.pre_early.age_min or 9))
         return {"server_time": now,
-                "counts": {g: len(v) for g, v in buckets.items()},
+                "pre_early": [card(s) for s in pre[:30]],
+                "counts": {g: len(v) for g, v in buckets.items()} | {"pre_early": len(pre)},
                 "groups": {g: [card(s) for s in buckets[g][:HOME_LIMIT[g]]] for g in GROUPS}}
 
     @app.get("/api/list/{kind}")

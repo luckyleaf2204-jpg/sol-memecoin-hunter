@@ -37,7 +37,7 @@ MAX_BACKOFF_S = 120.0
 TIER_MAX_BACKOFF_S = {"discovery": 30.0, "market": 30.0}   # live data: a failure must not stall them for minutes
 
 # (reason, weight) — weights follow the order requested in the spec
-PRIORITY = {"new": 7, "mc_rising": 6, "vol_rising": 5, "buy_rising": 4, "holders_rising": 3,
+PRIORITY = {"pre_early": 9, "new": 7, "mc_rising": 6, "vol_rising": 5, "buy_rising": 4, "holders_rising": 3,
             "group_opportunity": 2, "group_watch": 1, "starred": 8}
 
 
@@ -66,6 +66,8 @@ def hot_reasons(st: TokenState, now: float | None = None) -> list[str]:
         out.append("buy_rising")
     if st.holder_intel and st.holder_intel.abs_growth_5m is not None and st.holder_intel.abs_growth_5m >= 10:
         out.append("holders_rising")
+    if st.pre_early is not None and getattr(st.pre_early, "status", "") == "PRE_EARLY":
+        out.append("pre_early")
     if st.group == "opportunity":
         out.append("group_opportunity")
     elif st.group == "watch":

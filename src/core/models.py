@@ -443,6 +443,7 @@ class TokenState:
     last_deep: float = 0.0
     mc_track: McTrack | None = None
     identity: TokenIdentity = field(default_factory=TokenIdentity)
+    pre_early: Any = None                                 # intel.pre_early.PreEarly (1–3 min old tokens)
     trend: dict = field(default_factory=dict)            # display/priority deltas (never used for scoring)
     group: str = ""                                       # opportunity | watch | nodata | excluded | quiet
     group_reasons: list[str] = field(default_factory=list)

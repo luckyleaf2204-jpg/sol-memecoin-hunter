@@ -319,3 +319,32 @@ Sự cố 2026-09-30: CA `XsDoVfqeBukxuZHWhdvWHBhgEHjGNst4MLodqsJHzoB` (Tesla xS
 - **Hiển thị:** luôn dùng symbol/name canonical (ưu tiên Helius > Pump.fun > DexScreener).
 - **MC ban đầu:** `marketCapSol` của PumpPortal tính bằng đơn vị quote của curve. Chỉ được dùng khi quote đã được xác nhận là SOL (qua Pump.fun `quote_mint` hoặc quote của pair DexScreener). Nếu quote khác SOL thì huỷ.
 - **Test:** `tests/test_identity.py` là regression cho đúng CA này, có cả test live.
+
+## 13. ⚡ PRE-EARLY (`intel/pre_early.py`) — token 1–3 phút tuổi
+
+Lớp riêng, **không** thay đổi Early Signal / D1–D8. Early Signal cần ≥10 phút lịch sử, nên luôn KHÔNG RÕ với token này. PRE-EARLY chỉ đọc dữ liệu đã validate, không biến KHÔNG RÕ thành tín hiệu.
+
+- **Đủ điều kiện xét:** token 1.0–3.0 phút tuổi. Không biết tuổi thì không xét.
+- **Bị chặn khi có một trong các điều kiện:**
+  - danh tính chưa VERIFIED;
+  - dữ liệu INVALID vì **sai** (nếu INVALID chỉ vì **thiếu** dữ liệu thì kết quả là "Chưa đủ dữ liệu");
+  - Risk > 60;
+  - có cờ rug;
+  - holder bất thường (D6);
+  - top10 > 35%.
+- **6 tín hiệu:**
+  - tốc độ MC (≥ +40% và ≥ +25%/phút);
+  - volume tăng tốc (≥ 1.5× và ≥ $1,000/phút);
+  - số giao dịch tăng tốc (≥ 1.5× và ≥ 10/phút);
+  - lực mua (≥ 60% với ≥ 20 giao dịch);
+  - liquidity (≥ +20%);
+  - holder (≥ 30 holder và tăng ≥ 15, cần 2 lần đọc Helius).
+
+  Giá trị theo pair chỉ so trong cùng pair.
+- **Kết quả:**
+  - `UNKNOWN`: dưới 3/6 tín hiệu tính được;
+  - `PRE_EARLY`: ≥3 tín hiệu bật, bắt buộc có lực mua, MC không giảm;
+  - `NOT_YET`: các trường hợp còn lại.
+- **Hiển thị:** mục riêng ⚡ PRE-EARLY trên Tổng quan, badge trên card, và bảng tín hiệu trên trang token. Mỗi tín hiệu có ngưỡng, và có lý do khi thiếu dữ liệu.
+- **Ưu tiên:** token PRE-EARLY được ưu tiên cao nhất khi làm mới, và được đưa vào nhóm quét holder Helius.
+- **Test:** `tests/test_pre_early.py` (offline và live).

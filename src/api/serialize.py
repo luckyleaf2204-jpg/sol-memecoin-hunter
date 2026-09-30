@@ -165,6 +165,24 @@ def profile(st: TokenState) -> dict:
     }
 
 
+def pre_early_card(st: TokenState, full: bool = False) -> dict | None:
+    pe = st.pre_early
+    if pe is None or pe.status == "NOT_ELIGIBLE":
+        return None
+    out = {"status": pe.status, "label": t(f"web.pre.status.{pe.status}"), "fired": pe.fired,
+           "computable": pe.computable, "total": pe.total, "age_min": pe.age_min,
+           "data": t("web.pre.data_ok" if pe.computable >= 3 else "web.pre.data_missing",
+                     n=pe.computable, total=pe.total),
+           "blocked_by": [t(f"web.pre.block.{b}") for b in pe.blocked_by],
+           "reasons": [t(f"web.pre.sig.{s.key}") + ": " + s.value for s in pe.signals if s.fired]}
+    if full:
+        out["signals"] = [{"label": t(f"web.pre.sig.{s.key}"),
+                           "state": "fired" if s.fired else ("off" if s.fired is False else "unknown"),
+                           "value": s.value or t("common.unknown"),
+                           "rule": t(f"web.pre.need.{s.key}") if s.fired is None else s.note} for s in pe.signals]
+    return out
+
+
 def card(st: TokenState) -> dict:
     """Compact coin card. Numbers are kept raw for client-side sort/filter; labels are localized."""
     m, e, h, wi = st.market, st.early, st.holders, st.whale_intel
@@ -206,6 +224,7 @@ def card(st: TokenState) -> dict:
         "identity_claims": [{"source": SOURCE_LABEL.get(k, k), "symbol": v[0], "name": v[1]}
                             for k, v in sorted(st.identity.claims.items())],
         "token_program": st.identity.token_program or None,
+        "pre_early": pre_early_card(st),
         "fired": e.fired_count if e and e.strength is not None else None,
         "group": st.group or None,
         "group_reasons": [_group_reason(st, r) for r in st.group_reasons],
@@ -252,6 +271,7 @@ def view(st: TokenState, events=None, now: float | None = None) -> dict:
         "scores": [{"label": lab, "value": val, "note": note} for lab, val, note in subscore_rows(st)],
         "why": [{"points": p, "label": lab, "value": val, "source": src} for p, lab, val, src in why_items(st)],
         "early": early,
+        "pre_early": pre_early_card(st, full=True),
         "risk": {"score": rk.score, "level": t(f"state.{rk.level}"),
                  "categories": [{"label": t(f"riskcat.{c}"), "value": v} for c, v in rk.categories.items()],
                  "flags": [{"label": risk_text(f)[0], "detail": risk_text(f)[1], "points": f.points,

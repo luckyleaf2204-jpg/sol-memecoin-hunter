@@ -74,6 +74,8 @@ h2 { font-size: 16px; margin: 16px 2px 8px; }
 .badge { font-size: 11px; font-weight: 700; padding: 2px 7px; border-radius: 6px; background: var(--panel2); color: var(--muted); }
 .b-valid { color: var(--green); } .b-partial { color: var(--yellow); } .b-invalid { color: var(--red); }
 .b-early { color: #0f1117; background: var(--accent); }
+.b-pre { color: #0f1117; background: #facc15; }
+.g-pre > summary { color: #facc15; }
 .b-supp { color: var(--orange); }
 .scores { display: grid; grid-template-columns: repeat(3, 1fr); gap: 6px; margin-bottom: 8px; }
 .score { background: var(--panel2); border-radius: 10px; padding: 6px 8px; }

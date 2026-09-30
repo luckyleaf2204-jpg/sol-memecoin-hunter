@@ -130,6 +130,7 @@ function cardHtml(c) {
       <span class="badge">${esc(c.lifecycle_label)}</span>
       <span class="badge">${esc(c.age)}</span>
       ${c.identity === "CONFLICT" ? `<span class="badge b-invalid">⚠ ${esc(c.identity_label)}</span>` : c.identity === "UNVERIFIED" ? `<span class="badge">${esc(c.identity_label)}</span>` : ""}
+      ${c.pre_early && c.pre_early.status === "PRE_EARLY" ? `<span class="badge b-pre">⚡ PRE-EARLY ${esc(c.pre_early.fired)}/${esc(c.pre_early.total)}</span>` : ""}
       ${c.is_early ? `<span class="badge b-early">⚡ EARLY</span>` : ""}
       ${c.early_suppressed ? `<span class="badge b-supp">${esc(t("web.badge.suppressed"))}</span>` : ""}
       ${c.filters_passed ? `<span class="badge c-accent">${esc(t("lbl.pass"))}</span>` : ""}
@@ -149,6 +150,7 @@ function cardHtml(c) {
     </div>
     ${c.profile ? `<div class="meta">${esc(t("web.pf.initial"))} ${esc(c.profile.initial_label)} → ${esc(c.mc_label)} · ${gainTxt(c.profile)}${c.profile.mc_path.length > 2 ? " · " + esc(c.profile.mc_path.join(" → ")) : ""}</div>` : ""}
     ${c.group_reasons && c.group_reasons.length ? `<div class="meta">${esc(c.group_reasons.join(" · "))}</div>` : ""}
+    ${c.pre_early && c.pre_early.status === "PRE_EARLY" ? `<div class="meta c-accent">⚡ ${esc(c.pre_early.reasons.join(" · "))} · ${esc(c.pre_early.data)}</div>` : ""}
     <div class="foot">${updSpan(c.updated_at)}${c.hot && c.hot.length ? " · ⚑ " + esc(c.hot.join(", ")) : ""}</div>
   </a>`;
 }
@@ -332,7 +334,12 @@ function drawHome() {
   if (!d || !el) return;
   const p = listPrefs("home");
   if (S.open["g_opportunity"] === undefined) Object.assign(S.open, { g_opportunity: true, g_watch: true, g_nodata: false, g_excluded: false });
-  el.innerHTML = GROUPS.map(([g, ico]) => {
+  const pre = applyFilters(d.pre_early || [], p);
+  const preHtml = `<details class="sec grp g-pre" data-k="g_pre"${S.open.g_pre !== false ? " open" : ""}>
+      <summary>⚡ PRE-EARLY <span class="cnt">${esc((d.counts || {}).pre_early || 0)}</span></summary>
+      <div class="sec-body"><div class="meta">${esc(t("web.pre.rule"))}</div>
+      ${pre.length ? `<div class="cards">${pre.map(cardHtml).join("")}</div>` : `<div class="empty">${esc(t("web.pre.empty"))}</div>`}</div></details>`;
+  el.innerHTML = preHtml + GROUPS.map(([g, ico]) => {
     const items = applyFilters(d.groups[g] || [], p);
     const shown = (d.groups[g] || []).length, total = d.counts[g] || 0;
     const body = items.length
@@ -463,6 +470,15 @@ async function renderToken(mint, silent) {
     v.data_quality.issues.map((i) => `<div class="flag"><span class="${i.severity === "critical" ? "c-red" : "c-muted"}">${esc(i.text)}</span></div>`).join("");
   html += sec("overview", t("tab.d_overview"), ov);
 
+  if (v.pre_early) {
+    const pe = v.pre_early;
+    let pb = `<div class="kv"><span class="k">⚡ PRE-EARLY</span><span class="v ${pe.status === "PRE_EARLY" ? "c-green" : pe.status === "BLOCKED" ? "c-red" : "c-muted"}">${esc(pe.label)} · ${esc(pe.fired)}/${esc(pe.total)}</span><div class="meta">${esc(pe.data)} · ${esc(t("web.pre.age", { m: pe.age_min }))}</div></div>`;
+    if (pe.blocked_by.length) pb += `<div class="banner red">${esc(t("web.pre.blocked"))}: ${esc(pe.blocked_by.join(" · "))}</div>`;
+    pb += pe.signals.map((s) => `<div class="sig"><span class="m ${s.state === "fired" ? "c-green" : s.state === "off" ? "" : "c-muted"}">${s.state === "fired" ? "✓" : s.state === "off" ? "·" : "—"}</span>
+      <div class="b"><div>${esc(s.label)}</div><div class="meta">${esc(s.value)} · ${esc(s.rule)}</div></div></div>`).join("");
+    pb += `<div class="meta">${esc(t("web.pre.rule"))}</div>`;
+    html += sec("pre_early", "⚡ PRE-EARLY", pb);
+  }
   if (v.early) {
     const e = v.early;
     let eb = `<div class="kv"><span class="k">${esc(t("score.early_signal"))}</span><span class="v ${scoreCls(e.strength)}">${e.strength === null ? esc(t("common.unknown")) : esc(e.strength) + "/100"} (${esc(e.groups)}/7)</span>${e.strength === null ? `<div class="meta">${esc(e.note)}</div>` : ""}</div>`;

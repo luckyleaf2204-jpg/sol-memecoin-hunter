@@ -34,6 +34,7 @@ from holders.analyzer import HolderAnalyzer
 from intel.events import EventDetector
 from pumpfun.client import PumpFunClient
 from pumpfun.stream import PumpPortalStream
+from intel.pre_early import compute_pre_early
 from intel.mc_track import _pump_quote_is_sol, anchor_at_discovery, compute_trend, confirm_quote, update_mc_track
 from scanner.pipeline import evaluate, ingest_market
 from scanner.scheduler import TierClock, deep_due, dev_due, market_due, priority_score
@@ -294,6 +295,7 @@ class ScannerEngine:
         st.refreshed["eval"] = now
         st.trend = compute_trend(st, h, now)                 # display / priority only
         st.group, st.group_reasons = classify_group(st, self.settings)
+        st.pre_early = compute_pre_early(st, h, now)         # separate layer; never feeds Early Signal
         events = self.detector.detect(st, h, now)
         if events:
             st.recent_events = (st.recent_events + events)[-20:]
@@ -455,7 +457,9 @@ class ScannerEngine:
         this pool, and then ahead of the others (scheduler priority)."""
         pool = {st.mint: st for st in self._candidates()}
         for st in self.tracked.values():
-            if st.watch or st.group in ("opportunity", "watch"):
+            pe = st.pre_early
+            young_signal = bool(pe and pe.status in ("PRE_EARLY", "NOT_YET") and pe.fired >= 1)
+            if st.watch or st.group in ("opportunity", "watch") or young_signal:
                 pool.setdefault(st.mint, st)
         return list(pool.values())
 
