@@ -304,3 +304,18 @@ Token **hot** được xếp theo thứ tự: ⭐ đang theo dõi, mới (<15 ph
 **MC ban đầu** (`intel/mc_track.py`, bảng `mc_track`): MC hợp lệ đầu tiên (không có lỗi critical) sau khi phát hiện; ghi một lần, không bao giờ ghi đè (SQL `COALESCE`), khôi phục sau restart. Lịch sử MC = các mốc thay đổi ≥30%. **MC kịch bản** = 3 mốc MC chuẩn kế tiếp kèm hệ số cần đạt, và tham chiếu thật (đỉnh đã ghi nhận, ATH Pump.fun, token tốt nhất của dev nếu lịch sử đã xác minh). Không có xác suất, không phải dự đoán. Không có MC hợp lệ thì hiển thị "Chưa đủ dữ liệu".
 
 API mới: `GET /api/home` (4 nhóm + hồ sơ coin), `GET /api/status` → `refresh` (chu kỳ mục tiêu và thực đo). Ví liên quan của dev và hoạt động X/Telegram: NOT AVAILABLE, không đoán.
+
+## 12. Canonical token identity (`validation/identity.py`)
+
+Sự cố 2026-09-30: CA `XsDoVfqeBukxuZHWhdvWHBhgEHjGNst4MLodqsJHzoB` (Tesla xStock, TSLAx, Token-2022) bị hiển thị là `$APEWIF`. APEWIF thật là mint `FUgEk…aDtT`, một curve Pump.fun được định giá bằng TSLAx. Feed discovery đã gắn tên APEWIF vào CA của đồng quote.
+
+- **Nguồn tra theo CA (canonical):** Helius `getAsset` (metadata on-chain; gọi 1 lần/token, chỉ với token trong nhóm quét sâu), bản ghi Pump.fun có `mint` = CA, pair DexScreener có `baseToken.address` = CA.
+- **Chỉ là khai báo (claim):** PumpPortal.
+- **Trạng thái:**
+  - `UNVERIFIED`: chưa có nguồn canonical → không bao giờ vào 🔥.
+  - `VERIFIED`: mọi nguồn cùng một symbol.
+  - `CONFLICT`: symbol khác nhau → Data Quality critical `identity_conflict` → INVALID, nhóm ⛔; không quét holder (Helius), không neo MC.
+- **So sánh symbol:** chuẩn hoá NFKC, bỏ khoảng trắng, bỏ "$", không phân biệt hoa/thường. Name không được so.
+- **Hiển thị:** luôn dùng symbol/name canonical (ưu tiên Helius > Pump.fun > DexScreener).
+- **MC ban đầu:** `marketCapSol` của PumpPortal tính bằng đơn vị quote của curve. Chỉ được dùng khi quote đã được xác nhận là SOL (qua Pump.fun `quote_mint` hoặc quote của pair DexScreener). Nếu quote khác SOL thì huỷ.
+- **Test:** `tests/test_identity.py` là regression cho đúng CA này, có cả test live.

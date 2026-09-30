@@ -2,13 +2,13 @@
 
 Order of checks (first match wins):
 
-  ⛔ excluded     INVALID data · Risk HIGH/EXTREME (> 60) · any RUG-category risk flag (liquidity shock,
+  ⛔ excluded     token identity CONFLICT (validation.identity) · INVALID data · Risk HIGH/EXTREME (> 60) · any RUG-category risk flag (liquidity shock,
                   dev dump, recent dev sell) · liquidity state SHOCK · holder data INVALID (anomaly, D6)
                   · top10 above the user's max_top10_pct filter
   ⏳ nodata       no market data yet, INVALID only because data is MISSING / not yet indexed / stale (no
                   malformed value, no rug evidence), or Early Signal UNKNOWN (< 10 min history or < 4/7 groups).
                   Such a token is still INVALID for every score — it is only displayed as "not enough data".
-  🔥 opportunity  data VALID + holder data verified + Early Signal computed and NOT suppressed, and
+  🔥 opportunity  identity VERIFIED + data VALID + holder data verified + Early Signal computed and NOT suppressed, and
                   either Early Signal TRUE (engine unchanged, D1–D8) or [>= 3 signals fired AND
                   strength >= 50 AND Opportunity >= 60]. "Several confirming signals at once" — it is
                   NOT a buy recommendation.
@@ -41,6 +41,8 @@ def _missing_only(st: TokenState) -> bool:
 def classify_group(st: TokenState, s: Settings | None = None) -> tuple[str, list[str]]:
     s = s or Settings()
     ex = []
+    if st.identity.status == "CONFLICT":
+        ex.append("identity_conflict")
     missing = st.dq_status == INVALID and _missing_only(st)
     if st.dq_status == INVALID and not missing:
         ex.append("dq_invalid")
@@ -74,7 +76,8 @@ def classify_group(st: TokenState, s: Settings | None = None) -> tuple[str, list
     holders_ok = st.holder_status == "ok" and st.holders is not None
     confirmed = e.is_early is True or (e.fired_count >= OPP_MIN_FIRED and e.strength >= OPP_MIN_STRENGTH
                                        and opp is not None and opp >= OPP_MIN_SCORE)
-    if st.dq_status == VALID and holders_ok and not e.suppressed and confirmed:
+    verified = st.identity.status == "VERIFIED"
+    if st.dq_status == VALID and holders_ok and verified and not e.suppressed and confirmed:
         return "opportunity", ["early_true" if e.is_early else "multi_signal"]
 
     why = []
@@ -87,6 +90,8 @@ def classify_group(st: TokenState, s: Settings | None = None) -> tuple[str, list
             why.append("dq_partial")
         if not holders_ok:
             why.append("holders_missing")
+        if not verified:
+            why.append("identity_unverified")
         if e.suppressed:
             why.append("suppressed")
         return "watch", why

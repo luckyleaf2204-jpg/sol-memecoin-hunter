@@ -6,6 +6,7 @@
 
 Deductions:
   critical market issue                     -40 each (forces INVALID)
+  token identity CONFLICT (validation.identity)  critical: feeds/sources disagree on what this CA is
   market warning                            -10 each
   market data older than 1.5 × scan interval  -10 ; older than max(60 s, 3 × interval) = critical
   holder data unavailable                   -10
@@ -27,6 +28,8 @@ def assess_quality(st: TokenState, scan_interval: float, now: float | None = Non
     if not st.market:
         issues.append(Issue("critical", "market", "no_market"))
     issues += st.market_issues
+    if st.identity.status == "CONFLICT":
+        issues.append(Issue("critical", "identity", "identity_conflict", {"detail": st.identity.reason}))
 
     score = 100
     for i in issues:

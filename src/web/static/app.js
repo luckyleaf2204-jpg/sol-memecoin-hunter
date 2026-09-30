@@ -127,6 +127,7 @@ function cardHtml(c) {
       <span class="badge ${dqCls}">${esc(c.dq_label)}${c.dq_score !== null ? " " + esc(c.dq_score) : ""}</span>
       <span class="badge">${esc(c.lifecycle_label)}</span>
       <span class="badge">${esc(c.age)}</span>
+      ${c.identity === "CONFLICT" ? `<span class="badge b-invalid">⚠ ${esc(c.identity_label)}</span>` : c.identity === "UNVERIFIED" ? `<span class="badge">${esc(c.identity_label)}</span>` : ""}
       ${c.is_early ? `<span class="badge b-early">⚡ EARLY</span>` : ""}
       ${c.early_suppressed ? `<span class="badge b-supp">${esc(t("web.badge.suppressed"))}</span>` : ""}
       ${c.filters_passed ? `<span class="badge c-accent">${esc(t("lbl.pass"))}</span>` : ""}
@@ -429,6 +430,9 @@ async function renderToken(mint, silent) {
   </div>`;
   syncClock(v.server_time);
   const pf = c.profile;
+  const claims = (c.identity_claims || []).map((x) => `${esc(x.source)}: ${esc(x.symbol)}${x.name ? " (" + esc(x.name) + ")" : ""}`).join(" · ");
+  html += `<div class="banner ${c.identity === "CONFLICT" ? "red" : c.identity === "VERIFIED" ? "green" : ""}">${esc(t("web.id.title"))}: ${esc(c.identity_label)}
+    <div class="meta">${claims || esc(t("web.nodata"))}${c.identity === "CONFLICT" ? " — " + esc(t("web.id.conflict_note")) : ""}</div></div>`;
   html += `<div class="token-head">
     <div class="meta">${esc(t("web.pf.found", { time: hhmm(pf.first_seen) }))}${pf.age_at_discovery_min !== null ? " · " + esc(t("web.pf.found_age", { m: pf.age_at_discovery_min })) : ""} · ${esc(t("web.pf.age"))} ${esc(c.age)}</div>
     <div class="mcrow">

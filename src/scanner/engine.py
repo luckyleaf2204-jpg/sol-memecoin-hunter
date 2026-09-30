@@ -34,7 +34,7 @@ from holders.analyzer import HolderAnalyzer
 from intel.events import EventDetector
 from pumpfun.client import PumpFunClient
 from pumpfun.stream import PumpPortalStream
-from intel.mc_track import anchor_at_discovery, compute_trend, update_mc_track
+from intel.mc_track import _pump_quote_is_sol, anchor_at_discovery, compute_trend, confirm_quote, update_mc_track
 from scanner.pipeline import evaluate, ingest_market
 from scanner.scheduler import TierClock, deep_due, dev_due, market_due, priority_score
 from scoring.groups import classify_group
@@ -42,6 +42,7 @@ from scoring.ranking import rank_opportunities
 from solana_data.rpc import SolanaRpc
 from i18n import t
 from solana_data.rpc import SOURCE_DAS
+from validation.identity import apply_identity, claim_from_info, record_claim
 from validation.market import CURVE_MAX_AGE_S
 
 WSOL = "So11111111111111111111111111111111111111112"
@@ -239,6 +240,7 @@ class ScannerEngine:
         if st.holders is None and st.holder_status not in ("failed", "invalid"):
             st.holder_status = "pending" if self.rpc.has_das else "no_key"
         h = self.history.get(st.mint)
+        apply_identity(st)                                   # canonical symbol/name of THIS CA (+ conflicts)
         evaluate(st, self.settings, h, now, self.sol_price)
         st.refreshed["eval"] = now
         st.trend = compute_trend(st, h, now)                 # display / priority only
@@ -253,16 +255,26 @@ class ScannerEngine:
     def _add(self, info: TokenInfo) -> bool:
         st = self.tracked.get(info.mint)
         if st:
-            st.info.merge(info)
+            self._merge_info(st, info)
             return False
         age_h = (time.time() - info.created_at) / 3600 if info.created_at else 0
         if info.mint not in self.watch and (age_h > self.settings.max_age_hours
                                             or len(self.tracked) >= self.settings.max_tracked):
             return False
         st = self.tracked[info.mint] = TokenState(info=info, watch=info.mint in self.watch)
+        claim_from_info(st, info.sources, info.symbol, info.name)   # a feed only CLAIMS a symbol/name
+        apply_identity(st)
         self._restore_mc(st)
         anchor_at_discovery(st, self.sol_price)          # initial MC from the discovery source, if reported
         return True
+
+    def _merge_info(self, st: TokenState, info: TokenInfo) -> None:
+        """Merge an observation of this CA, recording its identity claim and the curve quote (Pump.fun)."""
+        claim_from_info(st, info.sources, info.symbol, info.name)
+        st.info.merge(info)
+        apply_identity(st)
+        if info.quote_mint:
+            confirm_quote(st, _pump_quote_is_sol(info))
 
     def _save_mc(self) -> None:
         """Write changed MC journeys now (a new anchor is persisted in the same round it was set)."""
@@ -328,7 +340,7 @@ class ScannerEngine:
         for st in stale[:CURVE_REFRESH_PER_CYCLE]:
             fresh = await self.pump.coin(st.mint)
             if fresh:
-                st.info.merge(fresh)
+                self._merge_info(st, fresh)
 
     async def refresh_market(self, mints: list[str] | None = None) -> dict | None:
         """DexScreener batch for `mints` (default: every tracked token). Returns the result or None."""
@@ -350,6 +362,8 @@ class ScannerEngine:
             st = self.tracked.get(mint)
             if st:
                 ingest_market(st, market, socials, self.sol_price, self.history.get(mint), now)
+                record_claim(st.identity, "dexscreener", market.base_symbol, market.base_name)
+                apply_identity(st)
                 update_mc_track(st, now)
         self._save_mc()
         return res
@@ -447,7 +461,16 @@ class ScannerEngine:
         if not info.creator or info.total_supply is None or (info.real_sol_reserves is None and not info.complete):
             fresh = await self.pump.coin(info.mint)
             if fresh:
-                info.merge(fresh)
+                self._merge_info(st, fresh)
+        if self.rpc.has_das and not st.identity.helius_checked:
+            asset = await self.rpc.das_get_asset(info.mint)
+            if asset is not None:
+                st.identity.helius_checked = True
+                st.identity.token_program, st.identity.extensions = asset["token_program"], asset["extensions"]
+                record_claim(st.identity, "helius", asset["symbol"], asset["name"])
+        if apply_identity(st).status == "CONFLICT":
+            st.holder_status = st.holder_status or "pending"
+            return                                        # identity first: never analyse a mislabelled CA
         if info.total_supply is None:
             sup = await self.rpc.token_supply(info.mint)
             if sup:
@@ -543,7 +566,7 @@ class ScannerEngine:
             self._restore_mc(st)
         info = await self.pump.coin(mint)
         if info:
-            st.info.merge(info)
+            self._merge_info(st, info)
         await self._deep(st, force_dev=True)
         res = await self.dex.tokens([WSOL, mint]) or {}
         wsol = res.get(WSOL, (None, None))[0]
@@ -551,6 +574,8 @@ class ScannerEngine:
             self.sol_price = wsol.price_usd
         if mint in res:
             ingest_market(st, res[mint][0], res[mint][1], self.sol_price, self.history.get(mint))
+            record_claim(st.identity, "dexscreener", res[mint][0].base_symbol, res[mint][0].base_name)
+            apply_identity(st)
             update_mc_track(st)
             st.refreshed["market"] = time.time()
         self._evaluate(st)

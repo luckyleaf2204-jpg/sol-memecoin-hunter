@@ -17,7 +17,7 @@ from core.models import EarlySignal, Issue, McTrack, RiskFactor, RiskResult, Tok
 from database.db import Database
 from dex.dexscreener import parse_pair
 from history.store import POINT_SPACING_S, HolderSnap, TokenHistory
-from intel.mc_track import anchor_at_discovery, compact_path, compute_trend, mc_scenario, update_mc_track
+from intel.mc_track import anchor_at_discovery, confirm_quote, compact_path, compute_trend, mc_scenario, update_mc_track
 from scanner import scheduler as sch
 from scanner.engine import ScannerEngine
 from scanner.pipeline import ingest_market
@@ -142,10 +142,11 @@ def test_initial_mc_saved_once_never_overwritten_and_history():
 
 def test_initial_mc_anchored_at_discovery_from_source():
     now = time.time()
-    # PumpPortal create event: marketCapSol × SOL/USD
+    # PumpPortal create event: marketCapSol is in QUOTE units -> pending until the quote is confirmed SOL
     st = TokenState(info=TokenInfo(mint="PP1", discovery_mc_sol=30.0, discovered_at=now))
-    assert anchor_at_discovery(st, 150.0)
-    assert st.mc_track.initial_mc == pytest.approx(4_500) and st.mc_track.initial_ts == now
+    assert not anchor_at_discovery(st, 150.0) and st.mc_track.pending is not None
+    assert confirm_quote(st, True)                              # Pump.fun / DexScreener: quote is SOL
+    assert st.mc_track.initial_mc == pytest.approx(4_500) and st.mc_track.initial_ts == now   # discovery time
     assert "PumpPortal" in st.mc_track.initial_source
     # later DexScreener MC (and any other source) never replaces it
     _ingest(st, 60_000, now + 120)
@@ -155,6 +156,13 @@ def test_initial_mc_anchored_at_discovery_from_source():
     st2 = TokenState(info=TokenInfo(mint="PF1", pump_usd_mc=12_345.0, discovered_at=now))
     assert anchor_at_discovery(st2, None) and st2.mc_track.initial_mc == 12_345.0
     assert "Pump.fun" in st2.mc_track.initial_source
+    # curve quoted in another token (e.g. TSLAx): marketCapSol × SOL price would be wrong -> discarded,
+    # the anchor then comes from the first validated USD market cap (DexScreener)
+    st5 = TokenState(info=TokenInfo(mint="QT1", discovery_mc_sol=11.3, discovered_at=now))
+    anchor_at_discovery(st5, 150.0)
+    assert not confirm_quote(st5, False) and st5.mc_track.pending is None and st5.mc_track.initial_mc is None
+    _ingest(st5, 9_000, now + 30)
+    assert st5.mc_track.initial_mc == 9_000 and st5.mc_track.initial_source == "DexScreener"
     # no sourced value -> no anchor yet (never invented); implausible values rejected
     st3 = TokenState(info=TokenInfo(mint="NO1", discovery_mc_sol=30.0, discovered_at=now))
     assert not anchor_at_discovery(st3, None) and st3.mc_track.initial_mc is None
@@ -168,16 +176,22 @@ def test_engine_anchors_on_discovery_and_persists_immediately(tmp_path):
     eng.sol_price = 100.0
 
     async def latest(n):
-        return [TokenInfo(mint="DISC1", created_at=time.time() - 30, discovery_mc_sol=40.0),
-                TokenInfo(mint="DISC2", created_at=time.time() - 30, pump_usd_mc=7_000.0)]
+        return [TokenInfo(mint="DISC1", created_at=time.time() - 30, discovery_mc_sol=40.0, sources={"pumpportal"}),
+                TokenInfo(mint="DISC2", created_at=time.time() - 30, pump_usd_mc=7_000.0, sources={"pumpfun"},
+                          symbol="TKN")]
 
     async def none(*a, **k):
         return []
     eng.pump.latest, eng.pump.recently_traded = latest, none
     asyncio.run(eng.discover(full=True))
-    assert eng.tracked["DISC1"].mc_track.initial_mc == pytest.approx(4_000)
+    assert eng.tracked["DISC1"].mc_track.initial_mc is None and eng.tracked["DISC1"].mc_track.pending
     saved = db.load_mc_tracks()                                  # written in the same round, not 20s later
-    assert saved["DISC1"].initial_mc == pytest.approx(4_000) and saved["DISC2"].initial_mc == 7_000.0
+    assert saved["DISC2"].initial_mc == 7_000.0 and "DISC1" not in saved
+    # Pump.fun record of DISC1 arrives: quote is SOL -> the DISCOVERY value is committed and saved at once
+    eng._merge_info(eng.tracked["DISC1"], TokenInfo(mint="DISC1", quote_mint="So11111111111111111111111111111111111111112",
+                                                    sources={"pumpfun"}))
+    eng._save_mc()
+    assert db.load_mc_tracks()["DISC1"].initial_mc == pytest.approx(4_000)
 
 
 def test_migrate_graduate_keeps_anchor_and_continuous_history(tmp_path):
@@ -417,13 +431,20 @@ def test_trend_is_same_pair_only():
 
 
 # ---------------------------------------------------------------- groups
+def _verified(st):
+    from validation.identity import apply_identity, record_claim
+    record_claim(st.identity, "dexscreener", "TKN", "")
+    apply_identity(st)
+    return st
+
+
 def _early(strength, fired, is_early, suppressed=()):
     return EarlySignal(strength=strength, is_early=is_early, transition=is_early, fired_count=fired,
                        suppressed=list(suppressed), groups_computable=5 if strength is not None else 2)
 
 
 def test_groups_follow_existing_results_only():
-    st = build_state(dex_pair(mint="G1"))
+    st = _verified(build_state(dex_pair(mint="G1")))
     st.holder_status = "ok"
     st.early = _early(72, 4, True)
     assert classify_group(st)[0] == "opportunity"
@@ -456,6 +477,9 @@ def test_missing_data_is_nodata_but_malformed_data_is_excluded():
 def test_opportunity_needs_verified_holders_and_valid_data():
     st = build_state(dex_pair(mint="G4"))
     st.early = _early(72, 4, True)
+    st.holder_status = "ok"
+    assert classify_group(st)[0] == "watch" and "identity_unverified" in classify_group(st)[1]   # not verified
+    _verified(st)
     st.holder_status = "pending"                                     # holders not verified yet
     assert classify_group(st)[0] == "watch"
     st.holder_status = "ok"
@@ -470,7 +494,7 @@ def test_opportunity_needs_verified_holders_and_valid_data():
 @pytest.fixture
 def web(tmp_path):
     eng = ScannerEngine(Settings(), Database(tmp_path / "w.db"), keys=ApiKeys(helius=SECRET), on_log=lambda m: None)
-    good = build_state(dex_pair(mint="GoodMint1111111111111111111111111111111111"))
+    good = _verified(build_state(dex_pair(mint="GoodMint1111111111111111111111111111111111")))
     good.holder_status = "ok"
     good.early = _early(72, 4, True)
     update_mc_track(good)

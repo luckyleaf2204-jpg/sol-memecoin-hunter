@@ -99,6 +99,22 @@ class SolanaRpc:
                 "call": st.last_call or "getTokenAccounts", "status": st.last_status, "ms": st.last_ms,
                 "error": "" if r is not None else st.last_error}
 
+    async def das_get_asset(self, mint: str) -> dict | None:
+        """On-chain metadata of this exact mint (DAS getAsset): symbol, name, token program, mint extensions."""
+        if not self.helius_url:
+            return None
+        payload = {"jsonrpc": "2.0", "id": 1, "method": "getAsset", "params": {"id": mint}}
+        data = await self.http.post_json(self.helius_url, payload, source=SOURCE_DAS, retries=1)
+        r = data.get("result") if isinstance(data, dict) else None
+        if not isinstance(r, dict):
+            return None
+        if r.get("id") and r["id"] != mint:          # never accept metadata of another address
+            return None
+        meta = (r.get("content") or {}).get("metadata") or {}
+        return {"symbol": (meta.get("symbol") or "").strip(), "name": (meta.get("name") or "").strip(),
+                "token_program": (r.get("token_info") or {}).get("token_program") or "",
+                "extensions": sorted((r.get("mint_extensions") or {}).keys()), "interface": r.get("interface") or ""}
+
     async def das_token_accounts(self, mint: str, page: int = 1, limit: int = 1000) -> dict | None:
         if not self.helius_url:
             return None

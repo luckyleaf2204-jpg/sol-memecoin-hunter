@@ -88,6 +88,7 @@ def parse_coin(d: dict) -> TokenInfo | None:
         ath_usd_mc=_f(d.get("ath_market_cap")),
         sol_price=sol_price,
         pump_updated_at=time.time(),
+        quote_mint=d.get("quote_mint") or "11111111111111111111111111111111",
         sources={SOURCE},
     )
 

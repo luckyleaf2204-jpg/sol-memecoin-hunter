@@ -51,7 +51,8 @@ class TokenInfo:
     pump_updated_at: float | None = None   # when Pump.fun data above was fetched
     dev_initial_buy: float | None = None   # tokens bought by creator in create tx (PumpPortal)
     dev_initial_sol: float | None = None
-    discovery_mc_sol: float | None = None  # PumpPortal create event: market cap in SOL at creation
+    discovery_mc_sol: float | None = None  # PumpPortal create event: market cap in QUOTE units (SOL for classic curves)
+    quote_mint: str = ""                   # Pump.fun record: curve quote mint ("" = unknown)
     sources: set[str] = field(default_factory=set)
     discovered_at: float = field(default_factory=time.time)
 
@@ -88,6 +89,9 @@ class MarketData:
     dex_id: str = ""
     pair_address: str = ""
     quote_symbol: str = ""
+    quote_address: str = ""
+    base_symbol: str = ""                  # DexScreener baseToken (address == this CA) — identity check
+    base_name: str = ""
     pair_created_at: float | None = None
     updated_at: float = field(default_factory=time.time)
 
@@ -354,6 +358,25 @@ class WhaleIntel:
 
 
 @dataclass
+class TokenIdentity:
+    """Canonical identity of ONE contract address.
+
+    claims: source -> (symbol, name). CA-keyed sources (looked up BY this address) are canonical:
+      helius (on-chain metadata via DAS getAsset), pumpfun (Pump.fun record of this mint),
+      dexscreener (pair whose baseToken.address == this CA).
+    Discovery feeds (pumpportal) only CLAIM a symbol/name; they are never trusted on their own.
+    status: UNVERIFIED (no canonical source yet) | VERIFIED | CONFLICT (sources disagree on the symbol)."""
+    claims: dict[str, tuple[str, str]] = field(default_factory=dict)
+    status: str = "UNVERIFIED"
+    symbol: str = ""
+    name: str = ""
+    reason: str = ""
+    helius_checked: bool = False
+    token_program: str = ""
+    extensions: list[str] = field(default_factory=list)
+
+
+@dataclass
 class McTrack:
     """Market-cap journey as WE observed it.
 
@@ -372,6 +395,7 @@ class McTrack:
     last_pair: str = ""                    # DexScreener pair of the last observation
     last_mc: float | None = None
     migrations: list[dict] = field(default_factory=list)   # {ts, from, to, mc_before, mc_after}
+    pending: dict | None = None            # PumpPortal MC waiting for "quote is SOL" confirmation (not persisted)
     dirty: bool = False                    # needs saving
 
     def gain_x(self, current: float | None) -> float | None:
@@ -418,6 +442,7 @@ class TokenState:
     snapshotted: bool = False
     last_deep: float = 0.0
     mc_track: McTrack | None = None
+    identity: TokenIdentity = field(default_factory=TokenIdentity)
     trend: dict = field(default_factory=dict)            # display/priority deltas (never used for scoring)
     group: str = ""                                       # opportunity | watch | nodata | excluded | quiet
     group_reasons: list[str] = field(default_factory=list)

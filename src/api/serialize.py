@@ -15,6 +15,7 @@ from alerts.report import (SECTIONS, age_str, dev_label, event_text, filter_text
 from core.models import TokenState
 from i18n import t
 from intel.mc_track import compact_path, mc_scenario, validated_mc
+from validation.identity import SOURCE_LABEL
 
 
 def summary(st: TokenState) -> dict:
@@ -200,6 +201,11 @@ def card(st: TokenState) -> dict:
         "narratives": [t(f"narrative.{n}") for n in st.narratives],
         "filters_passed": not st.filter_fails,
         "watch": st.watch,
+        "identity": st.identity.status,
+        "identity_label": t(f"web.id.{st.identity.status}"),
+        "identity_claims": [{"source": SOURCE_LABEL.get(k, k), "symbol": v[0], "name": v[1]}
+                            for k, v in sorted(st.identity.claims.items())],
+        "token_program": st.identity.token_program or None,
         "fired": e.fired_count if e and e.strength is not None else None,
         "group": st.group or None,
         "group_reasons": [_group_reason(st, r) for r in st.group_reasons],

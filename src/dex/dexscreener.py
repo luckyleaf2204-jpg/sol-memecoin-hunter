@@ -58,6 +58,9 @@ def parse_pair(p: dict) -> MarketData:
         dex_id=p.get("dexId") or "",
         pair_address=p.get("pairAddress") or "",
         quote_symbol=(p.get("quoteToken") or {}).get("symbol") or "",
+        quote_address=(p.get("quoteToken") or {}).get("address") or "",
+        base_symbol=(p.get("baseToken") or {}).get("symbol") or "",
+        base_name=(p.get("baseToken") or {}).get("name") or "",
         pair_created_at=created / 1000 if created else None,
     )
 

@@ -17,6 +17,24 @@ SOL_USD = 117.5
 set_language("en")
 
 
+@pytest.fixture(autouse=True)
+def _offline_unless_live(request, monkeypatch):
+    """Offline tests must be hermetic: no real API key -> no real network call, even under `--live`
+    (where HELIUS_API_KEY is exported for the live tests only)."""
+    if "live" not in request.keywords:
+        monkeypatch.delenv("HELIUS_API_KEY", raising=False)
+        monkeypatch.delenv("SOLANA_RPC_URL", raising=False)
+    yield
+
+
+@pytest.fixture(autouse=True)
+def _reset_language():
+    """create_app() switches the global UI language to Vietnamese; never let that leak into the next test."""
+    set_language("en")
+    yield
+    set_language("en")
+
+
 def pytest_addoption(parser):
     parser.addoption("--live", action="store_true", help="run tests that call real APIs")
 

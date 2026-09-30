@@ -5,9 +5,12 @@ Opportunity, Risk, Data Quality or Early Signal.
 
 INITIAL MC (anchor) — immutable
   Set once, at discovery, from the discovery source when it reports a market cap:
-    1. PumpPortal create event: marketCapSol × SOL/USD (DexScreener WSOL price)
-    2. Pump.fun list/coin: usd_market_cap
-  otherwise from the first VALIDATED DexScreener MC. Plausibility: finite and >= MIN_PLAUSIBLE_MC (the same
+    1. Pump.fun record of this CA: usd_market_cap (already in USD, correct for any curve quote)
+    2. PumpPortal create event: marketCapSol × SOL/USD at discovery — but `marketCapSol` is in the curve's
+       QUOTE units, and curves can be quoted in other tokens (e.g. TSLAx). So it is only kept as `pending`
+       and committed (with the discovery timestamp and SOL price) once the quote is confirmed to be SOL
+       (Pump.fun quote_mint or the DexScreener pair's quote token); a non-SOL quote discards it.
+  otherwise from the first VALIDATED DexScreener MC. Never while the token identity is in CONFLICT. Plausibility: finite and >= MIN_PLAUSIBLE_MC (the same
   floor the market validator uses). Once set it is never changed: later MC, a new pair after
   graduation/migration, restarts (SQLite COALESCE) and re-discovery after pruning (engine stash) all keep it.
 
@@ -28,6 +31,7 @@ import math
 import time
 
 from core.models import INVALID, McTrack, TokenState
+from pumpfun.client import SOL_QUOTES
 from history.store import TokenHistory
 from validation.market import MIN_PLAUSIBLE_MC
 
@@ -74,17 +78,38 @@ def set_anchor(tr: McTrack, mc: float, ts: float, source: str) -> bool:
     return True
 
 
+def _conflict(st: TokenState) -> bool:
+    return st.identity.status == "CONFLICT"
+
+
 def anchor_at_discovery(st: TokenState, sol_price: float | None) -> bool:
-    """Anchor from the discovery source itself (no DexScreener needed). Sourced values only."""
+    """Anchor from the discovery source itself. Sourced values only; PumpPortal MC waits for its quote."""
     info, tr = st.info, _track(st)
-    if tr.initial_mc is not None:
+    if tr.initial_mc is not None or _conflict(st):
         return False
     ts = info.discovered_at
-    if info.discovery_mc_sol and sol_price and sol_price > 0:
-        if set_anchor(tr, info.discovery_mc_sol * sol_price, ts, SRC_PUMPPORTAL):
-            return True
-    if info.pump_usd_mc:
-        return set_anchor(tr, info.pump_usd_mc, ts, SRC_PUMPFUN)
+    if info.pump_usd_mc and set_anchor(tr, info.pump_usd_mc, ts, SRC_PUMPFUN):
+        tr.pending = None
+        return True
+    if info.discovery_mc_sol and sol_price and sol_price > 0 and tr.pending is None:
+        tr.pending = {"mc_quote": info.discovery_mc_sol, "sol_price": sol_price, "ts": ts}
+        confirm_quote(st, _pump_quote_is_sol(info))
+    return tr.initial_mc is not None
+
+
+def _pump_quote_is_sol(info) -> bool | None:
+    return (info.quote_mint in SOL_QUOTES) if info.quote_mint else None
+
+
+def confirm_quote(st: TokenState, quote_is_sol: bool | None) -> bool:
+    """Resolve a pending PumpPortal MC: SOL quote -> commit (discovery time), other quote -> discard."""
+    tr = _track(st)
+    p = tr.pending
+    if not p or quote_is_sol is None or tr.initial_mc is not None:
+        return False
+    tr.pending = None
+    if quote_is_sol and not _conflict(st):
+        return set_anchor(tr, p["mc_quote"] * p["sol_price"], p["ts"], SRC_PUMPPORTAL)
     return False
 
 
@@ -92,11 +117,21 @@ def update_mc_track(st: TokenState, now: float | None = None) -> McTrack:
     """After a validated market ingest: anchor (if still missing), migrations, ATH, >= 30 % milestones."""
     now = now or time.time()
     tr = _track(st)
+    if _conflict(st):
+        tr.pending = None                           # a mislabelled CA never gets a discovery MC
+        return tr
     mc = validated_mc(st)
     if mc is None:
         return tr
     if tr.initial_mc is None:
-        set_anchor(tr, mc, now, ("Pump.fun curve via " + SRC_DEX) if st.market.is_curve else SRC_DEX)
+        m = st.market
+        quote_sol = (m.quote_address in SOL_QUOTES) if m.quote_address else (
+            m.quote_symbol.upper() in ("SOL", "WSOL") if m.quote_symbol else None)
+        if m.is_curve:                              # the curve pair tells us the curve's quote
+            confirm_quote(st, quote_sol)
+        if tr.initial_mc is None:
+            tr.pending = None                       # unconfirmed discovery MC is never used later
+            set_anchor(tr, mc, now, ("Pump.fun curve via " + SRC_DEX) if m.is_curve else SRC_DEX)
     pair = st.market.pair_address or ""
     migrated = bool(tr.last_pair and pair and pair != tr.last_pair)
     if migrated:
