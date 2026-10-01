@@ -10,9 +10,61 @@ is used for holder counts and full top-50 lists.
 """
 from __future__ import annotations
 
+import os
+import time
+
 from core.http import HttpClient
 
 PUBLIC_RPC = "https://api.mainnet-beta.solana.com"
+# Helius credit cost per call (https://docs.helius.dev/ — DAS 10, standard RPC 1). The free plan has ~1M / month:
+# without a budget the holder scans burned it in about a day (production incident 2026-10-01: "max usage reached").
+DAS_CREDITS, RPC_CREDITS = 10, 1
+
+
+class CreditMeter:
+    """Counts Helius credits per UTC day against monthly_credits / 30. Spending stops (fail-safe) at the limit."""
+
+    def __init__(self, monthly_credits: int):
+        self.daily_budget = max(0, int(monthly_credits / 30))
+        self.day = time.strftime("%Y-%m-%d", time.gmtime())
+        self.used = 0
+        self.denied = 0
+        self.exhausted_at: float | None = None      # set when Helius itself answers "max usage reached"
+
+    def _roll(self):
+        d = time.strftime("%Y-%m-%d", time.gmtime())
+        if d != self.day:
+            self.day, self.used, self.denied = d, 0, 0
+
+    def paced_ok(self, now: float | None = None, burst: float = 0.05) -> bool:
+        """Spend evenly over the UTC day: used <= budget × (elapsed fraction of the day + burst)."""
+        self._roll()
+        now = now or time.time()
+        frac = (now % 86400) / 86400
+        return self.used <= self.daily_budget * min(1.0, frac + burst)
+
+    def remaining(self) -> int:
+        self._roll()
+        return max(0, self.daily_budget - self.used)
+
+    def allow(self, cost: int) -> bool:
+        self._roll()
+        if self.exhausted_at and time.time() - self.exhausted_at < 3600:
+            self.denied += 1
+            return False
+        if self.used + cost > self.daily_budget:
+            self.denied += 1
+            return False
+        return True
+
+    def spend(self, cost: int) -> None:
+        self._roll()
+        self.used += cost
+
+    def state(self) -> dict:
+        self._roll()
+        return {"day": self.day, "used": self.used, "daily_budget": self.daily_budget, "remaining": self.remaining(),
+                "denied": self.denied, "quota_exhausted": bool(self.exhausted_at and time.time() - self.exhausted_at < 3600)}
 SOURCE = "solana_rpc"
 SOURCE_DAS = "helius_das"
 
@@ -21,6 +73,11 @@ class SolanaRpc:
     def __init__(self, http: HttpClient, helius_key: str = "", rpc_url: str = ""):
         self.http = http
         self.helius_url = f"https://mainnet.helius-rpc.com/?api-key={helius_key}" if helius_key else ""
+        try:
+            monthly = int(os.environ.get("HELIUS_MONTHLY_CREDITS", "1000000"))
+        except ValueError:
+            monthly = 1_000_000
+        self.credits = CreditMeter(monthly)
         self.urls = [u for u in (self.helius_url, rpc_url.strip(), PUBLIC_RPC) if u]
         http.set_rate("api.mainnet-beta.solana.com", 90)
 
@@ -31,6 +88,10 @@ class SolanaRpc:
     async def call(self, method: str, params: list | dict, *, urls: list[str] | None = None):
         payload = {"jsonrpc": "2.0", "id": 1, "method": method, "params": params}
         for url in urls or self.urls:
+            if url == self.helius_url:
+                if not self.credits.allow(RPC_CREDITS):
+                    continue                                   # budget used up: fall back to the next RPC
+                self.credits.spend(RPC_CREDITS)
             data = await self.http.post_json(url, payload, source=SOURCE, retries=1)
             if isinstance(data, dict) and "result" in data:
                 return data["result"]
@@ -104,7 +165,13 @@ class SolanaRpc:
         if not self.helius_url:
             return None
         payload = {"jsonrpc": "2.0", "id": 1, "method": "getAsset", "params": {"id": mint}}
+        if not self.credits.allow(DAS_CREDITS):
+            self.http.health.fail(SOURCE_DAS, "Helius credit budget reached for today (HELIUS_MONTHLY_CREDITS / 30)")
+            return None
+        self.credits.spend(DAS_CREDITS)
         data = await self.http.post_json(self.helius_url, payload, source=SOURCE_DAS, retries=1)
+        if data is None and self.http.health.get(SOURCE_DAS).last_status == 429:
+            self.credits.exhausted_at = time.time()           # rate limit / "max usage reached": stop for 1 h
         r = data.get("result") if isinstance(data, dict) else None
         if not isinstance(r, dict):
             return None
@@ -122,7 +189,13 @@ class SolanaRpc:
             return None
         payload = {"jsonrpc": "2.0", "id": 1, "method": "getTokenAccounts",
                    "params": {"mint": mint, "page": page, "limit": limit}}
+        if not self.credits.allow(DAS_CREDITS):
+            self.http.health.fail(SOURCE_DAS, "Helius credit budget reached for today (HELIUS_MONTHLY_CREDITS / 30)")
+            return None
+        self.credits.spend(DAS_CREDITS)
         data = await self.http.post_json(self.helius_url, payload, source=SOURCE_DAS, retries=1)
+        if data is None and self.http.health.get(SOURCE_DAS).last_status == 429:
+            self.credits.exhausted_at = time.time()           # rate limit / "max usage reached": stop for 1 h
         if isinstance(data, dict) and "result" in data:
             return data["result"]
         if isinstance(data, dict) and "error" in data:

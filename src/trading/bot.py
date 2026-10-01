@@ -89,6 +89,8 @@ class PaperBot:
         self._positions(states, now)
         if self.cfg.enabled:
             self._entries(states, now)
+        if hasattr(self.engine, "deep_extra"):
+            self.engine.deep_extra = set(self.book.positions)
         eq = self.book.mark(now)
         self._set("book", RUN if self.book.positions else READY,
                   f"equity ${eq:,.2f} · {len(self.book.positions)} open · net {self.book.stats(now)['net_pnl']:+,.2f}", now=now)
@@ -184,6 +186,9 @@ class PaperBot:
                 if entries >= MAX_ENTRIES_PER_TICK:
                     rec["state"] = "QUEUED"                 # allowed, waits for the next tick's entry slot
                     continue
+                if not is_trade_candidate(st, rec):         # defence in depth: never buy outside 🟢
+                    rec["state"] = "BLOCKED"
+                    continue
                 ex = self.exec.buy(st, sz.usd, self._sol(), now)
                 if ex.status == "FILLED":
                     self.book.open(ex, self.cfg, now, sc.opportunity, sc.why, st.market.liquidity_usd, st.market.vol_5m)
@@ -233,16 +238,16 @@ class PaperBot:
                 pass
 
     def trade_candidates(self, now: float | None = None) -> list[tuple]:
-        """🟢 TRADE CANDIDATE: identity VERIFIED + VET passed + Decision TRADE + Risk allowed (fresh decision of a
-        token still published). An open position on the CA is shown as a candidate being held."""
+        """🟢 TRADE CANDIDATE: Early Signal TRUE + identity VERIFIED + VET passed + Decision TRADE + Risk allowed
+        (fresh decision of a token still published). An open position on the CA is shown as a candidate being held."""
         now = now or time.time()
         states = {s.mint: s for s in (self.engine.published or [])}
         out = []
         for mint, rec in self.decisions.items():
             st = states.get(mint)
-            if st is None or now - rec.get("ts", 0) > 30 or st.identity.status != "VERIFIED":
+            if st is None or now - rec.get("ts", 0) > 30:
                 continue
-            if rec.get("decision") != TRADE or not rec.get("vet_passed"):
+            if not is_trade_candidate(st, rec, allow_unchecked_risk=True):
                 continue
             holding = mint in self.book.positions
             reasons = rec.get("risk_reasons") or []
@@ -257,6 +262,17 @@ class PaperBot:
             return 0.0
         span = self.ops[-1][0] - self.ops[0][0]
         return round(sum(n for _, n in self.ops) / span, 1) if span > 0 else 0.0
+
+
+def is_trade_candidate(st: TokenState, rec: dict, allow_unchecked_risk: bool = False) -> bool:
+    """🟢 gate: Early Signal TRUE + identity VERIFIED + VET PASS + Decision TRADE (+ Risk, checked by the caller)."""
+    if st.early is None or st.early.is_early is not True:
+        return False
+    if st.identity.status != "VERIFIED":
+        return False
+    if rec.get("decision") != TRADE or not rec.get("vet_passed"):
+        return False
+    return allow_unchecked_risk or bool(rec.get("risk_allowed"))
 
 
 def _ex_dict(e) -> dict:

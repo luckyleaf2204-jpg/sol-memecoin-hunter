@@ -6,7 +6,9 @@ gets an interval from its PRIORITY CLASS:
   tier            hot      normal   quiet     what
   discovery       5s       -        -         PumpPortal WS queue drain (+ Pump.fun lists, see engine)
   market          5s       10s      30s       DexScreener batch: price / MC / volume / txns / buy-sell / liq
-  holders         30s      60s      -         Helius DAS holder list (+ whale intel), candidates only
+  holders         120s     300s     -         Helius DAS holder list (+ whale intel) — PROGRESSIVE deep scan: only
+                                            tokens that earned it (see engine._deep_pool), results cached,
+                                            intervals ×2 / ×4 when the daily Helius credit budget gets tight
   dev             60s      120s     -         creator balance / history / funding (history is cached)
   persist         20s                         SQLite snapshots + alerts (unchanged cadence)
 
@@ -28,7 +30,7 @@ from core.models import TokenState
 
 TIERS = {"discovery": 5.0, "market": 5.0, "persist": 20.0, "holders": 3.0}   # loop ticks
 MARKET_S = {"hot": 5.0, "normal": 10.0, "quiet": 30.0}
-HOLDER_S = {"hot": 30.0, "normal": 60.0}
+HOLDER_S = {"hot": 120.0, "normal": 300.0}          # holder results are cached this long (Helius credits)
 DEV_S = {"hot": 60.0, "normal": 120.0}
 NEW_TOKEN_MIN = 15
 QUIET_VOL_5M, QUIET_TXNS_5M = 500.0, 10
@@ -105,14 +107,22 @@ def market_due(states: list[TokenState], now: float) -> list[TokenState]:
     return out
 
 
-def deep_due(candidates: list[TokenState], now: float, limit: int) -> list[TokenState]:
-    """Holder/whale (and dev when its own interval expired) work for candidates, hot first."""
+def deep_rank(st: TokenState) -> tuple:
+    """Best candidates first: scheduler priority, then Opportunity, then Momentum (None = last)."""
+    mom = st.subscores.get("momentum")
+    return (-priority_score(st), -(st.score.total if st.score else -1),
+            -(mom.score if mom and mom.score is not None else -1))
+
+
+def deep_due(candidates: list[TokenState], now: float, limit: int, scale: float = 1.0) -> list[TokenState]:
+    """Holder/whale (and dev when its own interval expired) work for candidates, best first.
+    `scale` stretches the cache intervals when the Helius credit budget is tight."""
     out = []
     for st in candidates:
         cls = "hot" if priority_class(st, now) == "hot" else "normal"
-        if due(st, "holders", HOLDER_S[cls], now):
+        if due(st, "holders", HOLDER_S[cls] * scale, now):
             out.append(st)
-    out.sort(key=lambda s: -priority_score(s))
+    out.sort(key=deep_rank)
     return out[:limit]
 
 

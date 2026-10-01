@@ -53,6 +53,7 @@ class TokenInfo:
     dev_initial_sol: float | None = None
     discovery_mc_sol: float | None = None  # PumpPortal create event: market cap in QUOTE units (SOL for classic curves)
     quote_mint: str = ""                   # Pump.fun record: curve quote mint ("" = unknown)
+    mayhem_state: str = ""                 # Pump.fun mayhem mode ("active" / "paused" / "completed"); "" = standard curve
     sources: set[str] = field(default_factory=set)
     discovered_at: float = field(default_factory=time.time)
 

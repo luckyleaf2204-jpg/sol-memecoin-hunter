@@ -600,6 +600,8 @@ function feedsTable(f) {
     ${row("Pump.fun", http(f.pumpfun), f.pumpfun.ok)}
     ${row("DexScreener", http(f.dexscreener), f.dexscreener.ok)}
     ${row(t("web.feed.with_market"), f.with_market + " / " + f.tracked, f.with_market > 0)}
+    ${f.helius && f.helius.credits ? row(t("web.feed.helius_credits"), `${f.helius.credits.used.toLocaleString("en-US")} / ${f.helius.credits.daily_budget.toLocaleString("en-US")} · ${t("web.feed.remaining")} ${f.helius.credits.remaining.toLocaleString("en-US")}${f.helius.credits.quota_exhausted ? " · QUOTA" : ""}`, !f.helius.credits.quota_exhausted && f.helius.credits.remaining > 0) : ""}
+    ${f.helius ? row(t("web.feed.deep_pool"), `${f.helius.deep_pool} · ×${f.helius.deep_scale}${f.helius.deep_skipped.length ? " · " + t("web.feed.skipped") + ": " + f.helius.deep_skipped.slice(0, 6).join(", ") : ""}`, !f.helius.deep_skipped.length) : ""}
   </div>`;
 }
 function refreshTable(r) {

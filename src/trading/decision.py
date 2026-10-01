@@ -3,7 +3,8 @@
 SCAN    candidates = tokens the scanner already flags: ⚡ PRE-EARLY, Early Signal TRUE (D1–D8, unchanged),
         🔥 group, or a momentum lifecycle (EARLY_MOMENTUM / MOMENTUM / BREAKOUT) with Opportunity >= 50.
         X Alpha and smart-money wallet signals have NO data source yet -> listed as NOT AVAILABLE, never faked.
-VET     every check must PASS. UNKNOWN blocks (no data = no trade). "N/A" is only used for checks whose source
+VET     every check must PASS — including EARLY SIGNAL = TRUE (Early Signal / D1–D8 exactly as computed by the
+        scanner; UNKNOWN or FALSE never trades, whatever Momentum or Opportunity say). UNKNOWN blocks (no data = no trade). "N/A" is only used for checks whose source
         does not exist yet (X Alpha) and is shown as such; it never counts in favour of a trade.
 SCORE   component scores 0-100 reuse the scanner's sub-scores (None = not available):
           momentum (subscore momentum) · onchain (holder / whale / onchain) · liquidity (subscore liquidity)
@@ -32,7 +33,8 @@ DANGEROUS_EXT = {"permanent_delegate", "transfer_hook", "pausable_config", "defa
 T22 = "TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb"
 WEIGHTS = {"momentum": 30, "onchain": 20, "liquidity": 15, "risk": 20, "early": 15, "x_alpha": 0, "smart_money": 0}
 MIN_HOLDERS, MAX_TOP10, MAX_DEV_PCT, MIN_VOL_5M, MIN_BUY_SHARE = 50, 35.0, 10.0, 5_000.0, 0.5
-SOFT = {"volume_buy_pressure", "liquidity", "holders"}
+MAX_HOLDER_AGE_S = 900          # cached Helius holder data older than this is UNKNOWN for VET
+SOFT = {"volume_buy_pressure", "liquidity", "holders", "early_signal"}
 EARLY_WATCH_MIN_RANK = 60      # failing only these -> WATCH, not REJECT
 
 
@@ -71,6 +73,12 @@ def vet(st: TokenState, cfg: TradingConfig, now: float | None = None) -> Vet:
     m, h, d, ident, rk = st.market, st.holders, st.dev, st.identity, st.risk
     C = []
 
+    es = st.early
+    C.append(Check("early_signal", PASS if es is not None and es.is_early is True else
+                   (UNKNOWN if es is None or es.strength is None else FAIL),
+                   "TRUE" if es is not None and es.is_early is True else
+                   ("UNKNOWN" if es is None or es.strength is None else f"FALSE ({es.strength})"),
+                   "Early Signal TRUE (D1–D8, unchanged) is mandatory for a trade"))
     C.append(Check("identity", PASS if ident.status == "VERIFIED" else FAIL, ident.status,
                    "symbol confirmed by a source looked up by this CA, no conflict"))
     ca_ok = bool(MINT_RE.match(st.mint)) and "dexscreener" in ident.claims
@@ -85,9 +93,13 @@ def vet(st: TokenState, cfg: TradingConfig, now: float | None = None) -> Vet:
     liq = m.liquidity_usd if m else None
     C.append(Check("liquidity", UNKNOWN if liq is None else (PASS if liq >= cfg.min_liquidity_usd else FAIL),
                    f"${liq:,.0f}" if liq is not None else "", f">= ${cfg.min_liquidity_usd:,.0f}"))
-    holders_ok = h is not None and h.valid and st.holder_status == "ok" and h.holder_count is not None
+    hstamp = st.stamps.get("holders")
+    holders_fresh = hstamp is None or now - hstamp.updated_at <= MAX_HOLDER_AGE_S
+    holders_ok = h is not None and h.valid and st.holder_status == "ok" and h.holder_count is not None and holders_fresh
     C.append(Check("holders", UNKNOWN if not holders_ok else (PASS if h.holder_count >= MIN_HOLDERS else FAIL),
-                   str(h.holder_count) if holders_ok else (st.holder_status or "no data"), f">= {MIN_HOLDERS} (Helius)"))
+                   str(h.holder_count) if holders_ok else ("stale (> 15 min)" if h is not None and not holders_fresh
+                                                          else (st.holder_status or "no data")),
+                   f">= {MIN_HOLDERS} (Helius, <= 15 min old)"))
     top = h.top10_pct if holders_ok else None
     C.append(Check("top_holders", UNKNOWN if top is None else (PASS if top <= MAX_TOP10 else FAIL),
                    f"top10 {top:.1f}%" if top is not None else "", f"top10 <= {MAX_TOP10:.0f}%"))

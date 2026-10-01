@@ -184,9 +184,11 @@ def test_real_apewif_mint_is_verified_and_quote_mc_not_used(eng):
     assert st.mc_track.pending is None and st.mc_track.initial_mc is None   # 11.3 TSLAx × SOL price discarded
     st = _run(eng, APEWIF)
     assert st.identity.status == "VERIFIED" and st.info.symbol == "APEWIF"
-    # a TSLAx-quoted curve has no SOL reserve to validate -> no validated MC -> no anchor (never a guess)
-    assert any(i.severity == "critical" for i in st.market_issues)
-    assert st.mc_track.initial_mc is None
+    # a TSLAx-quoted curve has no SOL reserve: liquidity UNKNOWN (warning, not a rejection); the anchor is the
+    # validated USD market cap from DexScreener — never the 11.3 TSLAx × SOL price PumpPortal value
+    assert any(i.key == "curve_unavailable" and i.severity == "warning" for i in st.market_issues)
+    assert st.market.liquidity_usd is None
+    assert st.mc_track.initial_mc == 4_900 and st.mc_track.initial_source.endswith("DexScreener")
 
 
 def test_ui_shows_canonical_symbol_and_conflict(eng):
@@ -232,11 +234,14 @@ def test_live_tslax_identity():
         h = HttpClient()
         try:
             dex = await DexScreenerClient(h).tokens([TSLAX])
-            asset = await SolanaRpc(h, os.environ.get("HELIUS_API_KEY", "")).das_get_asset(TSLAX)
-            return dex, asset
+            rpc = SolanaRpc(h, os.environ.get("HELIUS_API_KEY", ""))
+            asset = await rpc.das_get_asset(TSLAX)
+            return dex, asset, rpc.credits.state()["quota_exhausted"]
         finally:
             await h.aclose()
-    dex, asset = asyncio.run(go())
+    dex, asset, quota = asyncio.run(go())
     assert dex[TSLAX][0].base_symbol == "TSLAx"
     if os.environ.get("HELIUS_API_KEY"):
+        if asset is None and quota:
+            pytest.skip("Helius quota exhausted (HTTP 429 'max usage reached') — DexScreener part passed")
         assert asset["symbol"] == "TSLAx" and asset["token_program"] == T22

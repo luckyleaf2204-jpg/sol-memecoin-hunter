@@ -108,10 +108,11 @@ def test_deep_due_prioritises_hot_and_respects_limit():
     hot = [_st(f"H{i}", pc5=40.0) for i in range(3)]
     cold = [_st(f"C{i}") for i in range(5)]
     for st in hot + cold:
-        st.refreshed["holders"] = now - 35          # hot every 30s -> due; normal every 60s -> not yet
+        st.refreshed["holders"] = now - 130         # hot cached 120s -> due; normal cached 300s -> not yet
     assert [s.mint for s in sch.deep_due(cold + hot, now, 10)] == ["H0", "H1", "H2"]
+    assert sch.deep_due(cold + hot, now, 10, scale=2.0) == []      # credit pressure doubles the cache time
     for st in cold:
-        st.refreshed["holders"] = now - 61
+        st.refreshed["holders"] = now - 301
     todo = sch.deep_due(cold + hot, now, 4)
     assert len(todo) == 4 and [s.mint for s in todo[:3]] == ["H0", "H1", "H2"]
 
@@ -534,7 +535,7 @@ def test_home_groups_and_profile(web):
 def test_status_reports_actual_refresh(web):
     r = web.get("/api/status", headers=H).json()["refresh"]
     assert r["market_s"] == {"hot": 5.0, "normal": 10.0, "quiet": 30.0}
-    assert r["holders_s"] == {"hot": 30.0, "normal": 60.0} and r["dev_s"] == {"hot": 60.0, "normal": 120.0}
+    assert r["holders_s"] == {"hot": 120.0, "normal": 300.0} and r["dev_s"] == {"hot": 60.0, "normal": 120.0}
     assert {"discovery", "market", "persist", "holders"} <= set(r["tiers"])
 
 
@@ -571,19 +572,26 @@ def test_discovery_and_market_rounds_never_call_helius(tmp_path):
 
 
 def test_deep_pool_and_budget(tmp_path):
+    """PROGRESSIVE deep scan: Helius only for tokens that earned it with cheap data first."""
+    from core.models import EarlySignal
     eng = ScannerEngine(Settings(deep_per_cycle=15, deep_max_per_min=10), Database(tmp_path / "p.db"),
                         keys=ApiKeys(), on_log=lambda m: None)
     fresh = TokenState(info=TokenInfo(mint="FRESH", created_at=time.time() - 30))   # new, no market yet
-    cand = [_st(f"C{i}", vol5=30_000) for i in range(12)]                          # market candidates
+    cand = [_st(f"C{i}", vol5=30_000) for i in range(12)]                          # good Opportunity (>= 55)
+    for c in cand:
+        c.score.total = 70
+    big_mc_only = _st("BIGMC", vol5=30_000)
+    big_mc_only.score = None                                                       # MC/volume alone: not enough
     sig = _st("SIG", vol5=100, txns=(2, 1))
-    sig.market.market_cap = 8_000                                                  # below candidate thresholds
-    sig.group = "watch"                                                            # ...but has signals
+    sig.score = None
+    sig.early = EarlySignal(70, True, True, 4, groups_computable=6)                # Early Signal TRUE
     star = TokenState(info=TokenInfo(mint="STAR", created_at=time.time() - 30), watch=True)
-    for st in cand + [fresh, sig, star]:
+    for st in cand + [fresh, big_mc_only, sig, star]:
         eng.tracked[st.mint] = st
     pool = {s.mint for s in eng._deep_pool()}
-    assert "FRESH" not in pool                                  # discovery alone never spends Helius
+    assert "FRESH" not in pool and "BIGMC" not in pool          # discovery / MC alone never spend Helius
     assert {"SIG", "STAR"} <= pool and all(c.mint in pool for c in cand)
+    assert eng.deep_reasons(sig) == ["early_signal"] and "opportunity" in eng.deep_reasons(cand[0])
     now = time.time()
     first = eng._deep_batch(now)
     assert len(first) == 10 and first[0].mint == "STAR"         # capped per minute, starred first
@@ -597,7 +605,7 @@ def test_new_and_rising_tokens_come_first_in_deep_queue(tmp_path):
     rising = _st("RISING", pc5=45.0, vol5=30_000)
     plain = _st("PLAIN", vol5=30_000)
     for st in (young, rising, plain):
-        st.refreshed["holders"] = now - 100
+        st.refreshed["holders"] = now - 400
     order = [s.mint for s in sch.deep_due([plain, rising, young], now, 5)]
     assert order == ["YOUNG", "RISING", "PLAIN"]
 

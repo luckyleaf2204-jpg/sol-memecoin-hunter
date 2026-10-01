@@ -6,10 +6,18 @@ INVALID, which removes it from every score that ranks tokens. Nothing is estimat
 
 critical: pair_missing, price_bad, mc_bad, mc_implausible (< $1,000), mc_inconsistent (MC vs price×supply > ×3),
           volume_bad (5m/1h missing or <= 0), txns_missing, txns_inconsistent (volume with 0 txns),
-          liq_bad (AMM liquidity missing/<= 0/< $100), liq_not_reported,
-          curve_unavailable, curve_stale (> 180 s), curve_inconsistent (virtual − real ≠ 30 SOL ±1),
-          sol_price_missing, curve_too_small (< $100), market_stale (> 120 s at ingest)
-warning:  fdv_bad, txns_1h_missing
+          liq_bad (AMM liquidity missing/<= 0/< $100), liq_not_reported, curve_malformed (reserve < 0 or > 1000 SOL),
+          market_stale (> 120 s at ingest)
+warning:  fdv_bad, txns_1h_missing, and every bonding-curve case where the curve reserve simply cannot be
+          used — liquidity is then UNKNOWN (None), never estimated, and the token is NOT rejected for it:
+            curve_unavailable (no Pump.fun data / non-SOL quote) · curve_stale (> 180 s) · sol_price_missing ·
+            curve_graduated (token complete: the old curve is never used) · curve_empty (0 SOL in the curve) ·
+            curve_inconsistent (standard curve with virtual − real ≠ 30 SOL ±1)
+          curve_small: a real but small reserve (< $100, typical for a brand-new token) — value kept, noted
+          Mayhem-mode curves (Pump.fun `mayhem_state`) have non-standard virtual reserves: the 30-SOL identity is
+          not applied to them; the reported real reserve is used.
+          (Audit 2026-10-01: 85 % of fresh Pump.fun tokens hold < $100 of SOL and 26 % are mayhem curves — both were
+          wrongly rejected as INVALID before.)
 """
 from __future__ import annotations
 
@@ -24,6 +32,7 @@ MC_PRICE_TOLERANCE = 3.0          # MC must be within ×3 of price × supply
 PUMP_INITIAL_VIRTUAL_SOL = 30.0   # standard Pump.fun curve: virtual SOL = 30 + real SOL
 CURVE_CONSISTENCY_SOL = 1.0
 CURVE_MAX_AGE_S = 180             # Pump.fun curve reserve older than this is not trusted
+CURVE_MAX_REAL_SOL = 1_000.0      # a bonding curve never holds more (standard curve graduates at ~85 SOL)
 
 
 def _bad(v) -> bool:
@@ -96,10 +105,10 @@ def validate_market(m: MarketData, info: TokenInfo, sol_price: float | None,
         m.liquidity_usd, m.liquidity_source = None, ""
         if m.is_curve:
             usd, problem = curve_reserve_usd(info, sol_price, now)
-            if problem:
-                crit("liquidity", problem[0], **problem[1])
-            else:
+            if usd is not None:
                 m.liquidity_usd, m.liquidity_source = usd, "pumpfun_curve"
+            if problem:
+                (crit if problem[0] == "curve_malformed" else warn)("liquidity", problem[0], **problem[1])
         else:
             crit("liquidity", "liq_not_reported")
 
@@ -110,17 +119,24 @@ def validate_market(m: MarketData, info: TokenInfo, sol_price: float | None,
 
 def curve_reserve_usd(info: TokenInfo, sol_price: float | None, now: float):
     """SOL actually held by the bonding curve (reported by Pump.fun) × SOL price — reported, not estimated.
-    Returns (usd, None) if every check passes, else (None, (issue_key, params))."""
+    Returns (usd or None, None or (issue_key, params)). Only `curve_malformed` is critical; every other issue
+    means "liquidity UNKNOWN" (usd None) or, for curve_small, a real value with a note."""
     real, virt = info.real_sol_reserves, info.virtual_sol_reserves
+    if info.complete:
+        return None, ("curve_graduated", {})
     if info.pump_updated_at is None or real is None:
         return None, ("curve_unavailable", {})
+    if real < 0 or real > CURVE_MAX_REAL_SOL or (virt is not None and virt < 0):
+        return None, ("curve_malformed", {"real": real, "virtual": virt})
     if now - info.pump_updated_at > CURVE_MAX_AGE_S:
         return None, ("curve_stale", {"age": round(now - info.pump_updated_at)})
-    if virt is None or abs((virt - real) - PUMP_INITIAL_VIRTUAL_SOL) > CURVE_CONSISTENCY_SOL:
+    if not info.mayhem_state and (virt is None or abs((virt - real) - PUMP_INITIAL_VIRTUAL_SOL) > CURVE_CONSISTENCY_SOL):
         return None, ("curve_inconsistent", {"virtual": virt, "real": real})
     if _bad(sol_price):
         return None, ("sol_price_missing", {})
+    if real == 0:
+        return None, ("curve_empty", {})
     usd = real * sol_price
     if usd < MIN_PLAUSIBLE_LIQ:
-        return None, ("curve_too_small", {"value": round(usd, 2), "min": MIN_PLAUSIBLE_LIQ})
+        return usd, ("curve_small", {"value": round(usd, 2), "min": MIN_PLAUSIBLE_LIQ})
     return usd, None

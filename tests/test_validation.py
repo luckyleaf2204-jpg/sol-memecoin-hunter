@@ -99,11 +99,13 @@ def _curve_pair():
     return dex_pair(mint="C", dex="pumpfun", liq=None, mc=29_000, fdv=29_000, price="0.000029")
 
 
-def test_mayhem_curve_reserves_rejected():
+def test_inconsistent_curve_reserves_give_unknown_liquidity_not_invalid():
+    """Non-standard reserves without a mayhem flag: liquidity UNKNOWN (never the old $0.0000007 estimate), noted as a
+    warning — the token is no longer rejected for a curve it cannot read (2026-10-01 audit, approved principle)."""
     st = build_state(_curve_pair(), info=_curve_info(real=3e-09, virt=256.783848295))
     assert st.market.liquidity_usd is None
-    assert st.quality.status == INVALID and st.score is None
-    assert any(i.key == "curve_inconsistent" for i in st.quality.issues)
+    assert st.quality.status != INVALID
+    assert any(i.key == "curve_inconsistent" and i.severity == "warning" for i in st.quality.issues)
 
 
 def test_standard_curve_reserve_accepted():
@@ -112,9 +114,10 @@ def test_standard_curve_reserve_accepted():
     assert st.market.liquidity_usd == pytest.approx(25.0 * SOL_USD)
 
 
-def test_stale_curve_reserve_rejected():
+def test_stale_curve_reserve_is_unknown_not_used():
     st = build_state(_curve_pair(), info=_curve_info(real=25.0, virt=55.0, fetched_ago=600))
-    assert st.market.liquidity_usd is None and st.quality.status == INVALID
+    assert st.market.liquidity_usd is None and st.quality.status != INVALID            # never a stale value
+    assert any(i.key == "curve_stale" and i.severity == "warning" for i in st.quality.issues)
 
 
 def test_missing_sol_price_rejects_curve_liquidity():

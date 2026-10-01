@@ -48,7 +48,10 @@ from validation.identity import apply_identity, claim_from_info, record_claim
 from validation.market import CURVE_MAX_AGE_S
 
 WSOL = "So11111111111111111111111111111111111111112"
-CURVE_REFRESH_PER_CYCLE = 3       # per 10s (same Pump.fun budget as the former 8 per 20s minus discovery)
+CURVE_REFRESH_PER_CYCLE = 4       # per 10s (Pump.fun budget: 24/min curves + 9/min discovery < 40/min)
+DEEP_MIN_WATCH_RANK = 45
+DEEP_MIN_OPPORTUNITY = 55
+CURVE_YOUNG_MIN = 3.5             # tokens this young (PRE-EARLY window) are refreshed even if not candidates
 MAX_EVENTS = 500
 PUMP_LATEST_S, PUMP_ACTIVE_S, CURVE_S = 10.0, 20.0, 10.0
 REEVALUATE_S = 20.0               # tokens without fresh data are re-evaluated at the historic cadence
@@ -94,6 +97,9 @@ class ScannerEngine:
         self._started_at = time.time()
         self._feeds_logged = False
         self._deep_times: list[float] = []
+        self.deep_extra: set[str] = set()                 # mints the paper bot holds (registered by the bot)
+        self.deep_skipped: list[tuple[str, str]] = []
+        self._skip_logged_at = 0.0
         self._logged_at = 0.0
         self._round_new = 0
         try:
@@ -256,7 +262,9 @@ class ScannerEngine:
             "pumpfun": src("pumpfun", "frontend-api-v3.pump.fun") | {
                 "latest_ok": self._pump_last["latest"], "active_ok": self._pump_last["active"]},
             "dexscreener": src("dexscreener", "api.dexscreener.com"),
-            "helius": {"state": self.helius_state.get("state")},
+            "helius": {"state": self.helius_state.get("state"), "credits": self.rpc.credits.state(),
+                       "deep_pool": len(self._deep_pool()), "deep_scale": self.deep_scale(now),
+                       "deep_skipped": [sym for _, sym in self.deep_skipped[:20]]},
             "tracked": len(self.tracked),
             "with_market": sum(1 for s in self.tracked.values() if s.market),
         }
@@ -390,10 +398,14 @@ class ScannerEngine:
             return
         self._pump_at["curve"] = time.monotonic()
         now = time.time()
-        stale = [st for st in self._candidates()
+        pool = {st.mint: st for st in self._candidates()}
+        for st in self.tracked.values():                 # PRE-EARLY window: young curve tokens too
+            if st.age_minutes is not None and st.age_minutes <= CURVE_YOUNG_MIN and st.market and st.market.is_curve:
+                pool.setdefault(st.mint, st)
+        stale = [st for st in pool.values()
                  if not st.info.complete and (st.info.pump_updated_at is None
                                               or now - st.info.pump_updated_at > CURVE_MAX_AGE_S / 2)]
-        stale.sort(key=lambda st: -priority_score(st))
+        stale.sort(key=lambda st: (-priority_score(st), st.info.pump_updated_at or 0))
         for st in stale[:CURVE_REFRESH_PER_CYCLE]:
             fresh = await self.pump.coin(st.mint)
             if fresh:
@@ -453,23 +465,57 @@ class ScannerEngine:
         out.sort(key=lambda st: (not st.watch, -((st.market.vol_5m or 0) if st.market else 0)))
         return out
 
+    def deep_reasons(self, st: TokenState) -> list[str]:
+        """PROGRESSIVE deep scan — Helius is spent only on tokens that earned it with CHEAP data first:
+        starred · held by the paper bot · Early Signal TRUE · ⚡ PRE-EARLY (or NOT_YET with >= 2 signals) ·
+        👀 Early Watch rank >= DEEP_MIN_WATCH_RANK · Opportunity >= DEEP_MIN_OPPORTUNITY.
+        Discovery, market data and MC alone never trigger Helius."""
+        out = []
+        if st.watch:
+            out.append("starred")
+        if st.mint in self.deep_extra:
+            out.append("position")
+        if st.early is not None and st.early.is_early is True:
+            out.append("early_signal")
+        pe = st.pre_early
+        if pe is not None and (pe.status == "PRE_EARLY" or (pe.status == "NOT_YET" and pe.fired >= 2)):
+            out.append("pre_early")
+        ew = st.early_watch
+        if ew is not None and ew.rank is not None and ew.rank >= DEEP_MIN_WATCH_RANK:
+            out.append("early_watch")
+        if st.score is not None and st.score.total >= DEEP_MIN_OPPORTUNITY:
+            out.append("opportunity")
+        return out
+
     def _deep_pool(self) -> list[TokenState]:
-        """Tokens allowed to use Helius: market candidates + tokens with signals (🔥 / 👀 groups) + starred.
-        Discovery never triggers Helius by itself; a brand-new token is holder-checked only once it is in
-        this pool, and then ahead of the others (scheduler priority)."""
-        pool = {st.mint: st for st in self._candidates()}
-        for st in self.tracked.values():
-            pe = st.pre_early
-            young_signal = bool(pe and pe.status in ("PRE_EARLY", "NOT_YET") and pe.fired >= 1)
-            if st.watch or st.group in ("opportunity", "watch") or young_signal:
-                pool.setdefault(st.mint, st)
-        return list(pool.values())
+        return [st for st in self.tracked.values() if self.deep_reasons(st)]
+
+    def deep_scale(self, now: float) -> float:
+        """1 normally; ×2 / ×4 when today's spend gets close to the paced Helius budget."""
+        c = self.rpc.credits
+        if not self.rpc.has_das or not c.daily_budget:
+            return 1.0
+        allowed = c.daily_budget * min(1.0, (now % 86400) / 86400 + 0.05)
+        ratio = c.used / allowed if allowed else 1.0
+        return 4.0 if ratio > 0.95 else 2.0 if ratio > 0.8 else 1.0
 
     def _deep_batch(self, now: float) -> list[TokenState]:
         """Next holder/dev batch: due tokens by priority, capped per round and per minute (Helius budget)."""
         self._deep_times = [x for x in self._deep_times if now - x < 60]
         budget = max(0, self.settings.deep_max_per_min - len(self._deep_times))
-        todo = deep_due(self._deep_pool(), now, min(self.settings.deep_per_cycle, budget))
+        scale = self.deep_scale(now)
+        if self.rpc.has_das and (self.rpc.credits.remaining() < 60 or not self.rpc.credits.paced_ok(now)):
+            skipped = deep_due(self._deep_pool(), now, 50, scale)
+            self.deep_skipped = [(s.mint, s.info.symbol or s.mint[:6]) for s in skipped]
+            if skipped and now - self._skip_logged_at >= 60:
+                self._skip_logged_at = now
+                c = self.rpc.credits.state()
+                self.log(f"HELIUS budget: deep scan skipped for {len(skipped)} token(s) "
+                         f"({', '.join(sym for _, sym in self.deep_skipped[:8])}) — credits {c['used']}/{c['daily_budget']} "
+                         f"today, holders stay UNKNOWN (VET will not pass)")
+            return []                                     # Helius credits: daily budget, spent evenly over the day
+        self.deep_skipped = []
+        todo = deep_due(self._deep_pool(), now, min(self.settings.deep_per_cycle, budget), scale)
         self._deep_times += [now] * len(todo)
         return todo
 
