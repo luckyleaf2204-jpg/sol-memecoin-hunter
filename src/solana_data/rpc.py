@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import os
 import time
+from collections import deque
 
 from core.http import HttpClient
 
@@ -19,17 +20,24 @@ PUBLIC_RPC = "https://api.mainnet-beta.solana.com"
 # Helius credit cost per call (https://docs.helius.dev/ — DAS 10, standard RPC 1). The free plan has ~1M / month:
 # without a budget the holder scans burned it in about a day (production incident 2026-10-01: "max usage reached").
 DAS_CREDITS, RPC_CREDITS = 10, 1
+# Helius plan of this project (Developer, 10M credits / month since 2026-10-01). HELIUS_MONTHLY_CREDITS overrides it.
+DEFAULT_MONTHLY_CREDITS = 10_000_000
 
 
 class CreditMeter:
     """Counts Helius credits per UTC day against monthly_credits / 30. Spending stops (fail-safe) at the limit."""
 
     def __init__(self, monthly_credits: int):
+        self.monthly = max(0, int(monthly_credits))
         self.daily_budget = max(0, int(monthly_credits / 30))
         self.day = time.strftime("%Y-%m-%d", time.gmtime())
         self.used = 0
         self.denied = 0
         self.exhausted_at: float | None = None      # set when Helius itself answers "max usage reached"
+        self.events: deque = deque()                 # (ts, credits) of the last hour — credits/hour
+        self.calls_today = 0
+        self.started = time.time()
+        self.total = 0                               # since process start
 
     def _roll(self):
         d = time.strftime("%Y-%m-%d", time.gmtime())
@@ -57,14 +65,39 @@ class CreditMeter:
             return False
         return True
 
-    def spend(self, cost: int) -> None:
+    def spend(self, cost: int, now: float | None = None) -> None:
         self._roll()
+        now = now or time.time()
         self.used += cost
+        self.total += cost
+        self.calls_today += 1
+        self.events.append((now, cost))
+        while self.events and now - self.events[0][0] > 3600:
+            self.events.popleft()
+
+    def per_hour(self, now: float | None = None) -> int:
+        now = now or time.time()
+        while self.events and now - self.events[0][0] > 3600:
+            self.events.popleft()
+        return sum(c for _, c in self.events)
+
+    def projected_month(self, now: float | None = None) -> int:
+        """30 × today's pace (credits used today / elapsed part of the UTC day); the last hour's rate in the first hour
+        of a day or of the process (too little history for a daily pace)."""
+        now = now or time.time()
+        elapsed_today = min(now % 86400, now - self.started)
+        if elapsed_today >= 3600:
+            return int(self.used / elapsed_today * 86400 * 30)
+        return int(self.per_hour(now) * 24 * 30)
 
     def state(self) -> dict:
         self._roll()
+        now = time.time()
         return {"day": self.day, "used": self.used, "daily_budget": self.daily_budget, "remaining": self.remaining(),
-                "denied": self.denied, "quota_exhausted": bool(self.exhausted_at and time.time() - self.exhausted_at < 3600)}
+                "denied": self.denied, "quota_exhausted": bool(self.exhausted_at and now - self.exhausted_at < 3600),
+                "per_hour": self.per_hour(now), "per_day": self.used, "calls_today": self.calls_today,
+                "projected_month": self.projected_month(now), "monthly_plan": self.monthly,
+                "since_start": self.total}
 SOURCE = "solana_rpc"
 SOURCE_DAS = "helius_das"
 
@@ -74,9 +107,9 @@ class SolanaRpc:
         self.http = http
         self.helius_url = f"https://mainnet.helius-rpc.com/?api-key={helius_key}" if helius_key else ""
         try:
-            monthly = int(os.environ.get("HELIUS_MONTHLY_CREDITS", "1000000"))
+            monthly = int(os.environ.get("HELIUS_MONTHLY_CREDITS", str(DEFAULT_MONTHLY_CREDITS)))
         except ValueError:
-            monthly = 1_000_000
+            monthly = DEFAULT_MONTHLY_CREDITS
         self.credits = CreditMeter(monthly)
         self.urls = [u for u in (self.helius_url, rpc_url.strip(), PUBLIC_RPC) if u]
         http.set_rate("api.mainnet-beta.solana.com", 90)

@@ -601,6 +601,7 @@ function feedsTable(f) {
     ${row("DexScreener", http(f.dexscreener), f.dexscreener.ok)}
     ${row(t("web.feed.with_market"), f.with_market + " / " + f.tracked, f.with_market > 0)}
     ${f.helius && f.helius.credits ? row(t("web.feed.helius_credits"), `${f.helius.credits.used.toLocaleString("en-US")} / ${f.helius.credits.daily_budget.toLocaleString("en-US")} · ${t("web.feed.remaining")} ${f.helius.credits.remaining.toLocaleString("en-US")}${f.helius.credits.quota_exhausted ? " · QUOTA" : ""}`, !f.helius.credits.quota_exhausted && f.helius.credits.remaining > 0) : ""}
+    ${f.helius && f.helius.credits ? row(t("web.feed.helius_rate"), `${f.helius.credits.per_hour.toLocaleString("en-US")}/h · ${f.helius.credits.per_day.toLocaleString("en-US")}/${t("web.feed.day")} · ${t("web.feed.projected")} ${f.helius.credits.projected_month.toLocaleString("en-US")} / ${f.helius.credits.monthly_plan.toLocaleString("en-US")}`, f.helius.credits.projected_month <= f.helius.credits.monthly_plan) : ""}
     ${f.helius ? row(t("web.feed.deep_pool"), `${f.helius.deep_pool} · ×${f.helius.deep_scale}${f.helius.deep_skipped.length ? " · " + t("web.feed.skipped") + ": " + f.helius.deep_skipped.slice(0, 6).join(", ") : ""}`, !f.helius.deep_skipped.length) : ""}
   </div>`;
 }
@@ -851,7 +852,7 @@ async function renderBot(silent) {
     ${pend ? `<h3><span>⏳ ${esc(t("web.bot.pending"))}</span><span>${esc(d.pending.length)}</span></h3>${pend}` : ""}
   </section>
 
-  <section class="b-scan panel" id="bot-scan"><h3><span>🔍 ${esc(t("web.bot.scanning"))}</span><span class="meta">${hc ? `Helius ${esc(hc.used.toLocaleString("en-US"))} / ${esc(hc.daily_budget.toLocaleString("en-US"))}${hc.quota_exhausted ? " · ⚠ QUOTA" : ""}` : ""}</span></h3>
+  <section class="b-scan panel" id="bot-scan"><h3><span>🔍 ${esc(t("web.bot.scanning"))}</span><span class="meta">${hc ? `Helius ${esc(hc.used.toLocaleString("en-US"))} / ${esc(hc.daily_budget.toLocaleString("en-US"))} · ${esc(hc.per_hour.toLocaleString("en-US"))}/h · ${esc(t("web.feed.projected"))} ${esc((hc.projected_month / 1e6).toFixed(2))}M / ${esc((hc.monthly_plan / 1e6).toFixed(0))}M${hc.quota_exhausted ? " · ⚠ QUOTA" : ""}` : ""}</span></h3>
     <div class="cnts">${cnt("web.bot.sc.total", sc.total)}${cnt("web.bot.sc.pre", sc.pre_early)}${cnt("web.bot.sc.watch", sc.early_watch)}${cnt("web.bot.sc.signal", sc.early_signal)}${cnt("web.bot.sc.trade", sc.trade_candidates, true)}</div>
   </section>
 

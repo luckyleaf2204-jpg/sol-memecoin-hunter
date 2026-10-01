@@ -273,3 +273,23 @@ def test_bot_positions_stay_in_the_deep_pool(tmp_path):
     bot.exec.rng.random = lambda: 0.99
     bot.tick()
     assert st.mint in bot.book.positions and "position" in eng.deep_reasons(st)
+
+
+def test_credit_monitoring_hour_day_projection(monkeypatch):
+    from solana_data.rpc import DEFAULT_MONTHLY_CREDITS, CreditMeter, SolanaRpc
+    from core.http import HttpClient
+    monkeypatch.delenv("HELIUS_MONTHLY_CREDITS", raising=False)
+    assert SolanaRpc(HttpClient(), "k").credits.monthly == DEFAULT_MONTHLY_CREDITS == 10_000_000
+    monkeypatch.setenv("HELIUS_MONTHLY_CREDITS", "3000000")
+    assert SolanaRpc(HttpClient(), "k").credits.daily_budget == 100_000
+    m = CreditMeter(10_000_000)
+    now = time.time()
+    m.started = now - 7200
+    m.spend(10, now - 4000)                           # older than an hour: not in /hour (spends are chronological)
+    for i in range(29, -1, -1):
+        m.spend(10, now - 60 * i)                     # 300 credits in the last 30 min
+    s = m.state()
+    assert s["per_hour"] == 300 and s["per_day"] == 310 and s["calls_today"] == 31 and s["since_start"] == 310
+    elapsed = min(now % 86400, now - m.started)
+    expected = int(310 / elapsed * 86400 * 30) if elapsed >= 3600 else 300 * 24 * 30
+    assert abs(s["projected_month"] - expected) <= expected * 0.01 + 1 and s["monthly_plan"] == 10_000_000

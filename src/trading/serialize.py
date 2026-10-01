@@ -135,7 +135,7 @@ def bot_status(bot: PaperBot, engine=None, now: float | None = None) -> dict:
                             "unknown": states_.count("unknown"), "watching": len(states_)})
     return {
         "doing": doing, "scan": scan, "evaluated": evaluated, "exit_rules": exits, "exit_engine": engine_rows,
-        "version": "web-3",
+        "version": "web-4",
         "live_available": False,
         "pending": [{"id": o["id"], "symbol": o["symbol"], "mint": o["mint"], "usd": o["usd"],
                      "expires_in": max(0, round(o["expires"] - now)), "why": o["why"][:4]} for o in bot.pending.values()],
