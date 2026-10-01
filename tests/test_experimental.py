@@ -314,10 +314,25 @@ def test_fast_lane_never_exceeds_configured_rate():
     assert lane.stats(t0 + 300)["rate_limited_skips"] > 0
 
 
-def test_fast_lane_limit_capped_by_helius_budget():
+def test_fast_lane_default_5_and_quota_governor_drops_to_2():
     from scanner.fast_lane import FastLane
-    lane = FastLane(FakeRpc(budget=100_000), per_min=50)
-    assert lane.per_min() == max(1, int(100_000 / 24 / 60 * 0.10 / 10))       # 10 % of the paced hourly budget
+
+    class Credits(FakeCredits):
+        def __init__(self, used, exhausted=False):
+            super().__init__(True, 300_000)
+            self.used, self.exhausted = used, exhausted
+
+        def state(self):
+            return {"daily_budget": self.daily_budget, "used": self.used, "quota_exhausted": self.exhausted}
+    rpc = FakeRpc()
+    noon = 86400 * 20000 + 43200                                         # half the day elapsed -> 165K allowed
+    rpc.credits = Credits(used=50_000)
+    lane = FastLane(rpc)
+    assert lane.per_min_cfg == 5 and lane.per_min(noon) == 5 and not lane.throttled
+    rpc.credits = Credits(used=150_000)                                  # > 80 % of the paced allowance
+    assert lane.per_min(noon) == 2 and lane.throttled
+    rpc.credits = Credits(used=0, exhausted=True)
+    assert lane.per_min(noon) == 2
 
 
 def test_fast_lane_per_ca_cooldown_and_cache():
@@ -507,3 +522,154 @@ def test_fill_failure_logs_breakdown_and_keeps_candidate(tmp_path):
                                 "new_liquidity_decision, liquidity_model_used FROM candidates").fetchone()
     assert row[0] == "FAILED" and row[1] > row[2] and "slippage" in row[3] and row[4] == "PASS"
     assert b.audit.funnel["fill_fail"] == 1
+
+
+# ---------------------------------------------------------------- entry risk buffer (NEW BUYs only)
+def test_entry_risk_buffer_bands():
+    for score, expect in ((55, D.TRADE), (57, D.WATCH), (61, D.REJECT)):
+        st = hot()
+        st.risk = RiskResult(score, "MEDIUM")
+        xd, _ = ev(st)
+        assert xd.decision == expect, (score, xd.blocked_by)
+        assert (any(b.startswith("entry_risk_buffer") for b in xd.blocked_by)) == (score == 57)
+
+
+def test_entry_buffer_rechecked_at_entry_keeps_candidate(tmp_path):
+    st = hot(age_s=60)
+    st.risk = RiskResult(40, "LOW")
+    b = bot([st], ScriptedJupiter([J.OK]))
+    b.cfg.experimental = True
+    b.recorder = DatasetRecorder(tmp_path / "r.db")
+    b.tick()
+    st.risk = RiskResult(58, "MEDIUM")                      # risk rose between candidate and entry
+    asyncio.run(b.execute_intents())
+    assert not b.book.positions and b.buffer_blocks[-1]["risk_at_entry"] == 58
+    assert b.buffer_blocks[-1]["risk_at_candidate"] == 40
+    assert any("ENTRY RISK BUFFER" in a.text for a in b.activity)
+    row = b.recorder.db.execute("SELECT entry_blocked_by_risk_buffer, risk_at_candidate, risk_at_entry, "
+                                "would_have_bought_if_quote_ok FROM candidates").fetchone()
+    assert row == (1, 40.0, 58.0, 1)
+
+
+def test_entry_buffer_never_touches_held_positions():
+    st = hot(age_s=60)
+    b = bot([st], ScriptedJupiter([J.OK]))
+    b.cfg.experimental = True
+    b.tick()
+    asyncio.run(b.execute_intents())
+    assert st.mint in b.book.positions
+    st.risk = RiskResult(58, "MEDIUM")                      # above the buffer, below the hard limit
+    b.tick()
+    asyncio.run(b.execute_sells())
+    assert st.mint in b.book.positions                      # exits unchanged: only Risk > 60 / rug sells
+
+
+def test_old_and_new_entry_risk_logged_for_ab():
+    st = hot()
+    st.risk = RiskResult(57, "MEDIUM")
+    b = bot([st], ScriptedJupiter([J.OK]))
+    b.cfg.experimental = True
+    b.tick()
+    rec = b.decisions[st.mint]
+    assert rec["old_entry_risk_pass"] is True and rec["new_entry_risk_pass"] is False
+
+
+# ---------------------------------------------------------------- latency slippage models
+def test_latency_models_current_conservative_empirical():
+    from trading.execution import PaperExecutor
+    st = hot()
+    st.market.price_change_5m = 30.0
+    cur, cons, emp = PaperExecutor(7), PaperExecutor(7, latency_model="CONSERVATIVE"), PaperExecutor(7, latency_model="EMPIRICAL")
+    a = cur._slip(st)
+    assert 0.015 <= a <= 0.0205 and cur.last_model_used == "CURRENT"          # 5 % of 30 % + 0-0.5 % noise
+    assert abs(cons._slip(st) - min(0.03, a * 1.5)) < 1e-12
+    emp.empirical = lambda s: None                                           # not enough samples
+    assert abs(emp._slip(st) - a) < 1e-12 and "not enough samples" in emp.last_model_used
+    emp.empirical = lambda s: 0.004
+    assert emp._slip(st) == 0.004 and emp.last_model_used == "EMPIRICAL"
+
+
+def test_empirical_needs_min_samples_and_uses_p75():
+    st = hot()
+    b = bot([st], ScriptedJupiter([J.OK]))
+    for i in range(49):
+        b.latency_samples.append(("10-40%", i / 10_000))
+    assert b._empirical_slip(st) is None
+    st.market.price_change_5m = 20.0
+    b.latency_samples.append(("10-40%", 0.0049))
+    assert abs(b._empirical_slip(st) - 0.0036) < 1e-9                       # P75 = sorted[int(0.75*49)] = 0.0036
+    assert b.latency_stats()["empirical_active"] is True
+
+
+def test_latency_probe_measures_real_drift_and_fill_record_is_complete(monkeypatch):
+    class Drifting(ScriptedJupiter):
+        async def quote_result(self, *a, **kw):
+            r = await super().quote_result(*a[:4])
+            if self.calls == 2:                                               # the re-quote: 1 % fewer tokens
+                r.quote["outAmount"] = str(int(int(r.quote["outAmount"]) * 0.99))
+            return r
+    st = hot(age_s=60)
+    b = bot([st], Drifting([J.OK]))
+    b.cfg.experimental, b.cfg.latency_probe = True, True
+    monkeypatch.setattr(asyncio, "sleep", _no_sleep)
+    b.tick()
+    asyncio.run(b.execute_intents())
+    f = b.fill_log[-1]
+    assert f["requote_drift_bps"] == 100 and len(b.latency_samples) == 1
+    for k in ("quote_ts", "execution_ts", "quote_price", "simulated_execution_price", "jupiter_impact_bps",
+              "latency_slippage_bps", "total_slippage_bps", "max_slippage_bps", "fill_result", "latency_model",
+              "risk_at_candidate", "risk_at_quote", "risk_at_entry"):
+        assert k in f, k
+    assert f["max_slippage_bps"] == 300 and f["total_slippage_bps"] == f["jupiter_impact_bps"] + f["latency_slippage_bps"] \
+        or abs(f["total_slippage_bps"] - f["jupiter_impact_bps"] - f["latency_slippage_bps"]) <= 1
+
+
+_real_sleep = asyncio.sleep
+
+
+async def _no_sleep(*_a, **_k):
+    await _real_sleep(0)
+
+
+# ---------------------------------------------------------------- risk-spike forensics
+def test_forensics_snapshots_entry_offsets_and_exit():
+    st = hot(age_s=60)
+    b = bot([st], ScriptedJupiter([J.OK]))
+    b.cfg.experimental = True
+    t0 = time.time()
+    b.tick(t0)
+    asyncio.run(b.execute_intents(t0))
+    fx = b.forensics[st.mint]
+    assert fx["snaps"][0]["at"] == "ENTRY" and fx["ctx"]["risk_at_entry"] is not None
+    for k in (5, 10, 15, 30, 60):
+        b.tick(t0 + k)
+    assert [s["at"] for s in fx["snaps"]] == ["ENTRY", "+5s", "+10s", "+15s", "+30s", "+60s"]
+    assert all("factors" in s and "market_age_s" in s for s in fx["snaps"])
+
+
+def test_risk_spike_classification():
+    import sys
+    from pathlib import Path
+    sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "tools"))
+    from audit_bottlenecks import classify_spike
+
+    def snap(at, t, risk, factors, price=1.0, age=2.0, hf=100.0, dev="HOLDING", liq="STABLE"):
+        return {"at": at, "t": t, "risk": risk, "factors": factors, "price": price, "market_age_s": age,
+                "holders_fetched": hf, "dev_status": dev, "liq_state": liq}
+    base = ["age:young:5"]
+    refresh = {"symbol": "A", "ctx": {}, "exit": None, "snaps": [
+        snap("ENTRY", 0, 50, base), snap("+15s", 15, 66, base + ["holders:top10_high:16"], hf=110.0)]}
+    real = {"symbol": "B", "ctx": {}, "exit": None, "snaps": [
+        snap("ENTRY", 0, 50, base), snap("+10s", 10, 75, base + ["dev:dev_sold:25"], price=0.8, dev="MAJOR SELL")]}
+    stale = {"symbol": "C", "ctx": {}, "exit": None, "snaps": [
+        snap("ENTRY", 0, 50, base), snap("+5s", 5, 65, base + ["data:market_stale:15"], age=95.0)]}
+    flap = {"symbol": "D", "ctx": {}, "exit": None, "snaps": [
+        snap("ENTRY", 0, 50, base), snap("+5s", 5, 64, base + ["manipulation:wash:14"]),
+        snap("+10s", 10, 50, base)]}
+    calm = {"symbol": "E", "ctx": {}, "exit": None, "snaps": [snap("ENTRY", 0, 50, base), snap("+5s", 5, 52, base)]}
+    assert classify_spike(real)["class"] == "REAL_NEW_RISK"
+    assert classify_spike(stale)["class"] == "STALE_DATA"
+    assert classify_spike(flap)["class"] == "FALSE_POSITIVE"
+    assert classify_spike(calm) is None
+    r = classify_spike(refresh)
+    assert r["class"] == "DATA_REFRESH" and r["added_factors"] == ["holders:top10_high:16"]

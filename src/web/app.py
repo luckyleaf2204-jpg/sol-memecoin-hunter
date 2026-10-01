@@ -107,6 +107,7 @@ def create_app(engine: ScannerEngine | None = None, start_scanner: bool = True,
             from trading.jupiter import JupiterQuotes
             state["bot"].jupiter = JupiterQuotes(state["engine"].http)      # paper BUYs on real Jupiter quotes
             state["bot"].cfg.experimental = os.environ.get("EXPERIMENTAL_MODE", "1") != "0"   # spec Part 3 (PAPER)
+            state["bot"].cfg.latency_probe = os.environ.get("LATENCY_PROBE", "1") != "0"     # measure real drift
             if os.environ.get("RESEARCH_LOG", "1") != "0":                # research dataset (read-only log)
                 from research.dataset import DatasetRecorder
                 state["bot"].recorder = DatasetRecorder(DATA_DIR / "research.db", dex=state["engine"].dex)

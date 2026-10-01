@@ -50,6 +50,12 @@ class TradingConfig:
     # the OLD engine still runs on every token for A/B. Off by default (tests / library); the server turns it on.
     experimental: bool = False
     paper_fill_without_quote: bool = True    # experimental PAPER: a candidate whose quote fails is filled on the model
+    # PAPER execution calibration (max_slippage_pct unchanged): CURRENT | CONSERVATIVE | EMPIRICAL
+    latency_slippage_model: str = "CURRENT"
+    latency_probe: bool = False              # (server: on) re-quote after the latency window to measure real drift (quotes only)
+    empirical_min_samples: int = 50          # EMPIRICAL stays off (falls back to CURRENT) below this
+    # ENTRY risk buffer (experimental NEW BUYs only; Risk Engine, exits and the hard limit 60 unchanged)
+    entry_max_risk: int = 55
 
     def __post_init__(self):
         if self.mode not in ALLOWED_MODES:

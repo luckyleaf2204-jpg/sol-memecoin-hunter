@@ -4,8 +4,9 @@ Protects the Helius quota:
   * only tokens the bot flags as genuinely near a NEW-engine BUY (engine.deep_hint; the bot applies the eligibility:
     EarlyScore >= threshold - 0.05 AND Confidence >= threshold - 0.10, no hard failure, identity not CONFLICT,
     authorities not checked yet) — never "every token";
-  * global limit: at most `per_min` getAsset calls in any sliding 60 s (FAST_GETASSET_PER_MIN, default 12, and never
-    more than 10 % of the paced Helius hourly budget);
+  * global limit: at most `per_min` getAsset calls in any sliding 60 s (FAST_GETASSET_PER_MIN, default 5); the quota
+    governor drops it to THROTTLED_PER_MIN (2) whenever today's Helius spend runs ahead of the paced daily budget
+    (more than 80 % of what the day's elapsed share allows) or Helius reported its quota exhausted;
   * per-CA cooldown (default 20 s) between attempts; a CA already checked is never re-fetched by the lane;
   * cache of successful results (default 60 s TTL) shared with the deep scan;
   * Helius quota / budget unavailable -> no call, the gate stays UNKNOWN -> WATCH (never BUY, never REJECT for it).
@@ -18,13 +19,15 @@ import time
 from collections import deque
 
 DAS_CREDITS = 10
+THROTTLED_PER_MIN = 2
 
 
 class FastLane:
     def __init__(self, rpc, per_min: int | None = None, cooldown_s: float = 20.0, cache_ttl_s: float = 60.0,
                  max_per_round: int = 4):
         self.rpc = rpc
-        self.per_min_cfg = int(per_min if per_min is not None else os.environ.get("FAST_GETASSET_PER_MIN", 12))
+        self.per_min_cfg = int(per_min if per_min is not None else os.environ.get("FAST_GETASSET_PER_MIN", 5))
+        self.throttled = False
         self.cooldown_s = cooldown_s
         self.cache_ttl_s = cache_ttl_s
         self.max_per_round = max_per_round
@@ -37,14 +40,18 @@ class FastLane:
         self.latency_ms: deque[float] = deque(maxlen=200)
         self.paused_until = 0.0
 
-    def per_min(self) -> int:
-        """Configured limit, never above 10 % of the paced hourly Helius budget (in getAsset calls per minute)."""
+    def per_min(self, now: float | None = None) -> int:
+        """Configured limit (default 5/min); THROTTLED_PER_MIN while the quota governor sees spend ahead of pace."""
         lim = self.per_min_cfg
+        self.throttled = False
         try:
-            budget = self.rpc.credits.daily_budget
-            if budget:
-                lim = min(lim, max(1, int(budget / 24 / 60 * 0.10 / DAS_CREDITS)))
-        except AttributeError:
+            st = self.rpc.credits.state()
+            now = now or time.time()
+            allowed = (st.get("daily_budget") or 0) * min(1.0, (now % 86400) / 86400 + 0.05)
+            if st.get("quota_exhausted") or (allowed and st.get("used", 0) > 0.8 * allowed):
+                self.throttled = True
+                lim = min(lim, THROTTLED_PER_MIN)
+        except (AttributeError, TypeError):
             pass
         return max(0, lim)
 
@@ -101,7 +108,7 @@ class FastLane:
             if now - self.last_try.get(mint, 0) < self.cooldown_s:
                 self.n["cooldown_skips"] += 1
                 continue
-            if self._window(now) >= self.per_min():
+            if self._window(now) >= self.per_min(now):
                 self.n["rate_limited_skips"] += 1
                 break
             if not self.quota_ok():
@@ -123,7 +130,8 @@ class FastLane:
     def stats(self, now: float | None = None) -> dict:
         now = now or time.time()
         hits, miss = self.n["cache_hits"], self.n["cache_misses"]
-        return {**self.n, "calls_last_min": self._window(now), "per_min_limit": self.per_min(),
+        return {**self.n, "calls_last_min": self._window(now), "per_min_limit": self.per_min(now),
+                "throttled_by_quota_governor": self.throttled,
                 "cache_hit_rate": round(hits / (hits + miss), 3) if hits + miss else None,
                 "avg_latency_ms": round(sum(self.latency_ms) / len(self.latency_ms)) if self.latency_ms else None,
                 "resolved_tokens": len(self.checked), "paused": now < self.paused_until}

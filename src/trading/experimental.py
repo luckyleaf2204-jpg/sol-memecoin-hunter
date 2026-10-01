@@ -397,6 +397,10 @@ def evaluate(st: TokenState, v: Vet, sc: Score, cfg: TradingConfig, now: float |
         blocked.append("confidence")
     if es.final_risk is not None and es.final_risk > 60:
         blocked.append("final_risk")
+    rk = st.risk
+    if rk is not None and cfg.entry_max_risk < rk.score <= 60 and "risk_gt_60" not in hard:
+        blocked.append(f"entry_risk_buffer:{rk.score}>{cfg.entry_max_risk}")   # too close to the hard limit to BUY
+        waiting.append("risk")
     why = [f"EarlyScore {'—' if es.score is None else f'{es.score:.2f}'} (≥{es.theta}) · conf {es.confidence:.2f} "
            f"(≥{es.gamma}) · age {es.age_s:.0f}s [{es.bucket}] · risk obs {es.observed_risk} prior {es.prior_risk}"]
     waiting = list(dict.fromkeys(waiting))

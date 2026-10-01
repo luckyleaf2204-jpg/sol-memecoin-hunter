@@ -97,7 +97,12 @@ AB_CAND_COLS = {"engine": "TEXT", "old_decision": "TEXT", "new_decision": "TEXT"
                 "old_liquidity_decision": "TEXT", "new_liquidity_decision": "TEXT", "liquidity_model_used": "TEXT",
                 "liquidity_equivalent_usd": "REAL", "liquidity_confidence": "TEXT", "jupiter_impact_pct": "REAL",
                 "latency_slippage_pct": "REAL", "total_slippage_pct": "REAL", "max_slippage_pct": "REAL",
-                "fill_status": "TEXT", "fill_fail_reason": "TEXT"}
+                "fill_status": "TEXT", "fill_fail_reason": "TEXT", "quote_ts": "REAL", "execution_ts": "REAL",
+                "quote_price": "REAL", "simulated_execution_price": "REAL", "jupiter_impact_bps": "INTEGER",
+                "latency_slippage_bps": "INTEGER", "total_slippage_bps": "INTEGER", "max_slippage_bps": "INTEGER",
+                "fill_result": "TEXT", "latency_model": "TEXT", "requote_drift_bps": "INTEGER",
+                "risk_at_candidate": "REAL", "risk_at_quote": "REAL", "risk_at_entry": "REAL",
+                "entry_risk_buffer": "REAL", "entry_blocked_by_risk_buffer": "INTEGER"}
 
 
 def migrate(db: sqlite3.Connection) -> None:
@@ -408,10 +413,17 @@ class DatasetRecorder:
         cid = self.cand_open.get(st.mint)
         if cid is None:
             return
-        self.db.execute("UPDATE candidates SET jupiter_impact_pct=?, latency_slippage_pct=?, total_slippage_pct=?, "
-                        "max_slippage_pct=?, fill_status=?, fill_fail_reason=? WHERE id=?",
-                        (f["jupiter_impact_pct"], f["latency_slippage_pct"], f["total_slippage_pct"],
-                         f["max_slippage_pct"], f["status"], f["fail_reason"] or None, cid))
+        cols = ("jupiter_impact_pct", "latency_slippage_pct", "total_slippage_pct", "max_slippage_pct", "quote_ts",
+                "execution_ts", "quote_price", "simulated_execution_price", "jupiter_impact_bps", "latency_slippage_bps",
+                "total_slippage_bps", "max_slippage_bps", "fill_result", "latency_model", "requote_drift_bps",
+                "risk_at_candidate", "risk_at_quote", "risk_at_entry", "entry_risk_buffer",
+                "entry_blocked_by_risk_buffer")
+        have = [c for c in cols if c in f]
+        sets = ", ".join(f"{c}=?" for c in have)
+        self.db.execute(f"UPDATE candidates SET {sets}{', ' if sets else ''}fill_status=?, fill_fail_reason=?, "
+                        "would_have_bought_if_quote_ok=MAX(COALESCE(would_have_bought_if_quote_ok, 0), ?) WHERE id=?",
+                        (*[f[c] for c in have], f.get("status"), f.get("fail_reason") or None,
+                         int(f.get("status") in ("FAILED", "BLOCKED")), cid))
         self.db.commit()
 
     def candidate_ended(self, ca: str) -> None:

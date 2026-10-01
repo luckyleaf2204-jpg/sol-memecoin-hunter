@@ -153,12 +153,13 @@ def decompose(st, rec, settings, sol):
 async def run(minutes):
     eng = ScannerEngine(Settings(), Database(Path(tempfile.mkdtemp()) / "a.db"), keys=ApiKeys.from_env(),
                         on_log=lambda m: print(m, flush=True) if "PIPELINE" in m else None)
-    bot = PaperBot(eng, TradingConfig(experimental=True))
+    bot = PaperBot(eng, TradingConfig(experimental=True, latency_probe=True))
     bot.jupiter = JupiterQuotes(eng.http)
     stop = asyncio.Event()
     tasks = [asyncio.create_task(eng.run()), asyncio.create_task(bot.run(stop))]
     shocks, es_pass, liq_blocked, best = {}, {}, {}, {}
     promo, cand_first, paths = {}, {}, {}
+    buffer_only, buffer_any = set(), set()
     end = time.time() + minutes * 60
     while time.time() < end:
         await asyncio.sleep(10)
@@ -209,6 +210,11 @@ async def run(minutes):
                 else:
                     for gk, gv in g.items():
                         promo[k]["gates_ever"][gk] = promo[k]["gates_ever"][gk] or gv
+            bl = rec.get("blocked_by") or []
+            if any(b.startswith("entry_risk_buffer") for b in bl):
+                buffer_any.add(k)
+                if all(b.startswith("entry_risk_buffer") for b in bl):
+                    buffer_only.add(k)                       # would be a candidate without the buffer
             if rec.get("decision") == "TRADE" and k not in cand_first:
                 cand_first[k] = {"ts": now, "price": px, "symbol": st.info.symbol,
                                  "liquidity_promoted": k in promo, "liquidity_model": rec.get("liquidity_model")}
@@ -224,6 +230,8 @@ async def run(minutes):
     stop.set()
     eng.stop()
     await asyncio.gather(*tasks, return_exceptions=True)
+    bot._audit_buffer = {"any": len(buffer_any), "only_blocker": len(buffer_only)}
+    bot._audit_minutes = minutes
     return bot, eng, shocks, es_pass, liq_blocked, best, promo, cand_first, paths
 
 
@@ -258,8 +266,78 @@ def sim_trade(path, t0, p0, cost):
     return (round(100 * (last * (1 - cost) / entry - 1), 1), "mark_end_of_run") if last else (None, "no_price")
 
 
+def pctl(xs, ps=(0.5, 0.75, 0.9)):
+    xs = sorted(x for x in xs if x is not None)
+    if not xs:
+        return None
+    return {f"P{int(p * 100)}": round(xs[min(len(xs) - 1, int(p * (len(xs) - 1)))], 3) for p in ps} | {"n": len(xs)}
+
+
+def classify_spike(fx, max_age=30.0):
+    snaps = fx["snaps"] + ([fx["exit"]] if fx.get("exit") else [])
+    entry = snaps[0]
+    spike = next((x for x in snaps[1:] if (x.get("risk") or 0) > 60), None)
+    if spike is None and fx.get("exit") and fx["exit"].get("reason") == "risk_spike":
+        spike = fx["exit"]
+    if spike is None:
+        return None
+    key = lambda f: f.rsplit(":", 1)[0]  # noqa: E731
+    before = {key(f) for f in entry["factors"]}
+    added = sorted({f for f in spike["factors"] if key(f) not in before})
+    cats = {f.split(":")[0] for f in added}
+    later = [x for x in snaps if x["t"] > spike["t"]]
+    px = (spike["price"] / entry["price"] - 1) * 100 if spike.get("price") and entry.get("price") else None
+    gone = later and all(not ({key(f) for f in x["factors"]} & {key(f) for f in added}) for x in later[-1:])
+    if (spike.get("market_age_s") or 0) > max_age or (cats and cats <= {"data"}):
+        cls = "STALE_DATA"
+    elif cats & {"rug", "liquidity", "dev", "manipulation"} and (
+            (px is not None and px <= -5) or spike.get("liq_state") != entry.get("liq_state")
+            or (spike.get("dev_status") in ("SOLD ALL", "MAJOR SELL", "PARTIAL SELL")
+                and spike.get("dev_status") != entry.get("dev_status"))):
+        cls = "REAL_NEW_RISK"                         # something actually happened: dump, dev sell, liquidity move
+    elif cats and cats <= {"holders", "dev", "manipulation"} and (
+            spike.get("holders_fetched") != entry.get("holders_fetched") or spike.get("dev_status") != entry.get("dev_status")):
+        cls = "DATA_REFRESH"                          # newly fetched holder/dev data revealed pre-existing risk
+    elif added and gone and (px is None or abs(px) < 5):
+        cls = "FALSE_POSITIVE"
+    else:
+        cls = "UNKNOWN"
+    return {"symbol": fx["symbol"], "class": cls, "risk_path": [(x["at"], x["risk"]) for x in snaps],
+            "added_factors": added, "price_change_to_spike_pct": None if px is None else round(px, 1),
+            "spike_at_s": spike["t"], "entry_ctx": fx["ctx"]}
+
+
 def report(bot, eng, shocks, es_pass, liq_blocked, best, promo=None, cand_first=None, paths=None):
     out = {}
+    fl = bot.fill_log
+    out["slippage"] = {"jupiter_impact_pct": pctl(f.get("jupiter_impact_pct") for f in fl),
+                       "latency_slippage_pct": pctl(f.get("latency_slippage_pct") for f in fl),
+                       "total_slippage_pct": pctl(f.get("total_slippage_pct") for f in fl),
+                       "max_allowed_pct": bot.cfg.max_slippage_pct, "model": bot.cfg.latency_slippage_model,
+                       "models_used": dict(collections.Counter(f.get("latency_model") for f in fl))}
+    ls = bot.latency_stats()
+    drifts = sorted(max(0.0, d) for _, d in bot.latency_samples)
+    p75 = drifts[min(len(drifts) - 1, int(0.75 * (len(drifts) - 1)))] * 100 if drifts else None
+    attempts = [f for f in fl if f.get("jupiter_impact_pct") is not None]
+    out["latency_real"] = ls | {
+        "indicative_fill_rate_if_empirical_p75_pct": round(100 * sum(
+            1 for f in attempts if f["jupiter_impact_pct"] + p75 <= bot.cfg.max_slippage_pct) / len(attempts), 1)
+        if attempts and p75 is not None else None,
+        "note": "indicative only: EMPIRICAL is used for fills only after empirical_min_samples samples"}
+    spikes = [c for c in (classify_spike(fx) for fx in bot.forensics.values()) if c]
+    out["risk_spike_forensics"] = {"buys_tracked": len(bot.forensics),
+                                   "spikes": len(spikes), "classes": dict(collections.Counter(c["class"] for c in spikes)),
+                                   "details": spikes}
+    out["entry_risk_buffer"] = {"max_entry_risk": bot.cfg.entry_max_risk,
+                                "tokens_blocked_any": getattr(bot, "_audit_buffer", {}).get("any"),
+                                "tokens_where_buffer_was_the_only_blocker": getattr(bot, "_audit_buffer", {}).get("only_blocker"),
+                                "blocked_at_entry": len(bot.buffer_blocks),
+                                "entry_blocks": bot.buffer_blocks[-20:]}
+    mins = getattr(bot, "_audit_minutes", None)
+    fs = bot.fast_lane_stats()
+    out["fast_lane_rate"] = {"calls": fs.get("fast_getasset_calls"),
+                             "calls_per_min": round(fs.get("fast_getasset_calls", 0) / mins, 2) if mins else None,
+                             "limit_per_min": fs.get("per_min_limit"), "throttled": fs.get("throttled_by_quota_governor")}
     promo, cand_first, paths = promo or {}, cand_first or {}, paths or {}
     fills = bot.fill_log
     ok = [f for f in fills if f["status"] == "FILLED"]

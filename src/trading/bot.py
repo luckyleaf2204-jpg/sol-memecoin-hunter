@@ -44,7 +44,8 @@ class PaperBot:
         self.state_path = state_path
         self.config_path = config_path
         self.book = PaperBook.load(state_path, self.cfg.starting_balance) if state_path else PaperBook(self.cfg.starting_balance)
-        self.exec = PaperExecutor(self.cfg.seed, self.cfg.max_slippage_pct)
+        self.exec = PaperExecutor(self.cfg.seed, self.cfg.max_slippage_pct, self.cfg.latency_slippage_model)
+        self.exec.empirical = self._empirical_slip
         self.risk = RiskEngine(self.cfg)
         self.modules = {k: ModuleState(k) for k in MODULES}
         self.activity: deque[Activity] = deque(maxlen=400)
@@ -71,6 +72,11 @@ class PaperBot:
         self._gate_waiting: set[str] = set()   # experimental: ever WATCH because authority / Token-2022 unchecked
         self.fast_promoted: set[str] = set()   # ...and later a NEW candidate after the fast lane checked them
         self.fill_log: list[dict] = []          # every paper BUY fill attempt: impact / latency slip / total / max
+        self.latency_samples: deque = deque(maxlen=1000)   # (|chg5m| bucket, adverse drift fraction) from re-quotes
+        self.forensics: dict[str, dict] = {}    # mint -> Risk snapshots ENTRY, +5s, +10s, +15s, +30s, +60s
+        self.buffer_blocks: list[dict] = []     # NEW BUYs refused by the entry risk buffer (55 < Risk <= 60)
+        import random as _random
+        self._probe_rng = _random.Random(11)    # probe waits never consume the executor's random stream
         self._last_followup = 0.0
 
     # ---------------------------------------------------------------- helpers
@@ -119,6 +125,7 @@ class PaperBot:
         if self.cfg.enabled:
             self._entries(states, now)
         self._observe(states, now)
+        self._forensic_tick(states, now)
         if self.recorder is not None:
             self._rec("observe", list(states.values()), self.decisions, now,
                       {m for m, r in self.decisions.items() if r.get("ts") == now and m in states
@@ -204,6 +211,10 @@ class PaperBot:
                 rec["old_early"] = ("UNKNOWN" if es0 is None or es0.strength is None else
                                     "TRUE" if es0.is_early is True else f"FALSE {es0.groups_computable}/7")
                 rec["old_opportunity"], rec["old_confidence"] = sc.opportunity, sc.confidence
+                rs = st.risk.score if st.risk else None
+                rec["risk"] = rs
+                rec["old_entry_risk_pass"] = rs is not None and rs <= 60          # OLD_ENTRY_RISK (hard limit)
+                rec["new_entry_risk_pass"] = rs is not None and rs <= self.cfg.entry_max_risk   # NEW_ENTRY_RISK_BUFFER
                 if self.cfg.experimental:                   # NEW engine decides; OLD kept for A/B
                     xd = X.evaluate(st, v, sc, self.cfg, now)
                     decision = xd.decision
@@ -283,7 +294,8 @@ class PaperBot:
                         rec["blocked_by"] = rec.get("blocked_by", []) + ["jupiter: no route"]
                         continue
                     self.intents[st.mint] = {"mint": st.mint, "usd": sz.usd, "ts": now, "opportunity": sc.opportunity,
-                                             "why": sc.why, "setup": "+".join(sorted(reasons))}
+                                             "why": sc.why, "setup": "+".join(sorted(reasons)),
+                                             "risk_at_candidate": st.risk.score if st.risk else None}
                     rec["state"] = "QUOTING"
                     self.audit.execution("candidate", st, now, f"${sz.usd:,.2f}")
                     self.log("INFO", f"BUY CANDIDATE ${sz.usd:,.2f} → requesting Jupiter quote", st, now=now)
@@ -370,6 +382,86 @@ class PaperBot:
             self.log("FAILED", f"BUY → QUOTE FAILED ({qr.status}) → simulated fill failed: {ex.reason}", st, now=now)
             self.audit.execution("skip", st, now, ex.reason, reason="simulated_fill_failed")
 
+    # ---------------------------------------------------------------- execution calibration
+    @staticmethod
+    def _chg_bucket(st) -> str:
+        pc = abs(st.market.price_change_5m) if st.market and st.market.price_change_5m is not None else None
+        return "unknown" if pc is None else "<10%" if pc < 10 else "10-40%" if pc < 40 else ">=40%"
+
+    async def _latency_probe(self, st, mint: str, lamports: int, q: dict):
+        """Real latency drift: wait a simulated latency (0.4-1.5 s), re-quote the same size, compare outAmount.
+        Positive = adverse (fewer tokens). Quotes only. Returns bps or None."""
+        if not self.cfg.latency_probe or not hasattr(self.jupiter, "quote_result"):
+            return None
+        await asyncio.sleep(self._probe_rng.uniform(0.4, 1.5))
+        from trading.jupiter import WSOL
+        try:
+            r = await self.jupiter.quote_result(WSOL, mint, lamports, int(self.cfg.max_slippage_pct * 100),
+                                                attempts=1, budget_s=3.0)
+        except TypeError:
+            r = await self.jupiter.quote_result(WSOL, mint, lamports, int(self.cfg.max_slippage_pct * 100))
+        if not r.ok:
+            return None
+        try:
+            drift = 1 - int(r.quote["outAmount"]) / int(q["outAmount"])
+        except (KeyError, TypeError, ValueError, ZeroDivisionError):
+            return None
+        self.latency_samples.append((self._chg_bucket(st), drift))
+        return round(10_000 * drift)
+
+    def _empirical_slip(self, st) -> float | None:
+        """EMPIRICAL latency slippage: P75 of adverse drift in the token's bucket (all buckets if < 15 there);
+        None until cfg.empirical_min_samples samples exist."""
+        if len(self.latency_samples) < self.cfg.empirical_min_samples:
+            return None
+        b = self._chg_bucket(st)
+        xs = [max(0.0, d) for k, d in self.latency_samples if k == b]
+        if len(xs) < 15:
+            xs = [max(0.0, d) for _, d in self.latency_samples]
+        xs.sort()
+        return xs[min(len(xs) - 1, int(0.75 * (len(xs) - 1)))]
+
+    def latency_stats(self) -> dict:
+        xs = sorted(d for _, d in self.latency_samples)
+        pct = lambda p: round(10_000 * xs[min(len(xs) - 1, int(p * (len(xs) - 1)))], 1) if xs else None  # noqa: E731
+        return {"samples": len(xs), "min_samples_for_empirical": self.cfg.empirical_min_samples,
+                "empirical_active": len(xs) >= self.cfg.empirical_min_samples,
+                "drift_bps_p50": pct(0.5), "drift_bps_p75": pct(0.75), "drift_bps_p90": pct(0.9),
+                "adverse_share": round(sum(1 for x in xs if x > 0) / len(xs), 2) if xs else None,
+                "model": self.cfg.latency_slippage_model}
+
+    # ---------------------------------------------------------------- risk-spike forensics
+    FORENSIC_OFFSETS = (5, 10, 15, 30, 60)
+
+    @staticmethod
+    def _risk_snap(st, label: str, t_off: float) -> dict:
+        rk, m = st.risk, st.market
+        return {"at": label, "t": round(t_off, 1), "risk": rk.score if rk else None,
+                "factors": sorted(f"{f.category}:{f.key}:{f.points}" for f in (rk.factors if rk else [])),
+                "price": m.price_usd if m else None, "market_age_s": round(time.time() - m.updated_at, 1) if m else None,
+                "liq": m.liquidity_usd if m else None, "liq_state": st.liquidity_intel.state if st.liquidity_intel else None,
+                "holders_fetched": st.holders.fetched_at if st.holders else None, "holder_status": st.holder_status,
+                "dev_status": st.dev.status if st.dev else None, "dq": st.dq_status}
+
+    def _forensic_open(self, st, now: float, ctx: dict) -> None:
+        self.forensics[st.mint] = {"mint": st.mint, "symbol": st.info.symbol, "entry_ts": now, "ctx": ctx,
+                                   "snaps": [self._risk_snap(st, "ENTRY", 0)], "done": set(), "exit": None}
+
+    def _forensic_tick(self, states: dict, now: float) -> None:
+        for mint, fx in list(self.forensics.items()):
+            age = now - fx["entry_ts"]
+            st = states.get(mint)
+            if st is None or age > max(self.FORENSIC_OFFSETS) + 10:
+                continue
+            for off in self.FORENSIC_OFFSETS:
+                if off not in fx["done"] and age >= off:
+                    fx["done"].add(off)
+                    fx["snaps"].append(self._risk_snap(st, f"+{off}s", age))
+                    break
+        if len(self.forensics) > 200:
+            for m in sorted(self.forensics, key=lambda k: self.forensics[k]["entry_ts"])[:-200]:
+                self.forensics.pop(m, None)
+
     def _deep_hint(self, now: float) -> set[str]:
         """EXPERIMENTAL: tokens GENUINELY near a NEW-engine BUY get Helius priority (fast getAsset lane + holder deep
         scan) so their hard gates can be evaluated: EarlyScore >= threshold - 0.05 AND Confidence >= threshold - 0.10,
@@ -424,6 +516,9 @@ class PaperBot:
 
     def _after_sell(self, p, st, ex, reason: str, frac: float, now: float) -> None:
         self.book.reduce(p, ex, now, reason)
+        fx = self.forensics.get(p.mint)
+        if fx is not None and st is not None and fx["exit"] is None:
+            fx["exit"] = {"reason": reason, **self._risk_snap(st, "EXIT", now - fx["entry_ts"])}
         if ex.status == "FILLED":
             if reason == "take_profit_1":
                 p.tp1_done = True
@@ -544,6 +639,21 @@ class PaperBot:
                              f"{100 * imp:.2f}%" if imp is not None else f"BUY → QUOTE → MATCH · {route_label(q)}",
                      st, now=now)
             self.audit.execution("quote_ok", st, now, route_label(q))
+            risk_at_quote = st.risk.score if st.risk else None
+            drift = await self._latency_probe(st, mint, int(usd / sol * 1e9), q)
+            risk_at_entry = st.risk.score if st.risk else None
+            risk_ctx = {"risk_at_candidate": it.get("risk_at_candidate"), "risk_at_quote": risk_at_quote,
+                        "risk_at_entry": risk_at_entry, "entry_risk_buffer": self.cfg.entry_max_risk}
+            if self.cfg.experimental and (risk_at_entry is None or risk_at_entry > self.cfg.entry_max_risk):
+                rec["state"] = "RISK_BUFFER"
+                self.buffer_blocks.append({"ts": now, "mint": mint, "symbol": st.info.symbol, "stage": "entry", **risk_ctx})
+                del self.buffer_blocks[:-300]
+                self.log("BLOCK", f"BUY → QUOTE → MATCH → ENTRY RISK BUFFER: Risk {risk_at_entry} > "
+                                  f"{self.cfg.entry_max_risk} (hard limit 60) → WAIT · candidate kept", st, now=now)
+                self.audit.execution("skip", st, now, f"risk {risk_at_entry}", reason="entry_risk_buffer")
+                self._rec("fill", st, now, {"status": "BLOCKED", "fail_reason": "entry_blocked_by_risk_buffer",
+                                            "entry_blocked_by_risk_buffer": 1, **risk_ctx})
+                continue
             feeds_ok, why = self._feeds_ok()
             last = self.book.last_exit.get(mint)
             rd = self.risk.check_entry(mint=mint, usd=usd, equity=self.book.equity(), peak=self.book.peak,
@@ -559,10 +669,22 @@ class PaperBot:
             ex = self.exec.buy_from_quote(st, usd, q, sol, now)
             self._rec("quote", st, rec, now, "OK", "filled" if ex.status == "FILLED" else f"paper fill failed: {ex.reason}",
                       q, ex.status == "FILLED", int(self.cfg.max_slippage_pct * 100))
+            try:
+                out_tokens = int(q["outAmount"]) / 10 ** (st.info.decimals or 6)
+            except (KeyError, TypeError, ValueError):
+                out_tokens = 0.0
+            quote_price = usd / out_tokens if out_tokens else None
             fill = {"jupiter_impact_pct": round(ex.price_impact_pct, 3), "latency_slippage_pct": round(ex.slippage_pct, 3),
                     "total_slippage_pct": round(ex.price_impact_pct + ex.slippage_pct, 3),
                     "max_slippage_pct": self.cfg.max_slippage_pct, "status": ex.status,
-                    "fail_reason": "" if ex.status == "FILLED" else ex.reason}
+                    "fail_reason": "" if ex.status == "FILLED" else ex.reason,
+                    "quote_ts": now, "execution_ts": now + ex.latency_ms / 1000, "quote_price": quote_price,
+                    "simulated_execution_price": ex.fill_price if ex.fill_price else
+                    (quote_price * (1 + ex.slippage_pct / 100) if quote_price else None),
+                    "jupiter_impact_bps": round(100 * ex.price_impact_pct), "latency_slippage_bps": round(100 * ex.slippage_pct),
+                    "total_slippage_bps": round(100 * (ex.price_impact_pct + ex.slippage_pct)),
+                    "max_slippage_bps": round(100 * self.cfg.max_slippage_pct), "fill_result": ex.status,
+                    "latency_model": self.exec.last_model_used, "requote_drift_bps": drift, **risk_ctx}
             self.fill_log.append({"ts": now, "mint": mint, "symbol": st.info.symbol, **fill})
             del self.fill_log[:-300]
             self.audit.execution("fill_ok" if ex.status == "FILLED" else "fill_fail", st, now,
@@ -576,6 +698,7 @@ class PaperBot:
                                 f"slip {ex.slippage_pct:.2f}% · {ex.route} · WHY: {'; '.join((it.get('why') or [])[:3])}",
                          st, usd=usd, price=ex.fill_price, now=now)
                 self.audit.execution("buy", st, now, f"${usd:,.2f} @ {ex.fill_price:.8g} · {ex.route}")
+                self._forensic_open(st, now, risk_ctx)
             else:
                 self.book.record(ex)
                 self.log("FAILED", f"BUY → QUOTE → MATCH → PAPER FILL FAILED: {ex.reason} · Jupiter impact "

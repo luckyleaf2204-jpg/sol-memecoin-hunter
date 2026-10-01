@@ -70,9 +70,12 @@ def live_available() -> bool:
 
 class PaperExecutor(ExecutionInterface):
     name = "PAPER"
-    def __init__(self, seed: int = 7, max_slippage_pct: float = 3.0):
+    def __init__(self, seed: int = 7, max_slippage_pct: float = 3.0, latency_model: str = "CURRENT"):
         self.rng = random.Random(seed)
         self.max_slippage = max_slippage_pct / 100
+        self.latency_model = latency_model          # CURRENT | CONSERVATIVE | EMPIRICAL (see _slip)
+        self.empirical = None                       # callable(st) -> fraction | None, installed by the bot
+        self.last_model_used = "CURRENT"
 
     def network_fee(self, sol_price: float | None) -> float:
         return NETWORK_FEE_SOL * sol_price if sol_price else FALLBACK_NETWORK_USD
@@ -84,9 +87,30 @@ class PaperExecutor(ExecutionInterface):
         route, fee = route_of(st)
         return {"route": route, "fee_rate": fee, "impact": imp}
 
-    def _slip(self, st: TokenState) -> float:
+    def _slip_current(self, st: TokenState) -> float:
+        """CURRENT (unchanged): 0-0.5 % noise + 5 % of |price change 5m|, capped at 2 %.
+        Note (audit 2026-10-01): 5 % of a 5-minute move is ~15 s of average drift, while the simulated latency is
+        0.4-1.5 s — the reason EMPIRICAL exists. Kept as the default until real re-quote data says otherwise."""
         pc5 = abs(st.market.price_change_5m) if st.market and st.market.price_change_5m is not None else 0.0
         return self.rng.uniform(0, 0.005) + min(0.02, pc5 / 100 * 0.05)
+
+    def _slip(self, st: TokenState) -> float:
+        """Latency slippage by model. The random draw is consumed in every model so runs stay comparable.
+        CONSERVATIVE = CURRENT x 1.5 (cap 3 %) for stress tests. EMPIRICAL = adverse price drift measured by
+        re-quoting Jupiter after the latency window (P75 of the token's |change 5m| bucket); only when the bot has
+        enough samples — otherwise it falls back to CURRENT (and says so in last_model_used)."""
+        cur = self._slip_current(st)
+        self.last_model_used = "CURRENT"
+        if self.latency_model == "CONSERVATIVE":
+            self.last_model_used = "CONSERVATIVE"
+            return min(0.03, cur * 1.5)
+        if self.latency_model == "EMPIRICAL" and self.empirical is not None:
+            e = self.empirical(st)
+            if e is not None:
+                self.last_model_used = "EMPIRICAL"
+                return e
+            self.last_model_used = "CURRENT (EMPIRICAL: not enough samples)"
+        return cur
 
     def _fail(self, st: TokenState, impact: float) -> bool:
         p = 0.03 + (0.03 if st.market and st.market.is_curve else 0.0) + min(0.2, impact)
