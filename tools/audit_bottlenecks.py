@@ -153,7 +153,7 @@ def decompose(st, rec, settings, sol):
 async def run(minutes):
     eng = ScannerEngine(Settings(), Database(Path(tempfile.mkdtemp()) / "a.db"), keys=ApiKeys.from_env(),
                         on_log=lambda m: print(m, flush=True) if "PIPELINE" in m else None)
-    bot = PaperBot(eng, TradingConfig(experimental=True, latency_probe=True))
+    bot = PaperBot(eng, TradingConfig(experimental=True, latency_probe=True, latency_slippage_model="AUTO"))
     bot.jupiter = JupiterQuotes(eng.http)
     stop = asyncio.Event()
     tasks = [asyncio.create_task(eng.run()), asyncio.create_task(bot.run(stop))]
