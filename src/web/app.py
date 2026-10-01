@@ -108,8 +108,8 @@ def create_app(engine: ScannerEngine | None = None, start_scanner: bool = True,
             state["bot"].jupiter = JupiterQuotes(state["engine"].http)      # paper BUYs on real Jupiter quotes
             state["bot"].cfg.experimental = os.environ.get("EXPERIMENTAL_MODE", "1") != "0"   # spec Part 3 (PAPER)
             state["bot"].cfg.latency_probe = os.environ.get("LATENCY_PROBE", "1") != "0"     # measure real drift
-            lm = os.environ.get("LATENCY_SLIPPAGE_MODEL", "CURRENT").upper()               # CURRENT | CONSERVATIVE | EMPIRICAL
-            if lm in ("CURRENT", "CONSERVATIVE", "EMPIRICAL"):
+            lm = os.environ.get("LATENCY_SLIPPAGE_MODEL", "AUTO").upper()   # AUTO | CURRENT | CONSERVATIVE | EMPIRICAL
+            if lm in ("AUTO", "CURRENT", "CONSERVATIVE", "EMPIRICAL"):
                 state["bot"].cfg.latency_slippage_model = state["bot"].exec.latency_model = lm
             if os.environ.get("RESEARCH_LOG", "1") != "0":                # research dataset (read-only log)
                 from research.dataset import DatasetRecorder

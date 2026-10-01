@@ -217,7 +217,12 @@ async def run(minutes):
                     buffer_only.add(k)                       # would be a candidate without the buffer
             if rec.get("decision") == "TRADE" and k not in cand_first:
                 cand_first[k] = {"ts": now, "price": px, "symbol": st.info.symbol,
-                                 "liquidity_promoted": k in promo, "liquidity_model": rec.get("liquidity_model")}
+                                 "liquidity_promoted": k in promo, "liquidity_model": rec.get("liquidity_model"),
+                                 "risk": st.risk.score if st.risk else None,
+                                 "risk_factors": sorted(f"{f.category}:{f.key}:{f.points}" for f in (st.risk.factors if st.risk else [])),
+                                 "holder_status": st.holder_status, "dev_verified": bool(st.dev and st.dev.balance_verified),
+                                 "early_score": (rec.get("early_score") or {}).get("score"),
+                                 "prior_risk": (rec.get("early_score") or {}).get("prior_risk")}
             if (k in promo or k in cand_first) and px:
                 paths.setdefault(k, []).append((now, px))
             if k not in best or (row["opportunity"] or 0) >= (best[k]["opportunity"] or 0):
@@ -235,7 +240,7 @@ async def run(minutes):
     return bot, eng, shocks, es_pass, liq_blocked, best, promo, cand_first, paths
 
 
-def fwd(path, t0, p0, horizons=(60, 300, 600, 900)):
+def fwd(path, t0, p0, horizons=(60, 300, 600, 900, 1800, 3600)):
     if not path or not p0:
         return {}
     after = [(t, p) for t, p in path if t >= t0]
@@ -325,6 +330,22 @@ def report(bot, eng, shocks, es_pass, liq_blocked, best, promo=None, cand_first=
         if attempts and p75 is not None else None,
         "note": "indicative only: EMPIRICAL is used for fills only after empirical_min_samples samples"}
     spikes = [c for c in (classify_spike(fx) for fx in bot.forensics.values()) if c]
+    paths_risk = []
+    for fx in bot.forensics.values():
+        snaps = fx["snaps"] + ([fx["exit"]] if fx.get("exit") else [])
+        st_types = [x.get("spike_type") for x in snaps if x.get("spike_type")]
+        paths_risk.append({"symbol": fx["symbol"], "buy_ts": fx["entry_ts"],
+                           "spike_type": st_types[0] if st_types else None,
+                           "path": [{"at": x["at"], "risk": x["risk"], "risk_new": x.get("risk_new"),
+                                     "risk_data_refresh": x.get("risk_data_refresh"),
+                                     "risk_data_stale": x.get("risk_data_stale"),
+                                     "holders_stamp": x.get("holders_stamp"), "dev_stamp": x.get("dev_stamp"),
+                                     "changed": x.get("changed")} for x in snaps]})
+    out["risk_attribution"] = {
+        "buys": len(paths_risk),
+        "spike_types": dict(collections.Counter(r["spike_type"] for r in paths_risk if r["spike_type"])),
+        "risk_spike_exits": sum(1 for p in bot.book.closed if p.exit_reason == "risk_spike"),
+        "paths": paths_risk}
     out["risk_spike_forensics"] = {"buys_tracked": len(bot.forensics),
                                    "spikes": len(spikes), "classes": dict(collections.Counter(c["class"] for c in spikes)),
                                    "details": spikes}
@@ -381,6 +402,19 @@ def report(bot, eng, shocks, es_pass, liq_blocked, best, promo=None, cand_first=
         sims.append({"symbol": c["symbol"], "liquidity_promoted": c["liquidity_promoted"], "model": c["liquidity_model"],
                      "bought": k in bought, "sim_pnl_pct": pnl, "exit": how, **fwd(paths.get(k), c["ts"], c["price"])})
     out["candidates_simulated"] = sims
+    rugs = []
+    for k, c in cand_first.items():
+        f = fwd(paths.get(k), c["ts"], c["price"])
+        worst = f.get("mae_pct")
+        if worst is not None and worst <= -80:
+            rugs.append({"symbol": c["symbol"], "mae_pct": worst, "liquidity_model": c["liquidity_model"],
+                         "risk_at_candidate": c["risk"], "prior_risk": c["prior_risk"],
+                         "risk_factors_at_candidate": c["risk_factors"], "holder_status": c["holder_status"],
+                         "dev_verified": c["dev_verified"], "early_score": c["early_score"]})
+    out["rug_research"] = {"candidates_with_mae_le_-80pct": len(rugs), "cases": rugs,
+                           "note": "research examples for risk-component predictive power; no rule changed"}
+    st_counts = collections.Counter(f.get("candidate_status") for f in bot.fill_log)
+    out["candidate_status"] = dict(st_counts) | {"no_route_quotes": bot.quote_stats.get("NO_ROUTE", 0)}
     out["risk_spike_after_entry"] = [{"symbol": p.symbol, "after_s": round((p.closed_at or 0) - p.opened_at),
                                       "net": round(p.realized_usd - p.cost_usd, 2)}
                                      for p in bot.book.closed if p.exit_reason == "risk_spike"]

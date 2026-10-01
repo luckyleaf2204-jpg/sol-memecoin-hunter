@@ -673,3 +673,117 @@ def test_risk_spike_classification():
     assert classify_spike(calm) is None
     r = classify_spike(refresh)
     assert r["class"] == "DATA_REFRESH" and r["added_factors"] == ["holders:top10_high:16"]
+
+
+# ---------------------------------------------------------------- round 2: AUTO latency tiers, risk attribution
+def _bot_with_samples(values):
+    b = bot([hot()], ScriptedJupiter([J.OK]))
+    b.cfg.latency_slippage_model = "AUTO"
+    for v in values:
+        b.latency_samples.append(("10-40%", v))
+    return b
+
+
+def test_auto_latency_tiers():
+    import random as _r
+    rnd = _r.Random(3)
+    calm = [rnd.uniform(0, 0.006) for _ in range(120)]           # stable 0-60 bps
+    b = _bot_with_samples(calm[:49])
+    assert b.latency_tier()[0] == "CURRENT" and b._empirical_slip(hot()) is None
+    b = _bot_with_samples(calm[:60])
+    tier, p, _ = b.latency_tier()
+    assert tier == "EMPIRICAL_P90" and p == 0.90
+    v = b._empirical_slip(hot())
+    assert abs(v - sorted(calm[:60])[int(0.9 * 59)]) < 1e-12
+    b = _bot_with_samples(calm[:120])
+    assert b.latency_tier()[0] == "EMPIRICAL_P75"
+
+
+def test_auto_latency_stays_safe_when_distribution_is_unstable():
+    early = [0.0005] * 50
+    late = [0.008] * 50                                          # regime change: drift x16
+    b = _bot_with_samples(early + late)
+    assert b.latency_tier()[0] in ("CURRENT", "EMPIRICAL_P90") and b.latency_tier()[0] != "EMPIRICAL_P75"
+    spiky = [0.0002] * 45 + [0.05] * 15                          # erratic tail: P90 >> P75
+    assert _bot_with_samples(spiky).latency_tier()[0] == "CURRENT"
+
+
+def test_total_slippage_over_3pct_still_blocks_with_empirical():
+    st = hot(age_s=60)
+    b = bot([st], ScriptedJupiter([J.OK]))
+    b.cfg.experimental = True
+    b.exec.latency_model = "AUTO"
+    b.cfg.latency_slippage_model = "AUTO"
+    for _ in range(60):
+        b.latency_samples.append(("<10%", 0.028))                 # measured 2.8 % + impact 0.4 % > 3 %
+    b.tick()
+    asyncio.run(b.execute_intents())
+    assert not b.book.positions and b.fill_log[-1]["candidate_status"] == "slippage_blocked"
+    assert b.fill_log[-1]["latency_model"] == "EMPIRICAL_P90"
+
+
+def test_data_refresh_is_not_counted_as_new_risk():
+    from trading.bot import attribute_risk
+    entry = {"risk": 41, "factors": ["age:young:5"], "holders_stamp": None, "dev_stamp": None}
+    later = {"risk": 81, "holders_stamp": 1015.0, "dev_stamp": 1016.0,
+             "factors": ["age:young:5", "holders:top10_high:25", "holders:single_whale:10", "holders:few_holders:8",
+                         "dev:dev_concentration:15"]}
+    a = attribute_risk(entry, later, buy_ts=1000.0)
+    assert a["risk_new"] == 0 and a["risk_data_refresh"] == 58 and a["spike_type"] == "DATA_REFRESH"
+    # dev data already present at entry, worse after a later fetch = a real change
+    entry2 = dict(entry, dev_stamp=990.0, factors=["age:young:5"])
+    later2 = dict(later, factors=["age:young:5", "dev:dev_sold:30"], risk=71)
+    a2 = attribute_risk(entry2, later2, buy_ts=1000.0)
+    assert a2["risk_new"] == 30 and a2["spike_type"] == "RISK_NEW"
+    # market-side risk (rug / liquidity) is always new
+    a3 = attribute_risk(entry, dict(later, factors=["age:young:5", "rug:liquidity_shock:30"], risk=71), 1000.0)
+    assert a3["risk_new"] == 30 and a3["spike_type"] == "RISK_NEW"
+
+
+def test_forensic_snapshots_carry_attribution_and_timestamps():
+    st = hot(age_s=60)
+    b = bot([st], ScriptedJupiter([J.OK]))
+    b.cfg.experimental = True
+    t0 = time.time()
+    b.tick(t0)
+    asyncio.run(b.execute_intents(t0))
+    b.tick(t0 + 5)
+    snap = b.forensics[st.mint]["snaps"][1]
+    for k in ("risk", "risk_new", "risk_data_refresh", "risk_data_stale", "changed", "holders_stamp", "dev_stamp", "buy_ts"):
+        assert k in snap, k
+
+
+def test_missing_holder_dev_never_rejects_but_raises_prior():
+    st = hot(age_s=900)                                          # no holders, dev unverified
+    st.dev.balance_verified = False
+    xd, _ = ev(st)
+    assert xd.decision != D.REJECT and xd.es.prior_risk >= 30
+    assert "no holder data (unobserved concentration risk)" in xd.es.prior_reasons
+
+
+def test_idea_like_rug_curve_passing_floor_is_still_rejected():
+    st = curve_tok(virtual_sol=45, real_sol=15)                  # AMM-equivalent $13.5K: floor PASS
+    st.risk = RiskResult(30, "LOW", [RiskFactor("dev_dump", 30, "rug")])
+    xd, _ = ev(st)
+    assert xd.decision == D.REJECT and "rug" in xd.rejected
+    st = curve_tok(virtual_sol=45, real_sol=15)
+    st.dev.balance_verified, st.dev.status = True, "SOLD ALL"
+    assert "dev" in ev(st)[0].rejected
+
+
+def test_candidate_status_recorded_for_no_route_and_slippage(tmp_path):
+    st = hot(age_s=60)
+    b = bot([st], ScriptedJupiter([J.NO_ROUTE]))
+    b.cfg.experimental = True
+    b.recorder = DatasetRecorder(tmp_path / "a.db")
+    b.tick()
+    asyncio.run(b.execute_intents())
+    assert b.recorder.db.execute("SELECT candidate_status FROM candidates").fetchone()[0] == "candidate_no_route"
+    st2 = hot(age_s=60)
+    b2 = bot([st2], ScriptedJupiter([J.OK]))
+    b2.cfg.experimental = True
+    b2.recorder = DatasetRecorder(tmp_path / "b.db")
+    b2.exec._slip = lambda s: 0.029
+    b2.tick()
+    asyncio.run(b2.execute_intents())
+    assert b2.recorder.db.execute("SELECT candidate_status FROM candidates").fetchone()[0] == "slippage_blocked"

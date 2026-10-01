@@ -73,7 +73,8 @@ class PaperExecutor(ExecutionInterface):
     def __init__(self, seed: int = 7, max_slippage_pct: float = 3.0, latency_model: str = "CURRENT"):
         self.rng = random.Random(seed)
         self.max_slippage = max_slippage_pct / 100
-        self.latency_model = latency_model          # CURRENT | CONSERVATIVE | EMPIRICAL (see _slip)
+        self.latency_model = latency_model          # CURRENT | CONSERVATIVE | EMPIRICAL | AUTO (see _slip)
+        self.empirical_label = "EMPIRICAL"          # set by the bot's provider (e.g. EMPIRICAL_P90)
         self.empirical = None                       # callable(st) -> fraction | None, installed by the bot
         self.last_model_used = "CURRENT"
 
@@ -104,12 +105,13 @@ class PaperExecutor(ExecutionInterface):
         if self.latency_model == "CONSERVATIVE":
             self.last_model_used = "CONSERVATIVE"
             return min(0.03, cur * 1.5)
-        if self.latency_model == "EMPIRICAL" and self.empirical is not None:
+        if self.latency_model in ("EMPIRICAL", "AUTO") and self.empirical is not None:
             e = self.empirical(st)
             if e is not None:
-                self.last_model_used = "EMPIRICAL"
+                self.last_model_used = self.empirical_label
                 return e
-            self.last_model_used = "CURRENT (EMPIRICAL: not enough samples)"
+            why = self.empirical_label if self.empirical_label != "EMPIRICAL" else "not enough samples"
+            self.last_model_used = f"CURRENT ({self.latency_model}: {why})"
         return cur
 
     def _fail(self, st: TokenState, impact: float) -> bool:

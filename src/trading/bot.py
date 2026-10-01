@@ -30,6 +30,7 @@ EXIT_WHY = {"stop_loss": "price hit the stop loss", "break_even_stop": "fell bac
             "momentum_deterioration": "momentum reversed (DISTRIBUTION / DECLINING)",
             "volume_collapse": "volume collapsed below entry", "max_hold_time": "max holding time"}
 TICK_S = 5.0
+LAT_P90_MIN, LAT_P75_MIN = 50, 100        # AUTO latency model: samples needed for EMPIRICAL P90 / P75
 FAST_SCORE_MARGIN, FAST_CONF_MARGIN = 0.05, 0.10   # fast getAsset lane: "genuinely near a NEW BUY"
 QUOTE_RETRY_WINDOW_S = 60.0     # transient Jupiter failures (429 / timeout / 5xx) are retried this long
 NO_ROUTE_BLOCK_S = 120.0        # after a confirmed "no route": no re-quote of that CA for this long
@@ -73,6 +74,7 @@ class PaperBot:
         self.fast_promoted: set[str] = set()   # ...and later a NEW candidate after the fast lane checked them
         self.fill_log: list[dict] = []          # every paper BUY fill attempt: impact / latency slip / total / max
         self.latency_samples: deque = deque(maxlen=1000)   # (|chg5m| bucket, adverse drift fraction) from re-quotes
+        self.latency_log: deque = deque(maxlen=1000)       # per re-quote: quote/re-quote ts, real latency, route, liq
         self.forensics: dict[str, dict] = {}    # mint -> Risk snapshots ENTRY, +5s, +10s, +15s, +30s, +60s
         self.buffer_blocks: list[dict] = []     # NEW BUYs refused by the entry risk buffer (55 < Risk <= 60)
         import random as _random
@@ -393,8 +395,9 @@ class PaperBot:
         Positive = adverse (fewer tokens). Quotes only. Returns bps or None."""
         if not self.cfg.latency_probe or not hasattr(self.jupiter, "quote_result"):
             return None
+        q_ts = time.time()
         await asyncio.sleep(self._probe_rng.uniform(0.4, 1.5))
-        from trading.jupiter import WSOL
+        from trading.jupiter import WSOL, route_label
         try:
             r = await self.jupiter.quote_result(WSOL, mint, lamports, int(self.cfg.max_slippage_pct * 100),
                                                 attempts=1, budget_s=3.0)
@@ -407,25 +410,72 @@ class PaperBot:
         except (KeyError, TypeError, ValueError, ZeroDivisionError):
             return None
         self.latency_samples.append((self._chg_bucket(st), drift))
+        rq_ts = time.time()
+        self.latency_log.append({"mint": mint, "quote_ts": q_ts, "requote_ts": rq_ts, "latency_s": round(rq_ts - q_ts, 3),
+                                 "drift_bps": round(10_000 * drift, 1), "route": route_label(q),
+                                 "liquidity_usd": st.market.liquidity_usd if st.market else None,
+                                 "bucket": self._chg_bucket(st)})
+        self._last_probe = self.latency_log[-1]
         return round(10_000 * drift)
 
+    @staticmethod
+    def _pctl(xs, p: float) -> float | None:
+        xs = sorted(xs)
+        return xs[min(len(xs) - 1, int(p * (len(xs) - 1)))] if xs else None
+
+    def latency_tier(self) -> tuple[str, float | None, str]:
+        """AUTO tier from the measured adverse drift (re-quotes):
+        < 50 samples -> CURRENT · >= 50 -> EMPIRICAL_P90 if the P90 is stable · >= 100 -> EMPIRICAL_P75 if the P75 is
+        stable. Stable = the percentile of the two most recent halves differs by <= max(10 bps, 35 %), and the
+        distribution is not erratic (P90 <= 5 x P75 + 20 bps). Otherwise stay on the safer tier.
+        Returns (tier, percentile, why)."""
+        xs = [max(0.0, d) for _, d in self.latency_samples]
+        n = len(xs)
+
+        def stable(p: float, window: int) -> bool:
+            w = xs[-window:]
+            a, b = self._pctl(w[: window // 2], p), self._pctl(w[window // 2:], p)
+            return a is not None and b is not None and abs(a - b) <= max(0.0010, 0.35 * max(a, b))
+        if n < LAT_P90_MIN:
+            return "CURRENT", None, f"{n} < {LAT_P90_MIN} samples"
+        p75, p90 = self._pctl(xs, 0.75), self._pctl(xs, 0.90)
+        if p90 > 5 * p75 + 0.0020:
+            return "CURRENT", None, f"erratic distribution (P90 {p90 * 1e4:.0f} bps vs P75 {p75 * 1e4:.0f} bps)"
+        if n >= LAT_P75_MIN and stable(0.75, LAT_P75_MIN):
+            return "EMPIRICAL_P75", 0.75, f"{n} samples, P75 stable"
+        if stable(0.90, LAT_P90_MIN):
+            return "EMPIRICAL_P90", 0.90, f"{n} samples, P90 stable"
+        return "CURRENT", None, f"{n} samples, P90 not stable yet"
+
     def _empirical_slip(self, st) -> float | None:
-        """EMPIRICAL latency slippage: P75 of adverse drift in the token's bucket (all buckets if < 15 there);
-        None until cfg.empirical_min_samples samples exist."""
-        if len(self.latency_samples) < self.cfg.empirical_min_samples:
-            return None
+        """EMPIRICAL (explicit): P75 once cfg.empirical_min_samples exist. AUTO: the tier from latency_tier().
+        Percentile over the token's |change 5m| bucket when it has >= 15 samples, else over all samples."""
+        if self.cfg.latency_slippage_model == "AUTO":
+            tier, p, why = self.latency_tier()
+            self.exec.empirical_label = tier if p is not None else why
+            if p is None:
+                return None
+        else:
+            if len(self.latency_samples) < self.cfg.empirical_min_samples:
+                self.exec.empirical_label = "not enough samples"
+                return None
+            p = 0.75
+            self.exec.empirical_label = "EMPIRICAL"
         b = self._chg_bucket(st)
         xs = [max(0.0, d) for k, d in self.latency_samples if k == b]
         if len(xs) < 15:
             xs = [max(0.0, d) for _, d in self.latency_samples]
-        xs.sort()
-        return xs[min(len(xs) - 1, int(0.75 * (len(xs) - 1)))]
+        return self._pctl(xs, p)
 
     def latency_stats(self) -> dict:
         xs = sorted(d for _, d in self.latency_samples)
         pct = lambda p: round(10_000 * xs[min(len(xs) - 1, int(p * (len(xs) - 1)))], 1) if xs else None  # noqa: E731
+        tier, _, why = self.latency_tier()
+        lat = [x["latency_s"] for x in self.latency_log]
         return {"samples": len(xs), "min_samples_for_empirical": self.cfg.empirical_min_samples,
                 "empirical_active": len(xs) >= self.cfg.empirical_min_samples,
+                "auto_tier": tier, "auto_tier_why": why,
+                "real_latency_s_p50": round(self._pctl(lat, 0.5), 3) if lat else None,
                 "drift_bps_p50": pct(0.5), "drift_bps_p75": pct(0.75), "drift_bps_p90": pct(0.9),
                 "adverse_share": round(sum(1 for x in xs if x > 0) / len(xs), 2) if xs else None,
                 "model": self.cfg.latency_slippage_model}
@@ -434,18 +484,26 @@ class PaperBot:
     FORENSIC_OFFSETS = (5, 10, 15, 30, 60)
 
     @staticmethod
-    def _risk_snap(st, label: str, t_off: float) -> dict:
+    def _risk_snap(st, label: str, t_off: float, entry: dict | None = None, buy_ts: float | None = None) -> dict:
         rk, m = st.risk, st.market
-        return {"at": label, "t": round(t_off, 1), "risk": rk.score if rk else None,
+        hs, ds = st.stamps.get("holders"), st.stamps.get("dev")
+        snap = {"at": label, "t": round(t_off, 1), "risk": rk.score if rk else None,
                 "factors": sorted(f"{f.category}:{f.key}:{f.points}" for f in (rk.factors if rk else [])),
+                "holders_stamp": hs.updated_at if hs else None, "dev_stamp": ds.updated_at if ds else None,
+                "buy_ts": buy_ts,
                 "price": m.price_usd if m else None, "market_age_s": round(time.time() - m.updated_at, 1) if m else None,
                 "liq": m.liquidity_usd if m else None, "liq_state": st.liquidity_intel.state if st.liquidity_intel else None,
                 "holders_fetched": st.holders.fetched_at if st.holders else None, "holder_status": st.holder_status,
                 "dev_status": st.dev.status if st.dev else None, "dq": st.dq_status}
+        if entry is not None:
+            snap.update(attribute_risk(entry, snap, buy_ts))
+        return snap
 
     def _forensic_open(self, st, now: float, ctx: dict) -> None:
+        entry = self._risk_snap(st, "ENTRY", 0, buy_ts=now)
+        entry.update({"risk_new": 0, "risk_data_refresh": 0, "risk_data_stale": 0, "changed": []})
         self.forensics[st.mint] = {"mint": st.mint, "symbol": st.info.symbol, "entry_ts": now, "ctx": ctx,
-                                   "snaps": [self._risk_snap(st, "ENTRY", 0)], "done": set(), "exit": None}
+                                   "snaps": [entry], "done": set(), "exit": None}
 
     def _forensic_tick(self, states: dict, now: float) -> None:
         for mint, fx in list(self.forensics.items()):
@@ -456,7 +514,7 @@ class PaperBot:
             for off in self.FORENSIC_OFFSETS:
                 if off not in fx["done"] and age >= off:
                     fx["done"].add(off)
-                    fx["snaps"].append(self._risk_snap(st, f"+{off}s", age))
+                    fx["snaps"].append(self._risk_snap(st, f"+{off}s", age, fx["snaps"][0], fx["entry_ts"]))
                     break
         if len(self.forensics) > 200:
             for m in sorted(self.forensics, key=lambda k: self.forensics[k]["entry_ts"])[:-200]:
@@ -518,7 +576,8 @@ class PaperBot:
         self.book.reduce(p, ex, now, reason)
         fx = self.forensics.get(p.mint)
         if fx is not None and st is not None and fx["exit"] is None:
-            fx["exit"] = {"reason": reason, **self._risk_snap(st, "EXIT", now - fx["entry_ts"])}
+            fx["exit"] = {"reason": reason, **self._risk_snap(st, "EXIT", now - fx["entry_ts"], fx["snaps"][0],
+                                                               fx["entry_ts"])}
         if ex.status == "FILLED":
             if reason == "take_profit_1":
                 p.tp1_done = True
@@ -652,7 +711,8 @@ class PaperBot:
                                   f"{self.cfg.entry_max_risk} (hard limit 60) → WAIT · candidate kept", st, now=now)
                 self.audit.execution("skip", st, now, f"risk {risk_at_entry}", reason="entry_risk_buffer")
                 self._rec("fill", st, now, {"status": "BLOCKED", "fail_reason": "entry_blocked_by_risk_buffer",
-                                            "entry_blocked_by_risk_buffer": 1, **risk_ctx})
+                                            "entry_blocked_by_risk_buffer": 1, "candidate_status": "risk_buffer",
+                                            **risk_ctx})
                 continue
             feeds_ok, why = self._feeds_ok()
             last = self.book.last_exit.get(mint)
@@ -684,7 +744,12 @@ class PaperBot:
                     "jupiter_impact_bps": round(100 * ex.price_impact_pct), "latency_slippage_bps": round(100 * ex.slippage_pct),
                     "total_slippage_bps": round(100 * (ex.price_impact_pct + ex.slippage_pct)),
                     "max_slippage_bps": round(100 * self.cfg.max_slippage_pct), "fill_result": ex.status,
-                    "latency_model": self.exec.last_model_used, "requote_drift_bps": drift, **risk_ctx}
+                    "latency_model": self.exec.last_model_used, "requote_drift_bps": drift,
+                    "requote_ts": (getattr(self, "_last_probe", None) or {}).get("requote_ts") if drift is not None else None,
+                    "latency_actual_s": (getattr(self, "_last_probe", None) or {}).get("latency_s") if drift is not None else None,
+                    "route": ex.route, "liquidity_usd": st.market.liquidity_usd if st.market else None,
+                    "candidate_status": "bought" if ex.status == "FILLED" else
+                    ("slippage_blocked" if "slippage" in (ex.reason or "") else "fill_failed"), **risk_ctx}
             self.fill_log.append({"ts": now, "mint": mint, "symbol": st.info.symbol, **fill})
             del self.fill_log[:-300]
             self.audit.execution("fill_ok" if ex.status == "FILLED" else "fill_fail", st, now,
@@ -851,6 +916,58 @@ def REJECT_CATEGORY(reason: str, st: TokenState) -> list[str]:
     return [{"identity_conflict": "identity_conflict", "liquidity": "liquidity", "dev": "dev",
              "authorities": "authority", "token_2022": "token_2022", "data_invalid": "data_invalid",
              "early_signal": "early_signal_false"}.get(reason, "other:" + reason)]
+
+
+def attribute_risk(entry: dict, snap: dict, buy_ts: float | None) -> dict:
+    """Split the change of Risk components since ENTRY into
+    RISK_NEW          a component that changed although its data did not merely arrive (market, liquidity, rug, ...)
+    RISK_DATA_REFRESH a holders / dev component that appeared or grew because Helius data for it was fetched AFTER the
+                      BUY (risk that existed but was not visible at entry — e.g. top10 / single whale / dev share)
+    RISK_DATA_STALE   'data' components (missing / stale inputs)
+    Reading only: the Risk Engine and the exits are not affected. Also gives spike_type when Risk > 60:
+    RISK_NEW if the new-risk share of the increase alone would have crossed 60, else DATA_REFRESH / DATA_STALE."""
+    def parse(fs):
+        out = {}
+        for f in fs:
+            cat_key, _, pts = f.rpartition(":")
+            try:
+                out[cat_key] = float(pts)
+            except ValueError:
+                out[cat_key] = 0.0
+        return out
+    e, c = parse(entry.get("factors") or []), parse(snap.get("factors") or [])
+    buckets = {"risk_new": 0.0, "risk_data_refresh": 0.0, "risk_data_stale": 0.0}
+    changed = []
+    for k in sorted(set(e) | set(c)):
+        d = c.get(k, 0.0) - e.get(k, 0.0)
+        if not d:
+            continue
+        cat = k.split(":")[0]
+        if cat in ("holders", "dev"):
+            stamp = snap.get("holders_stamp" if cat == "holders" else "dev_stamp")
+            before = entry.get("holders_stamp" if cat == "holders" else "dev_stamp")
+            # first data AFTER the BUY (nothing to compare at entry) -> risk that already existed, now visible.
+            # data present at entry and worse at a later fetch (e.g. the dev actually sold) -> a real change.
+            first_seen = stamp is not None and buy_ts is not None and stamp > buy_ts and before is None
+            b = "risk_data_refresh" if first_seen else "risk_new"
+        elif cat == "data":
+            b = "risk_data_stale"
+        else:
+            b = "risk_new"
+        buckets[b] += d
+        changed.append([k, d, b.upper()])
+    out = {k: round(v, 1) for k, v in buckets.items()} | {"changed": changed}
+    r0, r1 = entry.get("risk"), snap.get("risk")
+    if r1 is not None and r1 > 60 and r0 is not None:
+        inc = r1 - r0
+        pos = {k: max(0.0, v) for k, v in buckets.items()}
+        tot = sum(pos.values())
+        new_part = inc * (pos["risk_new"] / tot) if tot else inc
+        if r0 + new_part > 60:
+            out["spike_type"] = "RISK_NEW"
+        else:
+            out["spike_type"] = "DATA_REFRESH" if pos["risk_data_refresh"] >= pos["risk_data_stale"] else "DATA_STALE"
+    return out
 
 
 def is_trade_candidate(st: TokenState, rec: dict, allow_unchecked_risk: bool = False) -> bool:

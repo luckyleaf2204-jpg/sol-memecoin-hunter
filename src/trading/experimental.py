@@ -270,6 +270,10 @@ def prior_risk(st: TokenState, age_s: float) -> tuple[int, list[str]]:
         at_least(30, "liquidity unknown")
     if age_s < 300 and h is None:
         at_least(15, "< 5 min without holder data")
+    if h is None:
+        at_least(30, "no holder data (unobserved concentration risk)")
+    if st.dev is None or not st.dev.balance_verified:
+        at_least(25, "dev balance unverified")
     if m is None or not m.pair_address:
         at_least(25, "single source (no DEX pair data)")
     return p, why

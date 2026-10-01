@@ -51,7 +51,7 @@ class TradingConfig:
     experimental: bool = False
     paper_fill_without_quote: bool = True    # experimental PAPER: a candidate whose quote fails is filled on the model
     # PAPER execution calibration (max_slippage_pct unchanged): CURRENT | CONSERVATIVE | EMPIRICAL
-    latency_slippage_model: str = "CURRENT"
+    latency_slippage_model: str = "CURRENT"    # AUTO: <50 samples CURRENT · >=50 P90 · >=100 P75 if stable
     latency_probe: bool = False              # (server: on) re-quote after the latency window to measure real drift (quotes only)
     empirical_min_samples: int = 50          # EMPIRICAL stays off (falls back to CURRENT) below this
     # ENTRY risk buffer (experimental NEW BUYs only; Risk Engine, exits and the hard limit 60 unchanged)

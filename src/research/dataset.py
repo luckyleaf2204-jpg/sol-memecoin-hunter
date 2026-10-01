@@ -102,7 +102,8 @@ AB_CAND_COLS = {"engine": "TEXT", "old_decision": "TEXT", "new_decision": "TEXT"
                 "latency_slippage_bps": "INTEGER", "total_slippage_bps": "INTEGER", "max_slippage_bps": "INTEGER",
                 "fill_result": "TEXT", "latency_model": "TEXT", "requote_drift_bps": "INTEGER",
                 "risk_at_candidate": "REAL", "risk_at_quote": "REAL", "risk_at_entry": "REAL",
-                "entry_risk_buffer": "REAL", "entry_blocked_by_risk_buffer": "INTEGER"}
+                "entry_risk_buffer": "REAL", "entry_blocked_by_risk_buffer": "INTEGER", "requote_ts": "REAL",
+                "latency_actual_s": "REAL", "route": "TEXT", "liquidity_usd": "REAL", "candidate_status": "TEXT"}
 
 
 def migrate(db: sqlite3.Connection) -> None:
@@ -200,6 +201,7 @@ class DatasetRecorder:
         self.db.executescript(SCHEMA)
         migrate(self.db)
         self.db.execute("PRAGMA journal_mode=WAL")
+        self.db.execute("PRAGMA synchronous=NORMAL")      # see database/db.py
         self.dex = dex                                  # DexScreenerClient for off-scanner follow-ups
         self.t: dict[str, dict] = {}                    # in-memory per-CA tracking state
         self.cand_open: dict[str, int] = {}             # ca -> candidates.id of the latest candidate episode
@@ -417,7 +419,8 @@ class DatasetRecorder:
                 "execution_ts", "quote_price", "simulated_execution_price", "jupiter_impact_bps", "latency_slippage_bps",
                 "total_slippage_bps", "max_slippage_bps", "fill_result", "latency_model", "requote_drift_bps",
                 "risk_at_candidate", "risk_at_quote", "risk_at_entry", "entry_risk_buffer",
-                "entry_blocked_by_risk_buffer")
+                "entry_blocked_by_risk_buffer", "requote_ts", "latency_actual_s", "route", "liquidity_usd",
+                "candidate_status")
         have = [c for c in cols if c in f]
         sets = ", ".join(f"{c}=?" for c in have)
         self.db.execute(f"UPDATE candidates SET {sets}{', ' if sets else ''}fill_status=?, fill_fail_reason=?, "
@@ -444,10 +447,12 @@ class DatasetRecorder:
                 "UPDATE candidates SET quote_ts=COALESCE(quote_ts, ?), time_from_candidate_to_quote_sec="
                 "COALESCE(time_from_candidate_to_quote_sec, ?), quote_status=?, quote_detail=?, quote_impact_pct=?, "
                 "quote_route_hops=?, would_have_bought_if_quote_ok=?, bought=MAX(bought, ?), "
-                "simulated_fill=MAX(COALESCE(simulated_fill, 0), ?) WHERE id=?",
+                "simulated_fill=MAX(COALESCE(simulated_fill, 0), ?), "
+                "candidate_status=CASE WHEN ?='NO_ROUTE' THEN 'candidate_no_route' "
+                "WHEN ?!='OK' AND candidate_status IS NULL THEN 'quote_failed' ELSE candidate_status END WHERE id=?",
                 (now, round(now - row[0], 2) if row else None, status, detail[:300], imp, hops,
                  int(not ok and bool(rec and rec.get("risk_allowed"))), int(bought),
-                 int(bought and not ok), cid))
+                 int(bought and not ok), status, status, cid))
         self._snap(st, rec, "bought" if bought else "candidate", "quote", now,
                    {"ok": int(status == "OK"), "status": status, "slippage_bps": slippage_bps, "hops": hops,
                     "impact_pct": imp, "detail": detail[:300]})

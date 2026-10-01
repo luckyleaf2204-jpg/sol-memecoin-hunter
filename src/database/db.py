@@ -68,6 +68,10 @@ class Database:
         self.conn = sqlite3.connect(self.path, check_same_thread=False)
         self.conn.row_factory = sqlite3.Row
         self.conn.execute("PRAGMA journal_mode=WAL")
+        # WAL + NORMAL (SQLite's recommended pairing): commits no longer fsync, checkpoints do. The database cannot
+        # be corrupted; a power loss can only drop the last few transactions. Was FULL: one fsync per commit, which
+        # made a 400-token evaluation round swing 0.45-3 s on Windows (audit 2026-10-01).
+        self.conn.execute("PRAGMA synchronous=NORMAL")
         self.conn.executescript(SCHEMA)
         self._migrate()
         self.conn.commit()
