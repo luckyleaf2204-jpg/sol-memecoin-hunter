@@ -109,6 +109,27 @@ class Position:
     setup: str = ""              # how the bot found it (scan reasons), for P&L per setup
     exit_reason: str = ""
     closed_at: float | None = None
+    # path diagnostics (logging only — the Exit Engine does not read them)
+    low_price: float | None = None
+    tp1_hit_ts: float | None = None        # first time the observed price reached the TP1 level
+    tp2_hit_ts: float | None = None
+    sl_hit_ts: float | None = None         # first time the observed price reached the initial stop level
+    initial_stop: float | None = None
+
+    @property
+    def mfe_pct(self) -> float | None:
+        return 100 * (self.high_price / self.entry_price - 1) if self.entry_price else None
+
+    @property
+    def mae_pct(self) -> float | None:
+        return 100 * (self.low_price / self.entry_price - 1) if self.entry_price and self.low_price else None
+
+    def path_log(self) -> dict:
+        rel = lambda t: None if t is None else round(t - self.opened_at)  # noqa: E731
+        return {"mfe_pct": None if self.mfe_pct is None else round(self.mfe_pct, 2),
+                "mae_pct": None if self.mae_pct is None else round(self.mae_pct, 2),
+                "time_to_tp1_s": rel(self.tp1_hit_ts), "time_to_tp2_s": rel(self.tp2_hit_ts),
+                "time_to_sl_s": rel(self.sl_hit_ts), "time_to_exit_s": rel(self.closed_at)}
 
     def value(self, price: float | None = None) -> float | None:
         p = price if price is not None else self.last_price

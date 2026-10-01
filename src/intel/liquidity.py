@@ -19,6 +19,35 @@ from intel.metrics import MetricBuilder, pct_change
 
 SHOCK_DROP_PCT = 30
 TREND_PCT = 5
+VIRTUAL_SOL_BASE = 30.0      # Pump.fun classic curve: virtual SOL reserve = 30 SOL + real SOL in the curve
+from pumpfun.client import SOL_QUOTES  # noqa: E402  (native SOL "1111…1111" and wrapped SOL)
+
+
+def depth_points(points, cur, now: float, info=None, sol_price: float | None = None):
+    """Liquidity points comparable with the CURRENT one, as the pool's actual depth (audit 2026-10-01):
+    * only the same pair AND the same liquidity source (a curve reserve is never compared with an AMM pool, a new
+      pair after graduation / migration starts a new baseline);
+    * AMM (DexScreener): reported liquidity as is;
+    * bonding curve: the 'liquidity' is the REAL SOL in the curve, which every ordinary sell removes; the price /
+      slippage depth of a constant-product curve is the VIRTUAL reserve (real + virtual base). A shock is therefore
+      measured on (real + base) x SOL price. Base = virtual - real reserves when Pump.fun reports both, else 30 SOL.
+      Non-SOL quote curves or no SOL price -> None (UNKNOWN, never a shock by assumption).
+    Returns (basis, [(ts, depth)]) or (basis, None)."""
+    if cur is None or cur.liq is None:
+        return "", None
+    same = [p for p in points if p.ts >= now - 900 and p.liq is not None and p.pair == cur.pair
+            and p.liq_src == cur.liq_src]
+    if cur.liq_src == "dexscreener_amm":
+        return "amm", [(p.ts, p.liq) for p in same]
+    if cur.liq_src == "pumpfun_curve":
+        if not sol_price or (info is not None and info.quote_mint and info.quote_mint not in SOL_QUOTES):
+            return "curve_depth", None
+        base_sol = VIRTUAL_SOL_BASE
+        if info is not None and info.virtual_sol_reserves and info.real_sol_reserves is not None                 and info.virtual_sol_reserves > info.real_sol_reserves:
+            base_sol = info.virtual_sol_reserves - info.real_sol_reserves
+        base = base_sol * sol_price
+        return "curve_depth", [(p.ts, p.liq + base) for p in same]
+    return "", None
 
 
 def impact_pct(size_usd: float, quote_depth_usd: float | None) -> float | None:
@@ -58,9 +87,14 @@ def analyze_liquidity(st: TokenState, h: TokenHistory, M: MetricBuilder, sol_pri
 
     cur = h.latest()
     pair = cur.pair if cur and cur.pair else None
-    pts = [(p.ts, p.liq) for p in h.points
+    raw = [(p.ts, p.liq) for p in h.points
            if p.ts >= now - 900 and p.liq is not None and (pair is None or p.pair == pair)]
-    li.state, li.change_15m_pct, li.max_drop_5m_pct = classify_state(pts)
+    li.state_raw = classify_state(raw)[0]
+    li.basis, pts = depth_points(h.points, cur, now, st.info, sol_price)
+    if pts is None:
+        li.state, li.change_15m_pct, li.max_drop_5m_pct = "UNKNOWN", None, None
+    else:
+        li.state, li.change_15m_pct, li.max_drop_5m_pct = classify_state(pts)
     p5 = h.at(300, now, pair=pair)
     if cur and p5 and cur.liq is not None and p5.liq is not None:
         li.change_5m_pct = pct_change(cur.liq, p5.liq)

@@ -314,6 +314,8 @@ class EarlySignal:
 @dataclass
 class LiquidityIntel:
     state: str = UNKNOWN_STATE   # GROWING | STABLE | FALLING | SHOCK | UNKNOWN
+    state_raw: str = UNKNOWN_STATE   # audit only: the pre-fix measure (raw curve SOL, pair-only filter)
+    basis: str = ""              # "amm" | "curve_depth" | "" — what the state was measured on
     change_5m_pct: float | None = None
     change_15m_pct: float | None = None
     max_drop_5m_pct: float | None = None

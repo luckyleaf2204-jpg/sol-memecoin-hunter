@@ -471,3 +471,17 @@ token; mỗi quyết định mang cả OLD lẫn NEW để so sánh A/B (`old_de
 - Candidate được tạo trước khi quote. Nếu quote fail (NO_ROUTE / 429 / timeout / 5xx sau khi retry), paper khớp
   lệnh bằng mô hình thanh khoản, vẫn qua Risk Engine, gắn tag `+noquote` / `SIMULATED`, và được thống kê tách riêng.
 - Exit Engine (TP +30/+80, SL −15), sizing và Risk Engine không đổi.
+
+## Audit 2026-10-01: liquidity baseline
+
+- **Liquidity SHOCK** (`intel/liquidity.py`, ngưỡng −30% không đổi):
+  - Chỉ so các điểm cùng pair **và** cùng nguồn. Graduation hay migration sang pool mới thì bắt đầu baseline mới.
+  - Với bonding curve, đo trên độ sâu thật của pool (`(real + virtual base) SOL × giá SOL`). Trước đây đo trên
+    lượng SOL thật trong curve, mà lượng này giảm theo mỗi lệnh bán thông thường.
+  - Curve quote bằng SOL nhận cả `1111…1111` (native) lẫn wSOL. Quote khác SOL → UNKNOWN.
+  - Trạng thái cũ vẫn ghi lại ở `state_raw` để audit.
+- **Position:** thêm MFE / MAE / time-to-TP1 / TP2 / SL / exit (chỉ để log, Exit Engine không đổi).
+- **A/B:** mỗi quyết định ghi đủ old/new decision, blocked_by, early, opportunity, confidence.
+- **Công cụ:**
+  - `tools/audit_bottlenecks.py --minutes 15`: phân loại shock, phân rã Opportunity, chặn thanh khoản, bảng chéo.
+  - `tools/bench_eval.py --runs 10`: benchmark đúng code path của test 400 token (min / median / p95 / max).

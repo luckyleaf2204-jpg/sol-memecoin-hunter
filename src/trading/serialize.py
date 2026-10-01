@@ -56,7 +56,7 @@ def _pos(p, now: float) -> dict:
             "trail_price": p.high_price * (1 - p.trailing_pct / 100) if p.tp1_done else None,
             "tokens": p.tokens, "fees": round(p.fees_usd, 4), "entry_score": p.entry_score, "why": p.entry_why[:6],
             "status": "STALE" if p.stale else p.status, "exit_reason": p.exit_reason, "closed_at": p.closed_at,
-            "realized": round(p.realized_usd, 2)}
+            "realized": round(p.realized_usd, 2), "setup": p.setup, "path": p.path_log()}
 
 
 def bot_status(bot: PaperBot, engine=None, now: float | None = None) -> dict:

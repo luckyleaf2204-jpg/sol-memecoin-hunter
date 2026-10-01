@@ -261,6 +261,8 @@ class ExpDecision:
     waiting: list = field(default_factory=list)
     rejected: list = field(default_factory=list)
     why: list = field(default_factory=list)
+    opportunity: int | None = None       # the Opportunity / Confidence the NEW engine gated on
+    confidence: int | None = None
 
 
 def hard_gates(st: TokenState, v: Vet, es: EarlyScore) -> list[str]:
@@ -328,12 +330,12 @@ def evaluate(st: TokenState, v: Vet, sc: Score, cfg: TradingConfig, now: float |
            f"(≥{es.gamma}) · age {es.age_s:.0f}s [{es.bucket}] · risk obs {es.observed_risk} prior {es.prior_risk}"]
     waiting = list(dict.fromkeys(waiting))
     if hard:
-        return ExpDecision(REJECT, es, blocked, waiting, hard, ["reject: " + ", ".join(hard)] + why)
+        return ExpDecision(REJECT, es, blocked, waiting, hard, ["reject: " + ", ".join(hard)] + why, opp, conf)
     if ident != "VERIFIED":
-        return ExpDecision(PENDING_IDENTITY, es, blocked, waiting, [], why)
+        return ExpDecision(PENDING_IDENTITY, es, blocked, waiting, [], why, opp, conf)
     if not blocked:
-        return ExpDecision(TRADE, es, [], [], [], why)
-    return ExpDecision(WATCH, es, blocked, waiting, [], ["waiting: " + ", ".join(blocked[:4])] + why)
+        return ExpDecision(TRADE, es, [], [], [], why, opp, conf)
+    return ExpDecision(WATCH, es, blocked, waiting, [], ["waiting: " + ", ".join(blocked[:4])] + why, opp, conf)
 
 
 def old_candidate(st: TokenState, rec: dict) -> bool:

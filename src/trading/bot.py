@@ -146,6 +146,7 @@ class PaperBot:
                 if price is not None:
                     p.last_price, p.last_price_ts = price, now
                     p.high_price = max(p.high_price, price)
+                    self._path_marks(p, price, now)
                 sig = exit_signal(p, st, price, self.cfg, now, p.entry_liq, p.entry_vol)
                 if not sig:
                     continue
@@ -198,12 +199,19 @@ class PaperBot:
                 decision = sc.decision
                 rec["old_decision"], rec["blocked_by_old"] = sc.decision, rec["blocked_by"]
                 rec["old_candidate"] = X.old_candidate(st, rec)
+                es0 = st.early
+                rec["old_early"] = ("UNKNOWN" if es0 is None or es0.strength is None else
+                                    "TRUE" if es0.is_early is True else f"FALSE {es0.groups_computable}/7")
+                rec["old_opportunity"], rec["old_confidence"] = sc.opportunity, sc.confidence
                 if self.cfg.experimental:                   # NEW engine decides; OLD kept for A/B
                     xd = X.evaluate(st, v, sc, self.cfg, now)
                     decision = xd.decision
                     rec.update({"engine": "experimental", "decision": decision, "blocked_by": xd.blocked_by,
-                                "waiting": xd.waiting, "rejected": xd.rejected, "why": xd.why + sc.why,
-                                "early_score": xd.es.as_dict()})
+                                "waiting": xd.waiting, "rejected": xd.rejected,
+                                "why": xd.why + ["OLD: " + w for w in sc.why[:3]],
+                                "early_score": xd.es.as_dict(), "new_opportunity": xd.opportunity,
+                                "new_confidence": xd.confidence,
+                                "new_early": "PASS" if xd.es.passed else ("UNKNOWN" if xd.es.score is None else "LOW")})
                 else:
                     rec["early_score"] = X.early_score(st, now, self.cfg).as_dict()   # logged only (A/B)
                 rec["risk_allowed"], rec["risk_reasons"], rec["state"] = None, [], decision
@@ -395,6 +403,19 @@ class PaperBot:
             except OSError:
                 pass
 
+    @staticmethod
+    def _path_marks(p, price: float, now: float) -> None:
+        """MFE / MAE / time-to-TP / time-to-SL diagnostics (spec 3.8). Logging only: exits are not affected."""
+        if p.initial_stop is None:
+            p.initial_stop = p.stop_price
+        p.low_price = price if p.low_price is None else min(p.low_price, price)
+        if p.tp1_hit_ts is None and price >= p.tp1_price:
+            p.tp1_hit_ts = now
+        if p.tp2_hit_ts is None and price >= p.tp2_price:
+            p.tp2_hit_ts = now
+        if p.sl_hit_ts is None and price <= p.initial_stop:
+            p.sl_hit_ts = now
+
     def _after_sell(self, p, st, ex, reason: str, frac: float, now: float) -> None:
         self.book.reduce(p, ex, now, reason)
         if ex.status == "FILLED":
@@ -402,7 +423,9 @@ class PaperBot:
                 p.tp1_done = True
                 p.stop_price = max(p.stop_price, p.entry_price)      # break-even
             closed = p.status == "CLOSED"
-            net = f" · NET P&L {p.realized_usd - p.cost_usd:+,.2f}$" if closed else ""
+            pl = p.path_log()
+            net = (f" · NET P&L {p.realized_usd - p.cost_usd:+,.2f}$ · MFE {pl['mfe_pct']}% MAE {pl['mae_pct']}% · "
+                   f"t(TP1) {pl['time_to_tp1_s']}s t(SL) {pl['time_to_sl_s']}s t(exit) {pl['time_to_exit_s']}s") if closed else ""
             self.log("SELL", f"{reason} · {100 * frac:.0f}% @ ${ex.fill_price:.8g} · {ex.route} · WHY: "
                              f"{EXIT_WHY.get(reason, reason)}{net}", st, usd=ex.usd_in, price=ex.fill_price, now=now)
         else:

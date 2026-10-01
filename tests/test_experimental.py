@@ -391,3 +391,43 @@ def test_authority_fast_lane_checks_hinted_tokens(tmp_path):
     xd, _ = ev(st)
     assert "gate_unknown:authorities" not in xd.blocked_by
     assert eng.fast.stats()["fast_getasset_calls"] == 1
+
+
+def test_token2022_unknown_is_watch_not_pass():
+    st = hot()
+    st.identity.helius_checked = False
+    xd, _ = ev(st)
+    assert "gate_unknown:token_2022" in xd.blocked_by and xd.decision == D.WATCH
+
+
+def test_ab_old_fields_identical_with_and_without_experimental():
+    a_st, b_st = hot(age_s=150, holders=80), hot(age_s=150, holders=80)
+    a, b = bot([a_st], ScriptedJupiter([J.OK])), bot([b_st], ScriptedJupiter([J.OK]))
+    b.cfg.experimental = True
+    now = time.time()
+    a.tick(now)
+    b.tick(now)
+    ra, rb = a.decisions[a_st.mint], b.decisions[b_st.mint]
+    for k in ("old_decision", "old_early", "old_opportunity", "old_confidence", "blocked_by_old", "old_candidate"):
+        assert ra[k] == rb[k], k                                     # OLD is never overwritten by NEW
+    assert ra["old_decision"] == ra["decision"]                      # OLD engine decides when experimental is off
+    assert rb["new_opportunity"] == rb["old_opportunity"] and rb["new_early"] in ("PASS", "LOW", "UNKNOWN")
+
+
+def test_opportunity_decomposition_is_consistent():
+    import sys
+    from pathlib import Path
+    sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "tools"))
+    from audit_bottlenecks import decompose
+    from core.config import Settings
+    st = hot(age_s=150, holders=80)
+    b = bot([st], ScriptedJupiter([J.OK]))
+    b.cfg.experimental = True
+    b.tick()
+    rec = b.decisions[st.mint]
+    d = decompose(st, rec, Settings(), 150.0)
+    comp = d["components"]
+    recomputed = round(sum(D.WEIGHTS[k] * v for k, v in comp.items()) / sum(D.WEIGHTS[k] for k in comp))
+    assert recomputed == rec["opportunity"]
+    assert all(v < 65 for v in d["weak_components"].values())
+    assert (rec["opportunity"] >= 65) == (d["classification"] == [])

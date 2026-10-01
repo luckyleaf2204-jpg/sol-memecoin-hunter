@@ -85,7 +85,9 @@ CREATE INDEX IF NOT EXISTS ix_cand_ca ON candidates(ca);
 
 AB_SNAP_COLS = {"engine": "TEXT", "old_decision": "TEXT", "new_decision": "TEXT", "blocked_by_old": "TEXT",
                 "early_score": "REAL", "early_confidence": "REAL", "early_theta": "REAL", "early_gamma": "REAL",
-                "age_bucket": "TEXT", "prior_risk": "REAL", "final_risk": "REAL"}
+                "age_bucket": "TEXT", "prior_risk": "REAL", "final_risk": "REAL", "old_early": "TEXT",
+                "new_early": "TEXT", "old_opportunity": "REAL", "new_opportunity": "REAL", "old_confidence": "REAL",
+                "new_confidence": "REAL"}
 AB_CAND_COLS = {"engine": "TEXT", "old_decision": "TEXT", "new_decision": "TEXT", "old_candidate": "INTEGER",
                 "new_candidate": "INTEGER", "blocked_by_old": "TEXT", "blocked_by_new": "TEXT", "early_score": "REAL",
                 "early_confidence": "REAL", "early_theta": "REAL", "early_gamma": "REAL", "age_bucket": "TEXT",
@@ -110,7 +112,9 @@ def ab_fields(rec: dict | None) -> dict:
             "blocked_by_old": json.dumps(rec.get("blocked_by_old") or []) if rec else None,
             "early_score": es.get("score"), "early_confidence": es.get("confidence"), "early_theta": es.get("theta"),
             "early_gamma": es.get("gamma"), "age_bucket": es.get("bucket"), "prior_risk": es.get("prior_risk"),
-            "final_risk": es.get("final_risk")}
+            "final_risk": es.get("final_risk"), "old_early": rec.get("old_early"), "new_early": rec.get("new_early"),
+            "old_opportunity": rec.get("old_opportunity"), "new_opportunity": rec.get("new_opportunity"),
+            "old_confidence": rec.get("old_confidence"), "new_confidence": rec.get("new_confidence")}
 
 
 SNAP_COLS = ("snapshot_id", "ca", "ts", "age_sec", "source", "stage", "reason", "mc_usd", "price_usd", "liq_usd",
