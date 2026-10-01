@@ -214,3 +214,35 @@ def test_pumpportal_reconnects_after_disconnect(monkeypatch):
     asyncio.run(go())
     assert len(attempts) >= 2 and s.connects >= 1 and s.events_total == 1 and q.qsize() == 1
     assert any("error" in m for m in logs) and any("connected" in m for m in logs)
+
+
+# ---------------------------------------------------------------- dashboard mapping (web-3)
+def test_exit_engine_mapping_uses_exit_thresholds():
+    from core.models import LiquidityIntel, RiskResult
+    from trading.serialize import bot_status, exit_status
+    st, b, p = _held()
+    e = exit_status(p, st, b.cfg)
+    assert set(e) == {"take_profit", "stop_loss", "liquidity", "momentum", "risk"}
+    assert e["stop_loss"]["state"] == "ok" and e["liquidity"]["state"] == "ok"
+    st.market.price_usd *= 0.9
+    st.stamps["market"].updated_at = time.time()
+    b.tick()
+    assert exit_status(p, st, b.cfg)["stop_loss"]["state"] == "near"
+    st.liquidity_intel = LiquidityIntel(state="SHOCK")
+    st.risk = RiskResult(70, "HIGH")
+    e = exit_status(p, st, b.cfg)
+    assert e["liquidity"]["state"] == "hit" and e["risk"]["state"] == "hit"
+    d = bot_status(b, b.engine)
+    assert d["version"] == "web-3" and d["positions"][0]["exit_state"].startswith("EXIT")
+    rows = {r["key"]: r for r in d["exit_engine"]}
+    assert rows["liquidity"]["hit"] == 1 and rows["take_profit"]["watching"] == 1
+
+
+def test_bot_page_has_the_seven_areas_and_route_alias():
+    from web.app import STATIC
+    js = (STATIC / "app.js").read_text(encoding="utf-8")
+    for area in ("bot-doing", "bot-status", "bot-scan", "bot-candidates", "bot-positions", "bot-exit", "bot-activity"):
+        assert f'id="{area}"' in js, area
+    assert '"#/" + h.slice(1)' in js                                  # "#bot" works like "#/bot"
+    html = (STATIC / "index.html").read_text(encoding="utf-8")
+    assert "app.js?v=web-3" in html and "styles.css?v=web-3" in html  # cache-busting on deploy

@@ -8,6 +8,43 @@ from trading.models import TRADE, WATCH
 from trading.config import ALLOWED_MODES
 
 
+def exit_status(p, st, cfg) -> dict:
+    """Read-only view of the Exit Engine for one position, with the SAME thresholds as trading.exits
+    (it does not decide anything: exits.exit_signal does). state: ok | near | hit | unknown."""
+    cur = p.last_price
+    out = {}
+    if cur is None:
+        unk = {"state": "unknown", "detail": "no validated price"}
+        out.update(take_profit=unk, stop_loss=unk)
+    else:
+        tp = p.tp2_price if p.tp1_done else p.tp1_price
+        to_tp = 100 * (tp / cur - 1)
+        out["take_profit"] = {"state": "hit" if cur >= tp else ("near" if to_tp <= 5 else "ok"),
+                              "detail": f"{'TP2' if p.tp1_done else 'TP1'} {to_tp:+.1f}% away"}
+        stop = p.stop_price
+        if p.tp1_done:
+            stop = max(stop, p.high_price * (1 - p.trailing_pct / 100))
+        to_sl = 100 * (cur / stop - 1)
+        out["stop_loss"] = {"state": "hit" if cur <= stop else ("near" if to_sl <= 5 else "ok"),
+                            "detail": f"{'trailing' if p.tp1_done else 'SL'} {to_sl:.1f}% below"}
+    liq = st.market.liquidity_usd if st is not None and st.market else None
+    shock = bool(st is not None and st.liquidity_intel and st.liquidity_intel.state == "SHOCK")
+    if st is None or liq is None or not p.entry_liq:
+        out["liquidity"] = {"state": "hit" if shock else "unknown", "detail": "SHOCK" if shock else "liquidity unknown"}
+    else:
+        r = liq / p.entry_liq
+        out["liquidity"] = {"state": "hit" if shock or r < 0.6 else ("near" if r < 0.75 else "ok"),
+                            "detail": f"{100 * r:.0f}% of entry liquidity (exit < 60%)"}
+    lc = st.lifecycle if st is not None else None
+    out["momentum"] = {"state": "unknown" if lc is None else ("hit" if lc in ("DISTRIBUTION", "DECLINING") else "ok"),
+                       "detail": lc or "unknown"}
+    rk = st.risk if st is not None else None
+    rug = bool(rk and any(f.category == "rug" for f in rk.factors))
+    out["risk"] = {"state": "unknown" if rk is None else ("hit" if rk.score > 60 or rug else ("near" if rk.score > 45 else "ok")),
+                   "detail": "rug flag" if rug else (f"Risk {rk.score} (exit > 60)" if rk else "unknown")}
+    return out
+
+
 def _pos(p, now: float) -> dict:
     return {"id": p.id, "mint": p.mint, "symbol": p.symbol, "opened_at": p.opened_at, "entry": p.entry_price,
             "current": p.last_price, "price_age_s": round(now - p.last_price_ts) if p.last_price_ts else None,
@@ -37,6 +74,10 @@ def bot_status(bot: PaperBot, engine=None, now: float | None = None) -> dict:
         d["risk"] = st.risk.score if st and st.risk else None
         d["lifecycle"] = st.lifecycle if st else None
         d["holding_min"] = round((now - p.opened_at) / 60, 1)
+        d["exit"] = exit_status(p, st, bot.cfg)
+        hit = [k for k, v in d["exit"].items() if v["state"] == "hit"]
+        near = [k for k, v in d["exit"].items() if v["state"] == "near"]
+        d["exit_state"] = ("EXIT: " + ", ".join(hit)) if hit else (("NEAR: " + ", ".join(near)) if near else "HOLD")
         positions.append(d)
     tracked = list(engine.published) if engine and engine.published else []
     cands = bot.trade_candidates(now)
@@ -85,8 +126,16 @@ def bot_status(bot: PaperBot, engine=None, now: float | None = None) -> dict:
              {"key": "momentum", "value": "DISTRIBUTION / DECLINING · volume sụp"},
              {"key": "risk", "value": "Risk > 60 · cờ rug · cá voi xả · identity conflict"},
              {"key": "time", "value": f"giữ tối đa {c.max_hold_min:.0f} phút"}]
+    engine_rows = []
+    for key in ("take_profit", "stop_loss", "liquidity", "momentum", "risk"):
+        states_ = [p["exit"][key]["state"] for p in positions]
+        engine_rows.append({"key": key, "rule": next((r["value"] for r in exits if r["key"] == key or
+                                                      (key == "stop_loss" and r["key"] == "stop_loss")), ""),
+                            "hit": states_.count("hit"), "near": states_.count("near"),
+                            "unknown": states_.count("unknown"), "watching": len(states_)})
     return {
-        "doing": doing, "scan": scan, "evaluated": evaluated, "exit_rules": exits,
+        "doing": doing, "scan": scan, "evaluated": evaluated, "exit_rules": exits, "exit_engine": engine_rows,
+        "version": "web-3",
         "live_available": False,
         "pending": [{"id": o["id"], "symbol": o["symbol"], "mint": o["mint"], "usd": o["usd"],
                      "expires_in": max(0, round(o["expires"] - now)), "why": o["why"][:4]} for o in bot.pending.values()],

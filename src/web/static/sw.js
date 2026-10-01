@@ -1,7 +1,7 @@
 /* Service worker: caches the app shell only. API data is private and live, so /api/* is never cached. */
-const CACHE = "hunter-shell-v7";
+const CACHE = "hunter-shell-v8";
 const SHELL = [
-  "/", "/static/styles.css", "/static/app.js", "/i18n/vi.json", "/manifest.webmanifest",
+  "/", "/static/styles.css?v=web-3", "/static/app.js?v=web-3", "/i18n/vi.json", "/manifest.webmanifest",
   "/apple-touch-icon.png", "/favicon.png", "/static/icons/icon-192.png", "/static/icons/icon-512.png",
 ];
 
@@ -25,7 +25,7 @@ self.addEventListener("fetch", (e) => {
   e.respondWith(
     fetch(e.request, { cache: "no-cache" })
       .then((res) => {
-        if (res.ok && SHELL.includes(url.pathname)) {
+        if (res.ok && (SHELL.includes(url.pathname) || SHELL.includes(url.pathname + url.search))) {
           const copy = res.clone();
           caches.open(CACHE).then((c) => c.put(e.request, copy));
         }
