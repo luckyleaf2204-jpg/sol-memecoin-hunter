@@ -270,3 +270,37 @@ def test_old_engine_never_fills_without_quote():
     b.tick()
     asyncio.run(b.execute_intents())
     assert not b.book.positions
+
+
+def test_authority_fast_lane_checks_hinted_tokens(tmp_path):
+    from core.config import ApiKeys, Settings
+    from database.db import Database
+    from scanner.engine import ScannerEngine
+
+    class Rpc:
+        has_das, calls = True, []
+
+        async def das_get_asset(self, mint):
+            Rpc.calls.append(mint)
+            return {"token_program": "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA", "extensions": [],
+                    "mint_authority": "", "freeze_authority": "", "symbol": "TKN", "name": "Token"}
+    eng = ScannerEngine(Settings(), Database(tmp_path / "e.db"), keys=ApiKeys(), on_log=lambda m: None)
+    eng.rpc = Rpc()
+    eng._evaluate = lambda st: None
+    st, other = hot(), hot()
+    other.info.mint = "Other" + "1" * 39
+    for x in (st, other):
+        x.identity.helius_checked = False
+    eng.tracked = {st.mint: st, other.mint: other}
+    eng.deep_hint = {st.mint}
+
+    async def go():
+        eng._stop = asyncio.Event()
+        task = asyncio.create_task(eng._authority_worker())
+        await asyncio.sleep(0.2)
+        eng._stop.set()
+        await task
+    asyncio.run(go())
+    assert Rpc.calls == [st.mint] and st.identity.helius_checked and not other.identity.helius_checked
+    xd, _ = ev(st)
+    assert "gate_unknown:authorities" not in xd.blocked_by

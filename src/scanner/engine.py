@@ -122,7 +122,7 @@ class ScannerEngine:
     async def run(self) -> None:
         self._stop = asyncio.Event()
         self._queue = asyncio.Queue(maxsize=5000)
-        tasks = [asyncio.create_task(self._deep_worker())]
+        tasks = [asyncio.create_task(self._deep_worker()), asyncio.create_task(self._authority_worker())]
         if self.settings.use_pumpportal_ws:
             self.stream = PumpPortalStream(self._queue, self.http.health, on_log=self.log)
             tasks.append(asyncio.create_task(self.stream.run(self._stop)))
@@ -635,6 +635,37 @@ class ScannerEngine:
             except asyncio.TimeoutError:
                 pass
 
+    async def apply_asset(self, st: TokenState) -> bool:
+        """Helius getAsset (10 credits): token program, extensions, mint / freeze authority, canonical identity."""
+        asset = await self.rpc.das_get_asset(st.info.mint)
+        if asset is None:
+            return False
+        st.identity.helius_checked = True
+        st.identity.token_program, st.identity.extensions = asset["token_program"], asset["extensions"]
+        st.identity.mint_authority = asset.get("mint_authority", "")
+        st.identity.freeze_authority = asset.get("freeze_authority", "")
+        record_claim(st.identity, "helius", asset["symbol"], asset["name"])
+        apply_identity(st)
+        return True
+
+    async def _authority_worker(self) -> None:
+        """FAST LANE for the on-chain hard gates: tokens the bot flags as close to a buy (deep_hint) get Helius
+        getAsset within seconds instead of waiting for the holder deep-scan cycle. Max 8 per round, once per CA."""
+        while not self._stop.is_set():
+            try:
+                if self.rpc.has_das and self.deep_hint:
+                    todo = [self.tracked[m] for m in list(self.deep_hint)
+                            if m in self.tracked and not self.tracked[m].identity.helius_checked][:8]
+                    for st in todo:
+                        if await self.apply_asset(st) and st.mint in self.tracked:
+                            self._evaluate(st)
+            except Exception as e:                       # never takes the scanner down
+                self.log(f"authority fast lane: {type(e).__name__}: {e}")
+            try:
+                await asyncio.wait_for(self._stop.wait(), timeout=3.0)
+            except asyncio.TimeoutError:
+                pass
+
     async def _deep(self, st: TokenState, force_dev: bool = False) -> None:
         st.refreshed["holders"] = time.time()          # cadence measured from the start of the scan
         info = st.info
@@ -644,13 +675,7 @@ class ScannerEngine:
             if fresh:
                 self._merge_info(st, fresh)
         if self.rpc.has_das and not st.identity.helius_checked:
-            asset = await self.rpc.das_get_asset(info.mint)
-            if asset is not None:
-                st.identity.helius_checked = True
-                st.identity.token_program, st.identity.extensions = asset["token_program"], asset["extensions"]
-                st.identity.mint_authority = asset.get("mint_authority", "")
-                st.identity.freeze_authority = asset.get("freeze_authority", "")
-                record_claim(st.identity, "helius", asset["symbol"], asset["name"])
+            await self.apply_asset(st)
         if apply_identity(st).status == "CONFLICT":
             st.holder_status = st.holder_status or "pending"
             return                                        # identity first: never analyse a mislabelled CA
