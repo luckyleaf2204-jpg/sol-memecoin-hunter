@@ -246,6 +246,7 @@ const SORTS = {
   newest: (c) => c.first_seen ?? null, mc_low: (c) => neg(c.mc), mc_rise: (c) => c.mc_rise, vol_rise: (c) => c.vol_rise,
   buy: (c) => c.buy_pp, holder_rise: (c) => c.holder_rise, risk_low: (c) => neg(c.risk), early: (c) => c.early,
   liq: (c) => c.liq, dev_hist: (c) => c.dev_hist,
+  mc_high: (c) => c.mc, momentum: (c) => c.momentum, confidence: (c) => tierConf(c), buy_share: (c) => c.buy_share,
   opp: (c) => c.opp, mc: (c) => c.mc, vol5m: (c) => c.vol5m, age: (c) => neg(c.age_min), holders: (c) => c.holders,
 };
 const HOME_SORTS = ["confirm", "newest", "mc_low", "mc_rise", "vol_rise", "buy", "holder_rise", "risk_low", "early", "liq", "dev_hist"];
@@ -616,6 +617,79 @@ function refreshTable(r) {
 }
 
 
+
+/* ---------------------------------------------------------------- 4 early tiers */
+const TIERS = ["pre_early", "watch", "signal", "trade"];
+const TIER_SORTS = ["tier", "mc_high", "mc_low", "age", "momentum", "opp", "confidence", "risk_low", "vol_rise", "buy_share"];
+function tierConf(c) {
+  if (c.trade && c.trade.confidence !== undefined) return c.trade.confidence;
+  if (c.early_watch) return c.early_watch.confidence;
+  if (c.pre_early) return Math.round(100 * c.pre_early.computable / c.pre_early.total);
+  return null;
+}
+function isComplete(c) {
+  if (c.early_watch) return c.early_watch.missing.length === 0;
+  if (c.pre_early) return c.pre_early.computable === c.pre_early.total;
+  return c.dq === "VALID";
+}
+function tierLine(tier, c) {
+  if (tier === "pre_early" && c.pre_early) {
+    const p = c.pre_early;
+    return `<div class="meta ${p.status === "PRE_EARLY" ? "c-accent" : ""}">⚡ ${esc(p.label)} · ${esc(p.fired)}/${esc(p.total)} · ${esc(p.data)}${p.blocked_by.length ? " · ⛔ " + esc(p.blocked_by.join(", ")) : ""}${p.reasons.length ? " · " + esc(p.reasons.join(" · ")) : ""}</div>`;
+  }
+  if (tier === "watch" && c.early_watch) {
+    const w = c.early_watch;
+    return `<div class="meta">👀 ${esc(t("web.ew.rank"))} ${esc(w.rank)} · Confidence ${esc(w.confidence)}% · ${esc(w.data)}${w.missing.length ? " · " + esc(t("web.ew.missing")) + ": " + esc(w.missing.join(", ")) : ""}</div>`;
+  }
+  if (tier === "trade" && c.trade) {
+    const x = c.trade;
+    return `<div class="meta c-green">🟢 Opportunity ${esc(x.opportunity)} · Confidence ${esc(x.confidence)}%${x.size_usd ? " · " + esc(t("web.trade.size")) + " $" + esc(x.size_usd) : ""}${x.holding ? " · " + esc(t("web.trade.holding")) : ""}</div>
+      <div class="meta">Why: ${esc(x.why.join(" · "))}</div>`;
+  }
+  return "";
+}
+async function renderTiers(tier, silent) {
+  tier = TIERS.includes(tier) ? tier : (S.prefs.tier || "pre_early");
+  S.prefs.tier = tier; savePrefs();
+  const key = "tier_" + tier;
+  S.prefs[key] = Object.assign({ sort: "tier", valid: false, lowRisk: false, complete: false, q: "" }, S.prefs[key] || {});
+  const p = S.prefs[key];
+  if (!silent) {
+    const seg = TIERS.map((x) => `<a class="chip${x === tier ? " on" : ""}" href="#/early/${x}">${esc(t("web.tier." + x))}</a>`).join("");
+    const opt = (v) => `<option value="${v}"${p.sort === v ? " selected" : ""}>${esc(t("web.sort." + v))}</option>`;
+    const chip = (k, lab) => `<button class="chip${p[k] ? " on" : ""}" data-tchip="${k}">${esc(t(lab))}</button>`;
+    $("#view").innerHTML = `<div class="chips tiers">${seg}</div>
+      <div class="banner">${esc(t("web.tier.rule." + tier))}</div>
+      <div class="toolbar"><div class="row">
+        <input class="search" id="q" type="search" placeholder="${esc(t("web.search"))}" value="${esc(p.q)}" autocomplete="off" autocapitalize="off" spellcheck="false">
+        <select class="select" id="sort">${TIER_SORTS.map(opt).join("")}</select></div>
+        <div class="chips">${chip("valid", "web.filter.valid")}${chip("lowRisk", "web.filter.lowRisk")}${chip("complete", "web.filter.complete")}</div></div>
+      <div id="list"><div class="spin">${esc(t("web.loading"))}</div></div>`;
+    $("#q").oninput = () => { p.q = $("#q").value; savePrefs(); drawTier(tier); };
+    $("#sort").onchange = () => { p.sort = $("#sort").value; savePrefs(); drawTier(tier); };
+    document.querySelectorAll("[data-tchip]").forEach((b) => { b.onclick = () => { const k = b.dataset.tchip; p[k] = !p[k]; savePrefs(); b.classList.toggle("on", p[k]); drawTier(tier); }; });
+  }
+  try {
+    const d = await api("/api/early/" + tier);
+    syncClock(d.server_time);
+    d.items.forEach((c, i) => { c._order = i; });
+    S.cache[key] = d.items;
+    drawTier(tier);
+  } catch (e) { if (!silent && $("#list")) $("#list").innerHTML = `<div class="empty">${esc(t("web.error"))}: ${esc(e.message)}</div>`; }
+}
+function drawTier(tier) {
+  const p = S.prefs["tier_" + tier], el = $("#list");
+  if (!el) return;
+  const q = (p.q || "").trim().toLowerCase();
+  let items = (S.cache["tier_" + tier] || []).filter((c) =>
+    (!p.valid || c.dq === "VALID") && (!p.lowRisk || (c.risk !== null && c.risk <= 60)) && (!p.complete || isComplete(c)) &&
+    (!q || (c.symbol || "").toLowerCase().includes(q) || (c.name || "").toLowerCase().includes(q) || c.mint.toLowerCase() === q));
+  items = p.sort === "tier" ? items.sort((a, b) => a._order - b._order) : sortBy(items, p.sort);
+  el.innerHTML = `<div class="count">${esc(t("web.count", { n: items.length }))}</div>` + (items.length
+    ? `<div class="cards">${items.map((c) => cardHtml(c).replace(/<\/a>$/, tierLine(tier, c) + "</a>")).join("")}</div>`
+    : `<div class="empty">${esc(t("web.tier.empty." + tier))}</div>`);
+}
+
 /* ---------------------------------------------------------------- paper trading bot */
 const MOD_NAMES = { scan: "SCAN", vet: "VET", size: "SIZE", risk: "RISK", fills: "FILLS", book: "BOOK" };
 function money(v, sign) {
@@ -782,7 +856,8 @@ function route() {
   if (p0 === "bot") { setTab("bot"); renderBot(); startPoll(() => renderBot(true), POLL.bot); return; }
   if (p0 === "home") { setTab("home"); renderHome(); startPoll(() => renderHome(true), POLL.home); return; }
   if (p0 === "token" && p1) { setTab(""); renderToken(p1); startPoll(() => renderToken(p1, true), POLL.token); return; }
-  if (["new", "early"].includes(p0)) { setTab(p0); renderList(p0); startPoll(() => renderList(p0, true), POLL.list); return; }
+  if (p0 === "early") { setTab("early"); renderTiers(p1); startPoll(() => renderTiers(p1 || S.prefs.tier, true), POLL.home); return; }
+  if (p0 === "new") { setTab(p0); renderList(p0); startPoll(() => renderList(p0, true), POLL.list); return; }
   if (p0 === "top") { setTab("more"); renderList(p0); startPoll(() => renderList(p0, true), POLL.list); return; }
   if (p0 === "list" && ["whales", "dev", "social"].includes(p1)) { setTab("more"); renderList(p1); startPoll(() => renderList(p1, true), POLL.list); return; }
   if (p0 === "watch") { setTab("watch"); renderWatch(); startPoll(() => renderWatch(true), POLL.watch); return; }

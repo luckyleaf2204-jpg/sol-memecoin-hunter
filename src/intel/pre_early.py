@@ -1,10 +1,10 @@
-"""PRE-EARLY — breakout hints for brand-new tokens (1–3 minutes old).
+"""PRE-EARLY — breakout hints for brand-new tokens (30 seconds – 3 minutes old).
 
 A separate layer. It does NOT change Early Signal / D1–D8 (which needs >= 10 min of history and stays
 UNKNOWN for such young tokens): it only reads data the pipeline already validated, and never turns an
 UNKNOWN input into a signal.
 
-ELIGIBLE      token age 1.0–3.0 min (created_at, else DexScreener pair creation). Unknown age -> NOT_ELIGIBLE.
+ELIGIBLE      token age 0.5–3.0 min (created_at, else DexScreener pair creation). Unknown age -> NOT_ELIGIBLE.
 BLOCKED       identity not VERIFIED (validation.identity) · Data Quality INVALID because data is WRONG
               (malformed / inconsistent — INVALID only because data is still MISSING, e.g. not yet indexed by
               DexScreener, gives UNKNOWN instead, never PRE_EARLY) · Risk > 60 · any RUG-category
@@ -15,10 +15,12 @@ SIGNALS       from the in-memory history of validated observations (last 3 min);
   volume_accel     5m-volume growth rate of the recent half >= 1.5× the earlier half and >= $1,000/min
                    (for a < 5 min old token the 5m volume is cumulative, so its growth = new volume)
   txn_accel        same on 5m transaction count, recent rate >= 10 tx/min
+  buyer_accel      same on 5m BUY count, recent rate >= 8 buys/min ("buyers" = buy transactions: unique buyer
+                   wallets have no data source and are NOT AVAILABLE)
   buy_pressure     buy share >= 60 % with >= 20 transactions (fewer txns -> UNKNOWN)
   liquidity_growth liquidity +20 % or more over >= 40 s (same pair)
   holder_growth    >= 30 holders and +15 or more between two valid holder snapshots (Helius)
-RESULT        UNKNOWN   < 3 of 6 signals computable ("Chưa đủ dữ liệu")
+RESULT        UNKNOWN   < 3 of 7 signals computable ("Chưa đủ dữ liệu")
               PRE_EARLY >= 3 fired, buy_pressure fired, MC not falling
               NOT_YET   otherwise
 Thresholds are fixed and shown to the user. PRE-EARLY is a research hint, not a buy recommendation.
@@ -32,17 +34,17 @@ from core.models import INVALID, TokenState
 from scoring.groups import _missing_only
 from history.store import TokenHistory
 
-MIN_AGE_MIN, MAX_AGE_MIN = 1.0, 3.0
+MIN_AGE_MIN, MAX_AGE_MIN = 0.5, 3.0
 WINDOW_S = 180
 MIN_SPAN_S = 40
 MIN_COMPUTABLE, MIN_FIRED = 3, 3
 RISK_BLOCK, TOP10_BLOCK = 60, 35.0
 MC_GROWTH, MC_PER_MIN = 0.40, 0.25
-ACCEL_RATIO, VOL_MIN_PER_MIN, TXN_MIN_PER_MIN = 1.5, 1_000.0, 10.0
+ACCEL_RATIO, VOL_MIN_PER_MIN, TXN_MIN_PER_MIN, BUY_MIN_PER_MIN = 1.5, 1_000.0, 10.0, 8.0
 BUY_SHARE, BUY_MIN_TXNS = 0.60, 20
 LIQ_GROWTH = 0.20
 HOLDER_MIN, HOLDER_GROWTH = 30, 15
-SIGNALS = ("mc_velocity", "volume_accel", "txn_accel", "buy_pressure", "liquidity_growth", "holder_growth")
+SIGNALS = ("mc_velocity", "volume_accel", "txn_accel", "buyer_accel", "buy_pressure", "liquidity_growth", "holder_growth")
 
 
 @dataclass
@@ -143,6 +145,7 @@ def compute_pre_early(st: TokenState, h: TokenHistory | None, now: float | None 
         sig["mc_velocity"] = PreSignal("mc_velocity", None, note="need 2 validated MC points over >= 40 s")
     sig["volume_accel"] = _accel("volume_accel", same, "vol_5m", VOL_MIN_PER_MIN, "usd")
     sig["txn_accel"] = _accel("txn_accel", same, "txns_5m", TXN_MIN_PER_MIN, "n")
+    sig["buyer_accel"] = _accel("buyer_accel", same, "buys_5m", BUY_MIN_PER_MIN, "n")
 
     if last and last.txns_5m is not None and last.buy_share is not None and last.txns_5m >= BUY_MIN_TXNS:
         sig["buy_pressure"] = PreSignal("buy_pressure", last.buy_share >= BUY_SHARE,

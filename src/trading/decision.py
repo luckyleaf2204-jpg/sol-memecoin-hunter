@@ -32,7 +32,8 @@ DANGEROUS_EXT = {"permanent_delegate", "transfer_hook", "pausable_config", "defa
 T22 = "TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb"
 WEIGHTS = {"momentum": 30, "onchain": 20, "liquidity": 15, "risk": 20, "early": 15, "x_alpha": 0, "smart_money": 0}
 MIN_HOLDERS, MAX_TOP10, MAX_DEV_PCT, MIN_VOL_5M, MIN_BUY_SHARE = 50, 35.0, 10.0, 5_000.0, 0.5
-SOFT = {"volume_buy_pressure", "liquidity", "holders"}      # failing only these -> WATCH, not REJECT
+SOFT = {"volume_buy_pressure", "liquidity", "holders"}
+EARLY_WATCH_MIN_RANK = 60      # failing only these -> WATCH, not REJECT
 
 
 # ---------------------------------------------------------------- SCAN
@@ -47,6 +48,9 @@ def scan_reasons(st: TokenState) -> list[str]:
         out.append("opportunity_group")
     if st.lifecycle in MOMENTUM_STAGES and st.score and st.score.total >= 50:
         out.append("momentum")
+    ew = st.early_watch
+    if ew is not None and getattr(ew, "rank", None) is not None and ew.rank >= EARLY_WATCH_MIN_RANK:
+        out.append("early_watch")
     return out
 
 

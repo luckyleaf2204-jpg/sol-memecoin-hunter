@@ -64,6 +64,7 @@ def test_breakout_is_pre_early_with_reasons():
     assert sig(pe, "buy_pressure").fired is True
     assert sig(pe, "mc_velocity").fired is True and "+90%" in sig(pe, "mc_velocity").value
     assert sig(pe, "volume_accel").fired is True and sig(pe, "txn_accel").fired is True
+    assert sig(pe, "buyer_accel").fired is True and "/min" in sig(pe, "buyer_accel").value
     assert sig(pe, "holder_growth").fired is None          # no 2 holder snapshots -> UNKNOWN, not a signal
     assert [s.key for s in pe.signals] == list(SIGNALS)
 
@@ -83,8 +84,8 @@ def test_unknown_is_never_counted_as_a_signal():
     assert len(unknown) >= 4 and all(s.note for s in unknown)   # every UNKNOWN says what data is missing
 
 
-@pytest.mark.parametrize("age_s", [30, 5 * 60])
-def test_only_tokens_one_to_three_minutes_old(age_s):
+@pytest.mark.parametrize("age_s", [20, 5 * 60])
+def test_only_tokens_thirty_seconds_to_three_minutes_old(age_s):
     st, h, now = build(BREAKOUT, age_s=age_s)
     assert compute_pre_early(st, h, now).status == "NOT_ELIGIBLE"
     st.info.created_at = None
@@ -176,7 +177,7 @@ def test_api_shows_pre_early_separately_with_reasons(eng):
     assert pe["status"] == "PRE_EARLY" and pe["label"] == "PRE-EARLY" and pe["reasons"]
     assert pe["data"].startswith("dữ liệu đủ") and pe["computable"] >= 3
     sigs = view["pre_early"]["signals"]
-    assert len(sigs) == 6 and {s["state"] for s in sigs} <= {"fired", "off", "unknown"}
+    assert len(sigs) == 7 and {s["state"] for s in sigs} <= {"fired", "off", "unknown"}
     assert any(s["state"] == "unknown" for s in sigs)        # missing data shown as UNKNOWN, with its rule
     unk = next(s for s in sigs if s["state"] == "unknown")
     assert unk["value"] == "KHÔNG RÕ" and unk["rule"].startswith("cần")     # Vietnamese reason for missing data
@@ -220,3 +221,10 @@ def test_missing_market_data_is_unknown_not_blocked_and_never_pre_early():
     st.quality = DataQuality(score=30, status="INVALID", issues=[Issue("critical", "market_cap", "mc_implausible")])
     pe = compute_pre_early(st, h, now)
     assert pe.status == "BLOCKED" and "dq_invalid" in pe.blocked_by and "risk_high" in pe.blocked_by
+
+
+def test_thirty_second_old_token_is_eligible_and_missing_data_stays_unknown():
+    st, h, now = build(BREAKOUT[-2:], age_s=40)               # 40 s old, 20 s of history
+    pe = compute_pre_early(st, h, now)
+    assert pe.status == "UNKNOWN" and pe.age_min < 1
+    assert sig(pe, "buyer_accel").fired is None and sig(pe, "mc_velocity").fired is None

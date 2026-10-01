@@ -34,6 +34,7 @@ from holders.analyzer import HolderAnalyzer
 from intel.events import EventDetector
 from pumpfun.client import PumpFunClient
 from pumpfun.stream import PumpPortalStream
+from intel.early_watch import compute_early_watch
 from intel.pre_early import compute_pre_early
 from intel.mc_track import _pump_quote_is_sol, anchor_at_discovery, compute_trend, confirm_quote, update_mc_track
 from scanner.pipeline import evaluate, ingest_market
@@ -295,7 +296,8 @@ class ScannerEngine:
         st.refreshed["eval"] = now
         st.trend = compute_trend(st, h, now)                 # display / priority only
         st.group, st.group_reasons = classify_group(st, self.settings)
-        st.pre_early = compute_pre_early(st, h, now)         # separate layer; never feeds Early Signal
+        st.pre_early = compute_pre_early(st, h, now)         # separate layers; never feed Early Signal
+        st.early_watch = compute_early_watch(st, now)
         events = self.detector.detect(st, h, now)
         if events:
             st.recent_events = (st.recent_events + events)[-20:]

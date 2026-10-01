@@ -75,6 +75,8 @@ h2 { font-size: 16px; margin: 16px 2px 8px; }
 .b-valid { color: var(--green); } .b-partial { color: var(--yellow); } .b-invalid { color: var(--red); }
 .b-early { color: #0f1117; background: var(--accent); }
 .b-pre { color: #0f1117; background: #facc15; }
+.chips.tiers { margin-bottom: 8px; }
+.chips.tiers .chip { display: inline-flex; align-items: center; }
 .g-pre > summary { color: #facc15; }
 .b-supp { color: var(--orange); }
 .scores { display: grid; grid-template-columns: repeat(3, 1fr); gap: 6px; margin-bottom: 8px; }

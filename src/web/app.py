@@ -31,6 +31,7 @@ from core.config import DATA_DIR, DB_PATH, Settings, env
 from database.db import Database
 from i18n import load as load_lang, set_language, t
 from scanner.engine import ScannerEngine
+from intel.early_watch import select_watch
 from scoring.groups import GROUPS, confirm_key
 from scoring.ranking import rank_early, rank_opportunities
 from trading.bot import PaperBot
@@ -300,6 +301,34 @@ def create_app(engine: ScannerEngine | None = None, start_scanner: bool = True,
             st = find(m)
             items.append(card(st) if st else {"mint": m, "pending": True})
         return {"items": items}
+
+    # ------------------------------------------------------------------ 4 early tiers
+    @app.get("/api/early/{tier}")
+    async def early_tier(tier: str, limit: int = 200):
+        sts, now = states(), time.time()
+        limit = max(1, min(limit, 400))
+        if tier == "pre_early":
+            order = {"PRE_EARLY": 0, "NOT_YET": 1, "UNKNOWN": 2, "BLOCKED": 3}
+            rows = [s for s in sts if s.pre_early is not None and s.pre_early.status in order]
+            rows.sort(key=lambda s: (order[s.pre_early.status], -s.pre_early.fired, s.pre_early.age_min or 9))
+            items = [card(s) for s in rows[:limit]]
+        elif tier == "watch":
+            items = [card(s) for s in select_watch(sts)]
+        elif tier == "signal":                   # Early Signal (D1–D8) exactly as computed — not re-ranked or filtered
+            items = [card(s) for s in rank_early(sts)[:limit]]
+        elif tier == "trade":
+            b = state["bot"]
+            items = []
+            for s, rec, holding in (b.trade_candidates(now) if b else []):
+                c = card(s)
+                c["trade"] = {"opportunity": rec.get("opportunity"), "confidence": rec.get("confidence"),
+                              "components": rec.get("components"), "why": rec.get("why", [])[:6],
+                              "invalidate": rec.get("invalidate", [])[:6], "size_usd": rec.get("size_usd"),
+                              "holding": holding, "state": rec.get("state")}
+                items.append(c)
+        else:
+            return JSONResponse({"error": "unknown_tier"}, status_code=404)
+        return {"tier": tier, "count": len(items), "server_time": now, "items": items}
 
     # ------------------------------------------------------------------ PAPER trading bot (no real execution)
     @app.get("/api/bot")

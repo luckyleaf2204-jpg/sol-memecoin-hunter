@@ -153,15 +153,15 @@ class PaperBot:
                        "why": sc.why, "invalidate": sc.invalidate,
                        "checks": [{"key": c.key, "result": c.result, "value": c.value, "rule": c.rule} for c in v.checks],
                        "ts": now}
-                prev = self.decisions.get(st.mint, {}).get("decision")
+                prev = self.decisions.get(st.mint, {}).get("state")
+                rec["vet_passed"] = D.vet_passed(v)
+                rec["risk_allowed"], rec["risk_reasons"], rec["state"] = None, [], sc.decision
                 self.decisions[st.mint] = rec
                 vet_items.append(rec)
                 if sc.decision != TRADE:
                     if prev != sc.decision:
                         self.log("WATCH" if sc.decision == WATCH else "REJECT",
                                  f"{sc.decision} opp {sc.opportunity} conf {sc.confidence} · {'; '.join(sc.why[:2])}", st, now=now)
-                    continue
-                if entries >= MAX_ENTRIES_PER_TICK:
                     continue
                 eq = self.book.equity()
                 sz = D.size(st, sc, self.cfg, eq, self.book.cash, self.book.exposure())
@@ -175,11 +175,14 @@ class PaperBot:
                                            exposure=self.book.exposure(), est_impact=est["impact"],
                                            feeds_ok=feeds_ok, feeds_reason=feeds_reason)
                 risk_items.append({"mint": st.mint, "symbol": st.info.symbol, "allowed": rd.allowed, "reasons": rd.reasons})
+                rec["risk_allowed"], rec["risk_reasons"], rec["size_usd"] = rd.allowed, rd.reasons, sz.usd
                 if not rd.allowed:
+                    rec["state"] = "BLOCKED"
                     if prev != "BLOCKED":
                         self.log("BLOCK", "risk: " + "; ".join(rd.reasons), st, now=now)
-                    rec["decision_note"] = "BLOCKED by risk"
-                    self.decisions[st.mint]["decision"] = "BLOCKED"
+                    continue
+                if entries >= MAX_ENTRIES_PER_TICK:
+                    rec["state"] = "QUEUED"                 # allowed, waits for the next tick's entry slot
                     continue
                 ex = self.exec.buy(st, sz.usd, self._sol(), now)
                 if ex.status == "FILLED":
@@ -228,6 +231,26 @@ class PaperBot:
                 await asyncio.wait_for(self._stop.wait(), timeout=TICK_S)
             except asyncio.TimeoutError:
                 pass
+
+    def trade_candidates(self, now: float | None = None) -> list[tuple]:
+        """🟢 TRADE CANDIDATE: identity VERIFIED + VET passed + Decision TRADE + Risk allowed (fresh decision of a
+        token still published). An open position on the CA is shown as a candidate being held."""
+        now = now or time.time()
+        states = {s.mint: s for s in (self.engine.published or [])}
+        out = []
+        for mint, rec in self.decisions.items():
+            st = states.get(mint)
+            if st is None or now - rec.get("ts", 0) > 30 or st.identity.status != "VERIFIED":
+                continue
+            if rec.get("decision") != TRADE or not rec.get("vet_passed"):
+                continue
+            holding = mint in self.book.positions
+            reasons = rec.get("risk_reasons") or []
+            if not (rec.get("risk_allowed") or (holding and reasons and all(r == "already holding this CA" for r in reasons))):
+                continue
+            out.append((st, rec, holding))
+        out.sort(key=lambda x: -(x[1].get("opportunity") or 0))
+        return out
 
     def ops_per_s(self) -> float:
         if len(self.ops) < 2:

@@ -374,3 +374,17 @@ Lớp riêng, **không** thay đổi Early Signal / D1–D8. Early Signal cần 
   - `POST /api/bot/kill`
   - `POST /api/bot/mode` (chỉ chấp nhận PAPER)
 - **PWA:** tab 🤖 Bot.
+
+## 15. Bốn tầng Early (tab Early)
+
+| Tầng | Tuổi token | Module | Quy tắc |
+|---|---|---|---|
+| ⚡ Pre-Early | 30 giây – 3 phút | `intel/pre_early.py` | 7 tín hiệu: MC velocity, volume, giao dịch, buyers (số lệnh mua; số ví mua riêng biệt KHÔNG CÓ nguồn), lực mua, liquidity, holder. Liệt kê **mọi** token trong độ tuổi này: PRE_EARLY lên đầu, rồi NOT_YET, UNKNOWN (ghi rõ dữ liệu thiếu), BLOCKED |
+| 👀 Early Watch | 3–10 phút | `intel/early_watch.py` | Xếp hạng = (Momentum 40, Opportunity 35, 100−Risk 25) trên các thành phần có dữ liệu, nhân (0.5 + 0.5 × Confidence). Confidence = số nhóm dữ liệu có / 6, nhóm thiếu luôn được liệt kê. Loại: identity conflict, dữ liệu sai, cờ rug, holder bất thường. Tối đa 50 token |
+| 🎯 Early Signal | ≥ 10 phút | `intel/early_signal.py` (không đổi) | D1–D8 và luật độ phủ 4/7 giữ nguyên; tab chỉ hiển thị `rank_early` |
+| 🟢 Trade Candidate | — | `trading/bot.trade_candidates` | Identity VERIFIED + VET PASS + Decision TRADE + Risk cho phép, quyết định trong 30 giây gần nhất. Đây là danh sách duy nhất Paper Bot được giao dịch. Feed lỗi (429 / cooldown), kill switch hoặc thiếu dữ liệu → danh sách trống |
+
+- **API:** `GET /api/early/{pre_early|watch|signal|trade}`.
+- **Sort:** MC (cao / thấp), tuổi, Momentum, Opportunity, Confidence, Risk, volume tăng tốc, buy pressure.
+- **Filter:** VALID, Risk ≤ 60, đủ dữ liệu.
+- **Nguồn quét của Paper Bot:** thêm nguồn `early_watch` (hạng ≥ 60). VET vẫn chặt như cũ.

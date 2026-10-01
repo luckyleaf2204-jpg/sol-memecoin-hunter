@@ -183,6 +183,16 @@ def pre_early_card(st: TokenState, full: bool = False) -> dict | None:
     return out
 
 
+def early_watch_card(st: TokenState) -> dict | None:
+    w = st.early_watch
+    if w is None or not w.eligible:
+        return None
+    return {"rank": w.rank, "confidence": w.confidence, "components": w.components, "age_min": w.age_min,
+            "excluded_by": [t(f"web.ew.ex.{x}") for x in w.excluded_by],
+            "missing": [t(f"web.ew.miss.{x}") for x in w.missing],
+            "data": t("web.ew.data", n=6 - len(w.missing), total=6)}
+
+
 def card(st: TokenState) -> dict:
     """Compact coin card. Numbers are kept raw for client-side sort/filter; labels are localized."""
     m, e, h, wi = st.market, st.early, st.holders, st.whale_intel
@@ -225,6 +235,9 @@ def card(st: TokenState) -> dict:
                             for k, v in sorted(st.identity.claims.items())],
         "token_program": st.identity.token_program or None,
         "pre_early": pre_early_card(st),
+        "early_watch": early_watch_card(st),
+        "momentum": st.subscores["momentum"].score if "momentum" in st.subscores else None,
+        "buy_share": (st.trend or {}).get("buy_share"),
         "fired": e.fired_count if e and e.strength is not None else None,
         "group": st.group or None,
         "group_reasons": [_group_reason(st, r) for r in st.group_reasons],
