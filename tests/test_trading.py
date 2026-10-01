@@ -111,7 +111,8 @@ def test_unverified_identity_and_unknown_checks_block():
     st = good_state()
     st.identity.claims.clear()
     apply_identity(st)
-    assert D.score(st, D.vet(st, TradingConfig()), TradingConfig()).decision == "REJECT"
+    sc = D.score(st, D.vet(st, TradingConfig()), TradingConfig())
+    assert sc.decision == "WATCH" and "identity" in sc.waiting          # unverified = waiting, never TRADE
     st2 = good_state()
     st2.identity.helius_checked = False                     # authorities never checked -> UNKNOWN -> no trade
     v = D.vet(st2, TradingConfig())

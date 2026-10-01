@@ -768,8 +768,18 @@ function stageOf(a) {
 }
 function decisionCls(a) { return a === "BUY" ? "d-buy" : a === "WATCH" ? "d-watch" : "d-reject"; }
 function nn(v) { return v === null || v === undefined ? "—" : esc(v); }
+function waitLine(x) {
+  if (x.action === "WATCH") {
+    const w = (x.waiting || []).map((k) => t("web.wait." + k));
+    return `<div class="c-wait">🟡 ${esc(t("web.wait.title"))}${w.length ? " — " + esc(t("web.wait.for")) + ": " + esc(w.join(" + ")) : ""}</div>`;
+  }
+  if (x.action === "REJECT" && (x.rejected || []).length) {
+    return `<div class="c-wait c-red">🔴 ${esc(x.rejected.map((k) => t("web.rej." + k)).join(" · "))}</div>`;
+  }
+  return "";
+}
 function candRow(x) {
-  const why = (x.action === "BUY" ? x.why : x.vet_failed.concat(x.why)).slice(0, 4).join(" · ");
+  const why = x.why.filter((w) => !/^(waiting|reject): /.test(w)).slice(0, 4).join(" · ");
   return `<div class="crow ${decisionCls(x.action)}">
     <div class="c-tok"><a class="sym" href="#/token/${esc(x.mint)}">$${esc(x.symbol)}</a><span class="ca" data-copy="${esc(x.mint)}" title="${esc(x.mint)}">${esc(short(x.mint))}</span></div>
     <div class="c-n" data-l="MC">${x.mc === null ? "—" : esc(usd(x.mc))}</div>
@@ -780,8 +790,8 @@ function candRow(x) {
     <div class="c-n" data-l="Conf">${x.confidence === null || x.confidence === undefined ? "—" : esc(x.confidence) + "%"}</div>
     <div class="c-n ${x.identity === "VERIFIED" ? "c-green" : x.identity === "CONFLICT" ? "c-red" : "c-muted"}" data-l="ID">${x.identity === "VERIFIED" ? "✓ VERIFIED" : esc(x.identity)}</div>
     <div class="c-n ${x.vet === "PASS" ? "c-green" : "c-orange"}" data-l="VET">${esc(x.vet)}</div>
-    <div class="c-dec"><span class="dec ${decisionCls(x.action)}">${esc(x.action)}</span></div>
-    <div class="c-why">${esc(why)}</div></div>`;
+    <div class="c-dec"><span class="dec ${decisionCls(x.action)}">${esc(x.action === "WATCH" ? t("web.wait.badge") : x.action)}</span></div>
+    <div class="c-why">${waitLine(x)}<div>${esc(why)}</div></div></div>`;
 }
 async function renderBot(silent) {
   let d;

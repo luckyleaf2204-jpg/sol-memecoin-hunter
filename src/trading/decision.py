@@ -12,7 +12,14 @@ SCORE   component scores 0-100 reuse the scanner's sub-scores (None = not availa
         Opportunity = weighted mean over AVAILABLE components (weights momentum 30, onchain 20, liquidity 15,
         risk 20, early 15). Confidence = share of the total weight backed by data (×0.8 when DQ is PARTIAL).
         TRADE  vet passed, Opportunity >= trade_min_opportunity and Confidence >= trade_min_confidence
-        WATCH  Opportunity >= watch_min_opportunity (or vet failed only on soft checks)  ·  REJECT otherwise
+               (UNCHANGED — the only way to a trade)
+        WATCH  "waiting for confirmation": no real failure, but data still missing (UNKNOWN / PENDING) or a trade
+               threshold not reached yet; `waiting` lists exactly what is missing (Early Signal, holder data, VET,
+               Risk, identity verification, market data, opportunity / confidence)
+        REJECT only for a REAL reason: identity CONFLICT, a check that really FAILED (incl. Early Signal FALSE,
+               liquidity, rug / shock / Risk > 60, dev dump, authorities, Token-2022, migration, volume / buy
+               pressure, wrong data), or Opportunity AND Momentum known and both below the watch level.
+               UNKNOWN / PENDING data is never a reason to reject.
 SIZE    risk-based: equity × risk_per_trade / stop distance, then capped by max position %, % of pool liquidity,
         free cash and exposure room; scaled by Opportunity, Confidence and short-term volatility.
 """
@@ -34,7 +41,13 @@ T22 = "TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb"
 WEIGHTS = {"momentum": 30, "onchain": 20, "liquidity": 15, "risk": 20, "early": 15, "x_alpha": 0, "smart_money": 0}
 MIN_HOLDERS, MAX_TOP10, MAX_DEV_PCT, MIN_VOL_5M, MIN_BUY_SHARE = 50, 35.0, 10.0, 5_000.0, 0.5
 MAX_HOLDER_AGE_S = 900          # cached Helius holder data older than this is UNKNOWN for VET
-SOFT = {"volume_buy_pressure", "liquidity", "holders", "early_signal"}
+SOFT = {"volume_buy_pressure", "liquidity", "holders", "early_signal"}   # kept for reference (old mapping)
+WATCH_MIN_MOMENTUM = 70
+# which "waiting for" group an UNKNOWN check belongs to
+WAIT_GROUP = {"early_signal": "early_signal", "holders": "holders", "top_holders": "holders", "dev": "vet_dev",
+              "authorities": "vet_onchain", "token_2022": "vet_onchain", "ca": "identity", "identity": "identity",
+              "liquidity": "market_data", "volume_buy_pressure": "market_data", "data_quality": "market_data",
+              "rug": "risk", "migration": "market_data"}
 EARLY_WATCH_MIN_RANK = 60      # failing only these -> WATCH, not REJECT
 
 
@@ -175,17 +188,60 @@ def score(st: TokenState, v: Vet, cfg: TradingConfig) -> Score:
     invalidate = [f"price <= stop (-{cfg.stop_loss_pct:.0f}%)", "liquidity drops > 30 % or SHOCK",
                   "Risk > 60 or a rug flag", "buy share < 50 % / volume collapse", "identity conflict or holder anomaly",
                   "market data stale or INVALID"]
+    waiting: list[str] = []
+    rejected: list[str] = []
     if not vet_passed(v):
-        hard = [c for c in v.checks if c.result not in (PASS, NA) and c.key not in SOFT]
-        decision = REJECT if hard or opp is None or opp < cfg.watch_min_opportunity else WATCH
+        decision, waiting, rejected = _classify_untradable(st, v, opp, comp["momentum"], cfg)
         why = [f"vet {c.key}: {c.result} {c.value}".strip() for c in v.checks if c.result not in (PASS, NA)] + why
     elif opp is not None and opp >= cfg.trade_min_opportunity and conf >= cfg.trade_min_confidence:
         decision = TRADE
     elif opp is not None and opp >= cfg.watch_min_opportunity:
         decision = WATCH
+        waiting = ["opportunity"] if opp < cfg.trade_min_opportunity else []
+        waiting += ["confidence"] if conf < cfg.trade_min_confidence else []
     else:
-        decision = REJECT
-    return Score(st.mint, comp, opp, conf, decision, why, invalidate)
+        decision, waiting, rejected = _classify_untradable(st, v, opp, comp["momentum"], cfg)
+    if decision == WATCH and waiting:
+        why = ["waiting: " + " + ".join(waiting)] + why
+    elif decision == REJECT and rejected:
+        why = ["reject: " + ", ".join(rejected)] + why
+    return Score(st.mint, comp, opp, conf, decision, why, invalidate, waiting, rejected)
+
+
+def _classify_untradable(st: TokenState, v: Vet, opp: int | None, mom: int | None, cfg: TradingConfig):
+    """WATCH vs REJECT for a token that cannot trade (yet). Never changes what TRADE requires."""
+    from scoring.groups import _missing_only
+    rejected, waiting = [], []
+    if st.identity.status == "CONFLICT":
+        rejected.append("identity_conflict")
+    elif st.identity.status != "VERIFIED":
+        waiting.append("identity")                       # no canonical source yet: data missing, not a conflict
+    for c in v.checks:
+        if c.result in (PASS, NA):
+            continue
+        if c.result == FAIL:
+            if c.key == "identity":
+                continue                                 # handled above (CONFLICT rejects, UNVERIFIED waits)
+            if c.key == "data_quality":
+                if st.dq_status == INVALID and not _missing_only(st):
+                    rejected.append("data_invalid")      # wrong data
+                else:
+                    waiting.append("market_data")        # stale / not yet available
+                continue
+            rejected.append(c.key)                       # a real failure
+        else:                                            # UNKNOWN = not enough data yet
+            waiting.append(WAIT_GROUP.get(c.key, "vet"))
+    waiting = list(dict.fromkeys(waiting))
+    if rejected:
+        return REJECT, waiting, rejected
+    attention = (opp is not None and opp >= cfg.watch_min_opportunity) or (mom is not None and mom >= WATCH_MIN_MOMENTUM)
+    if attention or (opp is None and mom is None):
+        if opp is None and mom is None:
+            waiting.append("scores")
+        elif opp is None or opp < cfg.trade_min_opportunity:
+            waiting.append("opportunity")
+        return WATCH, waiting, []
+    return REJECT, waiting, ["low_opportunity"]
 
 
 # ---------------------------------------------------------------- SIZE

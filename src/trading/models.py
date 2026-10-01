@@ -40,6 +40,8 @@ class Score:
     decision: str                            # TRADE | WATCH | REJECT
     why: list[str] = field(default_factory=list)
     invalidate: list[str] = field(default_factory=list)
+    waiting: list[str] = field(default_factory=list)   # WATCH: what is still missing before a trade (never a reject)
+    rejected: list[str] = field(default_factory=list)  # REJECT: the real reasons (never "data missing")
 
 
 @dataclass

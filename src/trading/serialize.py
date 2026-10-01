@@ -104,7 +104,8 @@ def bot_status(bot: PaperBot, engine=None, now: float | None = None) -> dict:
             "vet": "PASS" if not failed else f"{len(checks) - len(failed)}/{len(checks)}",
             "vet_failed": [f"{c['key']}: {c['result']}" for c in failed][:4],
             "action": "BUY" if is_cand else ("WATCH" if rec.get("decision") == WATCH else "REJECT"),
-            "state": rec.get("state"), "why": rec.get("why", [])[:4]})
+            "state": rec.get("state"), "why": rec.get("why", [])[:4],
+            "waiting": rec.get("waiting", []), "rejected": rec.get("rejected", [])})
     evaluated.sort(key=lambda x: (x["action"] != "BUY", -((x["opportunity"] or 0) + (x["confidence"] or 0) - (x["risk"] or 100))))
     if bot.cfg.kill_switch:
         doing = {"kind": "kill"}
@@ -135,7 +136,7 @@ def bot_status(bot: PaperBot, engine=None, now: float | None = None) -> dict:
                             "unknown": states_.count("unknown"), "watching": len(states_)})
     return {
         "doing": doing, "scan": scan, "evaluated": evaluated, "exit_rules": exits, "exit_engine": engine_rows,
-        "version": "web-4",
+        "version": "web-5",
         "live_available": False,
         "pending": [{"id": o["id"], "symbol": o["symbol"], "mint": o["mint"], "usd": o["usd"],
                      "expires_in": max(0, round(o["expires"] - now)), "why": o["why"][:4]} for o in bot.pending.values()],

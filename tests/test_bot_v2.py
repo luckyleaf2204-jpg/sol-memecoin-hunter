@@ -215,7 +215,7 @@ def test_dashboard_shows_every_evaluated_token_and_what_the_bot_does():
     b58 = "ABCDEFGHJKLMNPQRSTUVWXYZ"                             # base58: no 0 / O / I / l
     sts = [good("Many" + b58[i % 24] + b58[i // 24] + "1" * 36) for i in range(40)]
     for s in sts[5:]:
-        s.early = EarlySignal(40, False, False, 2, groups_computable=6)            # WATCH, not BUY
+        s.early = EarlySignal(None, None, None)                                    # UNKNOWN -> WATCH (waiting), not BUY
     b = bot(sts, FakeJupiter(), max_open_positions=50, max_total_exposure_pct=100)
     run(b)
     d = bot_status(b, b.engine)

@@ -166,7 +166,7 @@ class PaperBot:
                 sc = D.score(st, v, self.cfg)
                 rec = {"mint": st.mint, "symbol": st.info.symbol, "scan": reasons, "decision": sc.decision,
                        "opportunity": sc.opportunity, "confidence": sc.confidence, "components": sc.components,
-                       "why": sc.why, "invalidate": sc.invalidate,
+                       "why": sc.why, "invalidate": sc.invalidate, "waiting": sc.waiting, "rejected": sc.rejected,
                        "checks": [{"key": c.key, "result": c.result, "value": c.value, "rule": c.rule} for c in v.checks],
                        "ts": now}
                 prev = self.decisions.get(st.mint, {}).get("state")
