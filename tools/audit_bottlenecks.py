@@ -167,6 +167,7 @@ async def run(minutes, research_db=""):
     tasks = [asyncio.create_task(eng.run()), asyncio.create_task(bot.run(stop))]
     shocks, es_pass, liq_blocked, best = {}, {}, {}, {}
     promo, cand_first, paths = {}, {}, {}
+    mf_measured = set()
     lc = {"seen": {}, "setup_pass": {}, "es_pass": {}, "old_cand": {}, "exp_cand": {}, "lc_cand": {},
           "b_cand": {}, "c_cand": {}, "pre_would": {}, "edge_cand": {}}
     buffer_only, buffer_any = set(), set()
@@ -233,6 +234,8 @@ async def run(minutes, research_db=""):
                                  "holder_status": st.holder_status, "dev_verified": bool(st.dev and st.dev.balance_verified),
                                  "early_score": (rec.get("early_score") or {}).get("score"),
                                  "prior_risk": (rec.get("early_score") or {}).get("prior_risk")}
+            if rec.get("money_flow_score") is not None:
+                mf_measured.add(k)
             if rec.get("engine") == "lifecycle":
                 name = rec.get("lifecycle_name")
                 eqv = rec.get("liquidity_equivalent_usd")
@@ -285,6 +288,9 @@ async def run(minutes, research_db=""):
     await asyncio.gather(*tasks, return_exceptions=True)
     bot._audit_buffer = {"any": len(buffer_any), "only_blocker": len(buffer_only)}
     bot._audit_lc = lc
+    bot._audit_mf_measured = len(mf_measured)
+    bot._audit_breaks = [(m, list(h.breaks), [(p.ts, p.price, p.pair) for p in h.points])
+                         for m, h in getattr(eng.history, "_h", {}).items() if h.breaks]
     bot._audit_minutes = minutes
     return bot, eng, shocks, es_pass, liq_blocked, best, promo, cand_first, paths
 
@@ -359,6 +365,139 @@ def classify_spike(fx, max_age=30.0):
     return {"symbol": fx["symbol"], "class": cls, "risk_path": [(x["at"], x["risk"]) for x in snaps],
             "added_factors": added, "price_change_to_spike_pct": None if px is None else round(px, 1),
             "spike_at_s": spike["t"], "entry_ctx": fx["ctx"]}
+
+
+def v12_section(bot):
+    """V1.2 price accounting: provenance, discrepancy classes, staleness, slippage decomposition, pair consistency,
+    migration price jumps, CURRENT vs DEXSCREENER vs COMMON-SOURCE (Jupiter) reconciliation, money-flow coverage."""
+    from research.v11_analysis import slippage_bucket
+    from trading.price_provenance import CommonSourceExit, classify_discrepancy, pct
+
+    def lst(x):
+        return list(x) if x is not None else []
+
+    def age_bucket(ms):
+        if ms is None:
+            return "UNKNOWN"
+        return "<100ms" if ms < 100 else "100-250ms" if ms < 250 else "250-500ms" if ms < 500 else \
+            "500ms-1s" if ms < 1000 else "1-2s" if ms < 2000 else ">2s"
+    q_rows = []
+    for q in bot.quote_obs_log:
+        trail = [t for t in lst(q.get("trail")) if t.get("ts", 0) > q["market"].get("ts", 0)]
+        before = [q["decision_market"]] if q.get("decision_market") and q["decision_market"].get("ts", 0) < q["market"].get("ts", 0) else []
+        c = classify_discrepancy(q["market"], q["quote"], trail, before)
+        q_rows.append({"symbol": q["symbol"], "lifecycle": q.get("lifecycle"), "market_age_ms": q["market"].get("age_ms"),
+                       "quote_latency_ms": q["quote"].get("latency_ms"), "decision_to_quote_ms": q.get("decision_to_quote_ms"),
+                       "discrepancy_pct": c["discrepancy_pct"], "class": c["class"], "evidence": c["evidence"],
+                       "pair_match": None if not q["market"].get("pair") or not q["quote"].get("pair")
+                       else q["market"]["pair"] == q["quote"]["pair"], "market_source": q["market"].get("source"),
+                       "route_note": q["quote"].get("note"), "decimal_source": q.get("decimal_source")})
+    cls = collections.Counter(r["class"] for r in q_rows)
+    stale = {}
+    for r in q_rows:
+        b = age_bucket(r["market_age_ms"])
+        e = stale.setdefault(b, {"n": 0, "abs_disc": []})
+        e["n"] += 1
+        if r["discrepancy_pct"] is not None:
+            e["abs_disc"].append(abs(r["discrepancy_pct"]))
+    staleness = {b: {"n": e["n"], "mean_abs_discrepancy_pct": round(statistics.fmean(e["abs_disc"]), 2) if e["abs_disc"] else None,
+                     "median_abs_discrepancy_pct": statistics.median(e["abs_disc"]) if e["abs_disc"] else None}
+                 for b, e in stale.items()}
+    lat = {k: collections.Counter(age_bucket(r[k]) for r in q_rows) for k in ("quote_latency_ms", "decision_to_quote_ms")}
+    ages = sorted(r["market_age_ms"] for r in q_rows if r["market_age_ms"] is not None)
+    pairs = collections.Counter("match" if r["pair_match"] else ("mismatch" if r["pair_match"] is False else "unknown")
+                                for r in q_rows)
+    # slippage decomposition per fill attempt
+    fills = []
+    for f in bot.fill_log:
+        q = next((x for x in reversed(bot.quote_obs_log) if x["mint"] == f["mint"] and abs(x["ts"] - f.get("quote_ts", 0)) < 5), None)
+        mkt = (q or {}).get("market", {}).get("price")
+        qp = (q or {}).get("quote", {}).get("price")
+        fills.append({"route_impact_pct": f.get("jupiter_impact_pct"), "latency_slip_pct": f.get("latency_slippage_pct"),
+                      "total_reported_pct": f.get("total_slippage_pct"), "quote_vs_market_pct": pct(qp, mkt),
+                      "fill_vs_quote_pct": pct(f.get("simulated_execution_price"), qp),
+                      "fill_vs_market_pct": pct(f.get("simulated_execution_price"), mkt), "status": f.get("status"),
+                      "lifecycle": f.get("lifecycle"), "usd": f.get("position_size_usd"), "liq": f.get("liquidity_usd")})
+    sb = {}
+    for f in fills:
+        for key, label in (("total_reported_pct", "by_reported_total"), ("fill_vs_market_pct", "by_fill_vs_market")):
+            v = f.get(key)
+            b = slippage_bucket(abs(v) if v is not None else None)
+            e = sb.setdefault(label, {}).setdefault(b, {"attempts": 0, "filled": 0})
+            e["attempts"] += 1
+            e["filled"] += f["status"] == "FILLED"
+    # reconciliation per paper trade
+    rec_rows = []
+    c = bot.cfg
+    for mint, pv in bot.provenance.items():
+        ex = pv.get("exit") or {}
+        dm = (pv.get("quote_market") or {}).get("price")
+        model_c = None
+        if dm:
+            mc = CommonSourceExit(dm, pv["entry_ts"], c.stop_loss_pct, c.tp1_pct, c.tp1_sell_frac, c.tp2_pct,
+                                  c.trailing_pct, c.max_hold_min * 60)
+            for mk in pv.get("marks") or []:
+                if mk.get("price") and mk.get("post_entry", True):
+                    mc.on_price(mk["price"], mk["ts"])
+            if mc.closed_at is None and ex.get("exit_market", {}).get("price"):
+                mc.force_close(ex["exit_market"]["price"], ex["ts"], "mirror:" + (ex.get("reason") or "open"))
+            model_c = mc.summary()
+        cs = pv.get("common_source") or {}
+        cur = ex.get("realized_pnl_pct")
+        rec_rows.append({"symbol": pv["symbol"], "lifecycle": pv.get("lifecycle"),
+                         "entry_market": dm, "entry_market_age_ms": (pv.get("quote_market") or {}).get("age_ms"),
+                         "entry_quote": (pv.get("entry_quote") or {}).get("price"),
+                         "entry_fill": (pv.get("entry_fill") or {}).get("price"),
+                         "exit_market": (ex.get("exit_market") or {}).get("price"), "exit_reason_current": ex.get("reason"),
+                         "exit_fill_source": ex.get("exit_fill_source"),
+                         "current_pnl_pct": cur, "dexscreener_pnl_pct": (model_c or {}).get("pnl_pct"),
+                         "common_source_pnl_pct": cs.get("pnl_pct"),
+                         "difference_current_minus_common": round(cur - cs["pnl_pct"], 2)
+                         if cur is not None and cs.get("pnl_pct") is not None else None,
+                         "current_sl": ex.get("reason") in ("stop_loss",), "dexscreener_sl": (model_c or {}).get("exit_reason") == "stop_loss",
+                         "common_sl": cs.get("exit_reason") == "stop_loss",
+                         "current_mfe_mae": ((ex.get("path") or {}).get("mfe_pct"), (ex.get("path") or {}).get("mae_pct")),
+                         "dexscreener_mfe_mae": ((model_c or {}).get("mfe_pct"), (model_c or {}).get("mae_pct")),
+                         "common_mfe_mae": (cs.get("mfe_pct"), cs.get("mae_pct")),
+                         "common_exit": (cs.get("exit_reason"), cs.get("closed_after_s")),
+                         "jupiter_marks": len(pv.get("jupiter_marks") or []), "dex_marks": len(pv.get("marks") or []),
+                         "pre_entry_prints_ignored": sum(1 for mk in pv.get("marks") or [] if mk.get("post_entry") is False),
+                         "exit_print_fetched_before_entry": None if not ex.get("exit_market") else
+                         (ex["exit_market"].get("age_ms") or 0) / 1000 > ex["ts"] - pv["entry_ts"],
+                         "fill_vs_market_pct": pv.get("fill_vs_market_pct"), "pair_at_entry": (pv.get("pair_at_entry") or "")[:8],
+                         "route_pool": (pv.get("route_pool") or "")[:8]})
+
+    def expectancy(key):
+        v = [r[key] for r in rec_rows if r.get(key) is not None]
+        return {"n": len(v), "mean_pct": round(statistics.fmean(v), 2) if v else None}
+    migr = []
+    for m, breaks, pts in getattr(bot, "_audit_breaks", []):
+        for ts, old, new in breaks:
+            before = [p for p in pts if p[2] == old and p[0] <= ts]
+            after = [p for p in pts if p[2] == new and p[0] >= ts]
+            jump = pct(after[0][1], before[-1][1]) if before and after else None
+            migr.append({"mint": m[:8], "ts": ts, "old_pair": old[:8], "new_pair": new[:8], "price_jump_pct": jump,
+                         "position_spanning": m in bot.provenance})
+    pre = [r for r in bot.decisions.values() if r.get("pre_shadow_decision") == "WOULD_BUY"]
+    return {
+        "price_map": {"entry": "Jupiter buy quote x (1 + simulated latency slip)",
+                      "stop/TP/trailing/MFE/MAE/unrealized": "DexScreener mark (bot._price, <= 4 x max_data_age_s old)",
+                      "hard exits fill": "liquidity model at the DexScreener mark",
+                      "other exits fill": "Jupiter sell quote (model fallback)",
+                      "reported slippage": "total = Jupiter priceImpactPct (route vs mid at quote time) + simulated latency slip; "
+                                           "it does NOT include the quote-vs-market discrepancy"},
+        "quotes": len(q_rows), "discrepancy_classes": dict(cls), "quote_rows": q_rows[:60],
+        "market_age_ms_p50_p90": (ages[len(ages) // 2], ages[int(0.9 * (len(ages) - 1))]) if ages else None,
+        "staleness": staleness, "latency_buckets": {k: dict(v) for k, v in lat.items()},
+        "pair_consistency": dict(pairs), "slippage_decomposition": fills[:60], "slippage_buckets": sb,
+        "reconciliation": rec_rows, "expectancy": {"current": expectancy("current_pnl_pct"),
+                                                   "dexscreener": expectancy("dexscreener_pnl_pct"),
+                                                   "common_source": expectancy("common_source_pnl_pct")},
+        "sl_counts": {"current": sum(r["current_sl"] for r in rec_rows), "dexscreener": sum(r["dexscreener_sl"] for r in rec_rows),
+                      "common_source": sum(r["common_sl"] for r in rec_rows)},
+        "migrations": migr, "money_flow_measured_tokens": getattr(bot, "_audit_mf_measured", None),
+        "money_flow_collector": bot.money_flow.stats() if bot.money_flow is not None else None,
+        "pre_shadow_would_buy_now": len(pre)}
 
 
 def v11_section(bot, paths):
@@ -652,6 +791,7 @@ def report(bot, eng, shocks, es_pass, liq_blocked, best, promo=None, cand_first=
     out["candidates_simulated"] = sims
     out["lifecycle"] = lifecycle_section(bot, paths)
     out["v11"] = v11_section(bot, paths)
+    out["v12"] = v12_section(bot)
     rugs = []
     for k, c in cand_first.items():
         f = fwd(paths.get(k), c["ts"], c["price"])

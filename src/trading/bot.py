@@ -77,6 +77,12 @@ class PaperBot:
         self.money_flow = None                 # trading.money_flow.MoneyFlowCollector (shadow research, budgeted)
         self._last_mf = 0.0
         self.pre_buf: dict[str, deque] = {}    # recent shadow snapshots per watched CA (T-30s / -10s / -5s at BUY)
+        self.provenance: dict[str, dict] = {}  # V1.2: price provenance per paper trade (entry obs, marks, exits)
+        self.quote_obs_log: list[dict] = []     # every BUY quote: market print vs Jupiter implied price
+        self.market_trail: dict[str, deque] = {}   # market prints right after a quote (validation of discrepancies)
+        self.cs_shadow: dict[str, object] = {}  # EXIT_MODEL_COMMON_SOURCE trackers (Jupiter sell-quote marks)
+        self._last_cs = 0.0
+        self._mf_sticky: dict[str, float] = {}
         self._last_onchain = 0.0
         self._gate_waiting: set[str] = set()   # experimental: ever WATCH because authority / Token-2022 unchecked
         self.fast_promoted: set[str] = set()   # ...and later a NEW candidate after the fast lane checked them
@@ -123,6 +129,14 @@ class PaperBot:
             return None
         return st.market.price_usd
 
+    @staticmethod
+    def _post_entry(st: TokenState | None, p) -> bool:
+        """True when the market print was FETCHED at or after the position opened. The entry is a Jupiter fill;
+        a DexScreener print fetched before it (typically 5-25 s old at the decision) cannot trigger the stop / TP or
+        set MFE / MAE of that position (V1.2 forensic: BLOCUS / >_ / bwam / Papu exits fired on the pre-entry print)."""
+        stamp = st.stamps.get("market") if st is not None else None
+        return stamp is not None and stamp.updated_at >= p.opened_at
+
     def _sol(self):
         return getattr(self.engine, "sol_price", None)
 
@@ -136,6 +150,7 @@ class PaperBot:
             self._entries(states, now)
         self._observe(states, now)
         self._forensic_tick(states, now)
+        self._provenance_tick(states, now)
         if self.recorder is not None:
             self._rec("observe", list(states.values()), self.decisions, now,
                       {m for m, r in self.decisions.items() if r.get("ts") == now and m in states
@@ -160,6 +175,8 @@ class PaperBot:
             for p in list(self.book.positions.values()):
                 st = states.get(p.mint)
                 price = self._price(st, now)
+                if price is not None and not self._post_entry(st, p):
+                    price = None            # V1.2 fix: a print fetched BEFORE the fill says nothing about this position
                 p.stale = price is None
                 if price is not None:
                     p.last_price, p.last_price_ts = price, now
@@ -169,7 +186,7 @@ class PaperBot:
                 if not sig:
                     continue
                 frac, reason = sig
-                mark = price if price is not None else p.last_price
+                mark = price if price is not None else p.last_price    # = the fill until a post-entry mark exists
                 if mark is None or st is None:
                     self.log("INFO", f"exit signal {reason} but no validated price — waiting", st, now=now)
                     continue
@@ -311,7 +328,8 @@ class PaperBot:
                                              "why": sc.why, "setup": "+".join(sorted(reasons)),
                                              "risk_at_candidate": st.risk.score if st.risk else None,
                                              "lifecycle": rec.get("lifecycle_name"), "setup_type": rec.get("setup_type"),
-                                             "setup_score": rec.get("setup_score")}
+                                             "setup_score": rec.get("setup_score"),
+                                             "decision_market": self._mobs(st, now)}
                     rec["state"] = "QUOTING"
                     self.audit.execution("candidate", st, now, f"${sz.usd:,.2f}")
                     self.log("INFO", f"BUY CANDIDATE ${sz.usd:,.2f} → requesting Jupiter quote", st, now=now)
@@ -613,6 +631,94 @@ class PaperBot:
                     "liquidity_confidence": lq.get("confidence")})
         return ld.decision
 
+    @staticmethod
+    def _mobs(st, now: float) -> dict:
+        from trading.price_provenance import market_obs
+        return market_obs(st, now).as_dict()
+
+    def _provenance_open(self, st, it: dict, qobs: dict, m_at_quote: dict, ex, fill: dict, now: float) -> None:
+        from trading.price_provenance import CommonSourceExit, pct
+        p = self.book.positions.get(st.mint)
+        if p is None:
+            return
+        self.provenance[st.mint] = {
+            "mint": st.mint, "symbol": st.info.symbol, "lifecycle": it.get("lifecycle"),
+            "entry_ts": now, "decision_ts": it.get("ts"),
+            "decision_market": it.get("decision_market"), "quote_market": m_at_quote, "entry_quote": qobs,
+            "entry_fill": {"price": ex.fill_price, "source": "jupiter_buy_quote x (1 + simulated latency slip)",
+                           "latency_ms": ex.latency_ms, "latency_slip_pct": ex.slippage_pct,
+                           "route_impact_pct": ex.price_impact_pct},
+            "entry_price_book": p.entry_price, "stop_price_book": p.stop_price,
+            "stop_reference_source": "dexscreener mark fetched after the fill (bot._price + _post_entry)",
+            "discrepancy_quote_vs_market_pct": pct(qobs.get("price"), m_at_quote.get("price")),
+            "fill_vs_market_pct": pct(ex.fill_price, m_at_quote.get("price")),
+            "fill_vs_quote_pct": pct(ex.fill_price, qobs.get("price")),
+            "decision_to_quote_ms": round(1000 * ((qobs.get("ts") or now) - (it.get("ts") or now)))
+            if qobs.get("ts") else None, "quote_to_fill_ms": ex.latency_ms,
+            "marks": [], "jupiter_marks": [], "exit": None, "tokens": p.initial_tokens,
+            "pair_at_entry": m_at_quote.get("pair"), "route_pool": qobs.get("pair")}
+        c = self.cfg
+        cs = CommonSourceExit(ex.fill_price, now, c.stop_loss_pct, c.tp1_pct, c.tp1_sell_frac, c.tp2_pct,
+                              c.trailing_pct, c.max_hold_min * 60)
+        cs.mint, cs.tokens, cs.pending_mirror, cs.last_quote = st.mint, p.initial_tokens, None, 0.0
+        self.cs_shadow[st.mint] = cs
+        if len(self.cs_shadow) > 50:
+            for k in list(self.cs_shadow)[:10]:
+                self.cs_shadow.pop(k, None)
+
+    def _provenance_tick(self, states: dict, now: float) -> None:
+        for mint, pv in list(self.provenance.items()):
+            if pv.get("exit") is None and mint in states and mint in self.book.positions:
+                o = self._mobs(states[mint], now)
+                p = self.book.positions[mint]
+                o["post_entry"] = self._post_entry(states[mint], p)      # pre-entry prints are not position marks
+                pv["marks"].append(o)
+                del pv["marks"][:-400]
+        for mint, trail in list(self.market_trail.items()):
+            st = states.get(mint)
+            if st is None or now - trail[0]["ts"] > 90:
+                if now - trail[0]["ts"] > 90:
+                    self.market_trail.pop(mint, None)
+                continue
+            o = self._mobs(st, now)
+            if o.get("price") != trail[-1].get("price"):
+                trail.append(o)
+
+    async def common_source_round(self, now: float | None = None) -> int:
+        """Jupiter SELL-quote marks for EXIT_MODEL_COMMON_SOURCE (shadow). BUY quotes have priority: skipped while
+        BUY intents are pending. Each tracker runs until its own exit or 30 min."""
+        from trading.jupiter import WSOL
+        from trading.price_provenance import sell_quote_obs
+        now = now or time.time()
+        if self.jupiter is None or self.intents or not hasattr(self.jupiter, "quote_result"):
+            return 0
+        n = 0
+        for mint, cs in list(self.cs_shadow.items()):
+            if cs.closed_at is not None or now - cs.opened_at > 1800 or now - cs.last_quote < 15:
+                continue
+            st = next((s for s in (self.engine.published or []) if s.mint == mint), None)
+            dec = (st.info.decimals if st else None) or 6
+            t_req = time.time()
+            r = await self.jupiter.quote_result(mint, WSOL, int(cs.tokens * 10 ** dec), int(self.cfg.max_slippage_pct * 100))
+            t_resp = time.time()
+            cs.last_quote = now
+            n += 1
+            if not r.ok:
+                continue
+            o = sell_quote_obs(r.quote, cs.tokens, self._sol(), mint, t_req, t_resp).as_dict()
+            pv = self.provenance.get(mint)
+            if pv is not None:
+                pv["jupiter_marks"].append(o)
+                del pv["jupiter_marks"][:-200]
+            if cs.pending_mirror is not None:
+                cs.force_close(o["price"], cs.pending_mirror[0], "mirror:" + cs.pending_mirror[1])
+            else:
+                cs.on_price(o["price"], now)
+            if pv is not None:
+                pv["common_source"] = cs.summary()
+                self._rec("price_provenance", mint, pv)
+        return n
+
     def _shadow(self, st, rec: dict, su, ld, h, now: float) -> None:
         """V1.1 SHADOW research on the decision record: money flow, independence, cluster risk, exit liquidity,
         entry location, NEW_EDGE score and the A/B shadow decisions (B = +money flow, C = +money flow +exit liquidity).
@@ -661,6 +767,9 @@ class PaperBot:
                 self.pre_buf.pop(k, None)
 
     def mf_targets(self, now: float, cap: int = 3) -> list:
+        """Sticky (>= 120 s) so a token's sample can reach the 5-trades-per-minute floor instead of being spread thin."""
+        keep = [m for m, until in self._mf_sticky.items() if until > now and now - (self.decisions.get(m) or {}).get("ts", 0) <= 30]
+        self._mf_sticky = {m: self._mf_sticky[m] for m in keep}
         rows = []
         for mint, rec in self.decisions.items():
             if now - rec.get("ts", 0) > 30:
@@ -672,7 +781,14 @@ class PaperBot:
                 pri = 3
             if pri is not None:
                 rows.append((pri, -(su.get("score") or 0), mint))
-        return [m for _, _, m in sorted(rows)[:cap]]
+        out = keep[:cap]
+        for _, _, m in sorted(rows):
+            if len(out) >= cap:
+                break
+            if m not in out:
+                out.append(m)
+                self._mf_sticky[m] = now + 120
+        return out
 
     async def _money_flow_round(self, now: float) -> None:
         states = {s.mint: s for s in (self.engine.published or [])}
@@ -683,7 +799,8 @@ class PaperBot:
             await self.money_flow.refresh(mint, st.info.creator or None, now)
             if mint in self.book.positions or (self.decisions.get(mint) or {}).get("decision") == TRADE:
                 rec = self.money_flow.recs.get(mint) or {}
-                recent = [x.get("who") for x in rec.get("txs", [])[-20:] if x.get("side") == "buy"]
+                recent = [x.get("who") for x in rec.get("txs", []) if x.get("side") == "buy"
+                          and x.get("t") is not None and now - x["t"] <= 60]           # buyers of the scored window
                 await self.money_flow.lookup_funding(list(dict.fromkeys(recent))[:6], now)
 
     def lifecycle_summary(self, now: float | None = None) -> dict:
@@ -803,6 +920,20 @@ class PaperBot:
             fx["fast_sl_reason"] = f"stop_loss after {held:.0f}s" if fx["fast_sl_flag"] else None
             if self.recorder is not None:
                 self._rec("forensic", fx)
+        pv = self.provenance.get(p.mint)
+        # V1.2: recorded on the FINAL close (also after a partial TP1), not only on the first sell
+        if pv is not None and pv.get("exit") is None and p.status == "CLOSED" and st is not None:
+            pv["exit"] = {"ts": now, "reason": reason, "exit_fill": ex.fill_price, "exit_route": ex.route,
+                          "exit_market": self._mobs(st, now),
+                          "exit_fill_source": "jupiter_sell_quote" if (getattr(ex, "model", "") or "").startswith(
+                              "PAPER on a real Jupiter") else "liquidity_model_at_dexscreener_mark",
+                          "realized_pnl_pct": round(100 * (p.realized_usd - p.cost_usd) / p.cost_usd, 3) if p.cost_usd else None,
+                          "path": p.path_log()}
+            cs = self.cs_shadow.get(p.mint)
+            if cs is not None and reason not in ("stop_loss", "break_even_stop", "take_profit_1", "take_profit_2",
+                                                 "trailing_stop", "max_hold"):
+                cs.pending_mirror = (now, reason)          # valued on the next Jupiter sell quote
+            self._rec("price_provenance", p.mint, pv)
         if ex.status == "FILLED":
             if reason == "take_profit_1":
                 p.tp1_done = True
@@ -890,7 +1021,10 @@ class PaperBot:
                 self.audit.execution("skip", st, now, reason="no_longer_candidate")
                 continue
             usd = it["usd"]
+            t_req = time.time()
+            m_at_quote = self._mobs(st, t_req)
             qr = await self._buy_quote(mint, int(usd / sol * 1e9))
+            t_resp = time.time()
             self.quote_stats[qr.status] = self.quote_stats.get(qr.status, 0) + 1
             if not qr.ok:
                 first = it.setdefault("first", it["ts"])
@@ -923,6 +1057,18 @@ class PaperBot:
                              f"{100 * imp:.2f}%" if imp is not None else f"BUY → QUOTE → MATCH · {route_label(q)}",
                      st, now=now)
             self.audit.execution("quote_ok", st, now, route_label(q))
+            from trading.price_provenance import buy_quote_obs, pct
+            qobs = buy_quote_obs(q, usd, st.info.decimals or 6, mint, t_req, t_resp).as_dict()
+            self.quote_obs_log.append({"mint": mint, "symbol": st.info.symbol, "ts": t_resp, "usd": usd,
+                                       "decimal_source": "pump.fun/rpc" if st.info.total_supply else "default 6",
+                                       "decision_market": it.get("decision_market"), "market": m_at_quote, "quote": qobs,
+                                       "decision_to_quote_ms": round(1000 * (t_req - it["ts"])),
+                                       "quote_vs_market_pct": pct(qobs["price"], m_at_quote.get("price")),
+                                       "lifecycle": it.get("lifecycle"), "liq": st.market.liquidity_usd if st.market else None,
+                                       "impact_pct": None if imp is None else round(100 * imp, 3)})
+            del self.quote_obs_log[:-500]
+            self.market_trail[mint] = deque([m_at_quote], maxlen=40)
+            self.quote_obs_log[-1]["trail"] = self.market_trail[mint]      # later prints validate the discrepancy
             risk_at_quote = st.risk.score if st.risk else None
             drift = await self._latency_probe(st, mint, int(usd / sol * 1e9), q)
             risk_at_entry = st.risk.score if st.risk else None
@@ -995,6 +1141,7 @@ class PaperBot:
                 self.audit.execution("buy", st, now, f"${usd:,.2f} @ {ex.fill_price:.8g} · {ex.route}")
                 self._forensic_open(st, now, risk_ctx)
                 self._tag_position(mint, it)
+                self._provenance_open(st, it, qobs, m_at_quote, ex, fill, now)
             else:
                 self.book.record(ex)
                 self.log("FAILED", f"BUY → QUOTE → MATCH → PAPER FILL FAILED: {ex.reason} · Jupiter impact "
@@ -1032,6 +1179,12 @@ class PaperBot:
                 if self.recorder is not None and time.time() - self._last_followup >= 30:
                     self._last_followup = time.time()
                     await self.recorder.run_followups()
+                if self.cs_shadow and time.time() - self._last_cs >= 5:
+                    self._last_cs = time.time()
+                    try:
+                        await self.common_source_round(time.time())
+                    except Exception as e:                # research never breaks trading
+                        self.log("INFO", f"common-source shadow error: {type(e).__name__}: {e}")
                 if self.money_flow is not None and time.time() - self._last_mf >= 10:
                     self._last_mf = time.time()
                     try:

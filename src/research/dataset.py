@@ -85,6 +85,8 @@ CREATE TABLE IF NOT EXISTS buy_forensics (ca TEXT NOT NULL, entry_ts REAL NOT NU
   PRIMARY KEY (ca, entry_ts));
 CREATE TABLE IF NOT EXISTS latency_samples (id INTEGER PRIMARY KEY AUTOINCREMENT, ts REAL, ca TEXT, data TEXT);
 CREATE TABLE IF NOT EXISTS onchain_research (ca TEXT PRIMARY KEY, fetched_ts REAL, data TEXT);
+CREATE TABLE IF NOT EXISTS price_provenance (ca TEXT NOT NULL, entry_ts REAL NOT NULL, data TEXT,
+  PRIMARY KEY (ca, entry_ts));
 """
 
 AB_SNAP_COLS = {"engine": "TEXT", "old_decision": "TEXT", "new_decision": "TEXT", "blocked_by_old": "TEXT",
@@ -477,6 +479,11 @@ class DatasetRecorder:
         data = {k: v for k, v in fx.items() if k != "done"}
         self.db.execute("INSERT OR REPLACE INTO buy_forensics VALUES (?,?,?,?)",
                         (fx["mint"], fx["entry_ts"], fx.get("symbol"), json.dumps(data, default=str)))
+        self.db.commit()
+
+    def price_provenance(self, ca: str, pv: dict) -> None:
+        self.db.execute("INSERT OR REPLACE INTO price_provenance VALUES (?,?,?)",
+                        (ca, pv.get("entry_ts"), json.dumps(pv, default=str)))
         self.db.commit()
 
     def onchain(self, rec: dict) -> None:
