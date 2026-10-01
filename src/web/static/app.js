@@ -787,6 +787,17 @@ function lcSummary(d) {
   return `<div class="panel"><h3><span>LIFECYCLE</span><span class="meta">${esc(d.engine || "")}</span></h3>${row("NEW")}${row("PRE_MIGRATION")}${row("POST_MIGRATION")}${row("UNKNOWN")}${unk ? `<div class="meta">UNKNOWN: ${esc(unk)}</div>` : ""}</div>`;
 }
 
+function truthPanel(d) {
+  const T = d.price_truth;
+  if (!T) return "";
+  const px = (v) => (v === null || v === undefined ? "—" : esc(Number(v).toPrecision(4)));
+  const pc = (v) => (v === null || v === undefined ? "—" : esc((v >= 0 ? "+" : "") + Number(v).toFixed(1) + "%"));
+  const open = (T.open || []).map((p) => `<tr><td>${esc(p.symbol || "")}</td><td>${px(p.entry)}</td><td>${p.ds_mark_post_entry ? px(p.ds_mark) : "—"}</td><td>${p.truth === "VALID" ? px(p.jup_sell) : "TRUTH UNKNOWN"}</td><td>${pc(p.old_pnl_pct)}</td><td>${p.truth === "VALID" ? pc(p.truth_pnl_pct) : "TRUTH UNKNOWN"}</td></tr>`).join("");
+  const rec = (T.recent || []).map((r) => `<tr><td>${esc(r.symbol || "")}</td><td>${px(r.ds)}</td><td>${px(r.jup_sell)}</td><td>${px(r.entry)}</td><td>${pc(r.discrepancy_pct)}</td><td>${r.ds_age_s == null ? "—" : esc(r.ds_age_s + "s")}</td><td>${esc(r.status)} · ${esc(r.class)}</td></tr>`).join("");
+  if (!open && !rec) return "";
+  return `<div class="panel"><h3><span>PRICE TRUTH</span><span class="meta">${esc(T.label)} · ${esc(T.quotes_last_min)} SELL quotes/min</span></h3>${open ? `<div class="tblw"><table class="tbl"><thead><tr><th>OPEN</th><th>ENTRY</th><th>DS MARK</th><th>JUP SELL</th><th>OLD P&L</th><th>TRUTH P&L</th></tr></thead><tbody>${open}</tbody></table></div>` : ""}${rec ? `<div class="tblw"><table class="tbl"><thead><tr><th>TOKEN</th><th>DS</th><th>JUP SELL</th><th>ENTRY</th><th>DISCREPANCY</th><th>AGE</th><th>STATUS</th></tr></thead><tbody>${rec}</tbody></table></div>` : ""}</div>`;
+}
+
 function shadowLine(x) {
   const s = x.shadow;
   if (!s) return "";
@@ -945,6 +956,7 @@ async function renderBot(silent) {
 
   <section class="b-more">
     ${lcSummary(d)}
+    ${truthPanel(d)}
     ${shadowTables(d)}
     ${auditPanel(d)}
     <details class="sec" data-k="bot_more"${S.open.bot_more ? " open" : ""}><summary>${esc(t("web.bot.details"))}</summary><div class="sec-body">

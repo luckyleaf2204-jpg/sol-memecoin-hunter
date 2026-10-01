@@ -192,7 +192,8 @@ def test_fast_sl_flag_and_pre_entry_snapshots():
     assert set(fx["pre_entry"]) == {"T-30s", "T-10s", "T-5s"} and "shadow_at_entry" in fx
     p = b.book.positions[st.mint]
     st.market.price_usd = p.entry_price * 0.5                    # crash -> production stop loss
-    b.tick(time.time() + 8)
+    st.stamps["market"].updated_at = time.time() + 1             # observed AFTER the fill (V1.2: a pre-entry print
+    b.tick(time.time() + 8)                                      # never triggers the stop; was clock-resolution luck)
     assert fx.get("fast_sl_flag") is True and "stop_loss" in fx["fast_sl_reason"]
     assert b.fill_log[-1]["fill_vs_ref_pct"] is not None
 

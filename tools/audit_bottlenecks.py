@@ -367,6 +367,93 @@ def classify_spike(fx, max_age=30.0):
             "spike_at_s": spike["t"], "entry_ctx": fx["ctx"]}
 
 
+def v13_section(bot):
+    """V1.3 TRUTH PRICE: executable SELL-quote coverage, source agreement, DS staleness, migration epochs,
+    OLD vs TRUTH P&L, MFE / MAE, fast-SL research, exit shadow, lifecycle P&L on truth, data quality."""
+    from trading.truth_price import VALID
+
+    def med(v):
+        v = [x for x in v if x is not None]
+        return round(statistics.median(v), 3) if v else None
+
+    def q(v, f):
+        v = sorted(x for x in v if x is not None)
+        return round(v[int(f * (len(v) - 1))], 3) if v else None
+    now = time.time()
+    trs = list(bot.cs_shadow.values())
+    snaps = [x for t in trs for x in t.snapshots]
+    status = collections.Counter(x["source_status"] for x in snaps)
+    ds_cls = collections.Counter(x["ds_class"] for x in snaps)
+    valid = [x for x in snaps if x["source_status"] == VALID]
+    ds_age = [x["ds_age_s"] for x in snaps if x.get("ds_age_s") is not None]
+    age_b = collections.Counter("<1s" if a < 1 else "1-2s" if a < 2 else "2-5s" if a < 5 else "5-10s" if a < 10
+                                else "10-20s" if a < 20 else ">=20s" for a in ds_age)
+    disc_by_age = {}
+    for x in valid:
+        if x.get("ds_vs_truth_pct") is None or x.get("ds_age_s") is None:
+            continue
+        b = "<5s" if x["ds_age_s"] < 5 else "5-10s" if x["ds_age_s"] < 10 else ">=10s"
+        disc_by_age.setdefault(b, []).append(abs(x["ds_vs_truth_pct"]))
+    curve = [x for x in valid if x.get("curve_price")]
+    trades = []
+    for t in trs:
+        sm = t.summary(now)
+        row = getattr(t, "trade_row", None) or {}
+        trades.append({"symbol": t.symbol, "lifecycle": t.lifecycle, "trade_id": t.trade_id,
+                       "entry_fill": t.entry_fill, "entry_quote": t.entry_quote_price,
+                       "execution_impact_pct": t.execution_impact_pct, "latency_model_pct": t.latency_model_pct,
+                       "total_simulated_entry_cost_pct": row.get("total_simulated_entry_cost_pct"),
+                       "production_closed": t.old_exit is not None, "truth_closed": sm["exit_reason"] != "",
+                       "exit_reason_old": (t.old_exit or {}).get("reason"), "exit_reason_truth": sm["exit_reason"],
+                       "exit_reason_old_cat": sm["exit_reason_old"], "exit_reason_truth_cat": sm["exit_reason_truth"],
+                       "held_old_s": (t.old_exit or {}).get("held_s"), "closed_after_truth_s": sm["closed_after_s"],
+                       "old_pnl": (t.old_exit or {}).get("pnl_pct"), "pnl_ds": row.get("pnl_ds"),
+                       "pnl_truth": sm["pnl_pct"], "pnl_common_source": sm["pnl_common_source"],
+                       "mfe_ds": row.get("mfe_ds"), "mae_ds": row.get("mae_ds"), "mfe_truth": sm["mfe_pct"],
+                       "mae_truth": sm["mae_pct"], "t_mfe": sm["time_to_mfe_s"], "t_mae": sm["time_to_mae_s"],
+                       "snapshots": sm["snapshots"], "coverage_valid_pct": sm["coverage_valid_pct"],
+                       "status_counts": sm["status_counts"], "fast_sl": sm["fast_sl"],
+                       "old_fast_sl_class": sm["old_fast_sl_class"], "pair_changes": sm["pair_changes"],
+                       "crosses_migration_unverified": sm["crosses_migration_unverified"]})
+    done = [r for r in trades if r["production_closed"] and r["truth_closed"]]
+
+    def exp(key, rows):
+        v = [r[key] for r in rows if r.get(key) is not None]
+        return {"n": len(v), "mean": round(statistics.fmean(v), 2) if v else None, "median": med(v)}
+    by_lc = {}
+    for r in done:
+        by_lc.setdefault(r["lifecycle"] or "UNKNOWN", []).append(r)
+    agree = collections.Counter((r["exit_reason_old_cat"], r["exit_reason_truth_cat"]) for r in trades if r["production_closed"])
+    conf = [x["confidence"] for x in valid if x.get("confidence") is not None]
+    return {
+        "trades_tracked": len(trades), "completed_both": len(done),
+        "snapshots": len(snaps), "status_counts": dict(status),
+        "coverage_valid_pct": round(100 * status.get(VALID, 0) / len(snaps), 1) if snaps else None,
+        "context_slot_pct": round(100 * sum(1 for x in valid if x.get("context_slot")) / len(valid), 1) if valid else None,
+        "quote_latency_ms_p50_p90": (q([x.get("latency_ms") for x in snaps], 0.5), q([x.get("latency_ms") for x in snaps], 0.9)),
+        "skipped_budget": bot.truth_skipped_budget,
+        "ds_class_counts": dict(ds_cls), "ds_age_s_p50_p90": (q(ds_age, 0.5), q(ds_age, 0.9)), "ds_age_buckets": dict(age_b),
+        "abs_ds_vs_truth_by_ds_age": {k: {"n": len(v), "median": med(v), "p90": q(v, 0.9)} for k, v in disc_by_age.items()},
+        "abs_ds_vs_truth_pct_p50_p90": (q([abs(x["ds_vs_truth_pct"]) for x in valid if x.get("ds_vs_truth_pct") is not None], 0.5),
+                                         q([abs(x["ds_vs_truth_pct"]) for x in valid if x.get("ds_vs_truth_pct") is not None], 0.9)),
+        "curve": {"n": len(curve), "curve_vs_truth_p50": med([x["curve_vs_truth_pct"] for x in curve]),
+                  "abs_curve_vs_truth_p90": q([abs(x["curve_vs_truth_pct"]) for x in curve if x.get("curve_vs_truth_pct") is not None], 0.9),
+                  "ds_vs_curve_p50": med([x["ds_vs_curve_pct"] for x in curve]),
+                  "abs_ds_vs_curve_p90": q([abs(x["ds_vs_curve_pct"]) for x in curve if x.get("ds_vs_curve_pct") is not None], 0.9),
+                  "curve_status": dict(collections.Counter(x.get("curve_status") for x in snaps))},
+        "migration_events": [e for t in trs for e in t.pair_changes],
+        "confidence_p10_p50": (q(conf, 0.1), q(conf, 0.5)),
+        "pnl": {"old": exp("old_pnl", done), "ds": exp("pnl_ds", done), "truth": exp("pnl_truth", done),
+                "common_source": exp("pnl_common_source", done)},
+        "lifecycle_truth_pnl": {k: {"old": exp("old_pnl", v), "truth": exp("pnl_truth", v)} for k, v in by_lc.items()},
+        "exit_reason_matrix_old_truth": {f"{a}->{b}": n for (a, b), n in agree.items()},
+        "fast_sl": {"production_fast_sl_classes": dict(collections.Counter(r["old_fast_sl_class"] for r in trades if r["old_fast_sl_class"])),
+                    "truth_sl_hit_by_offset": {o: sum(1 for r in trades if (r["fast_sl"].get(o) or {}).get("sl_hit"))
+                                               for o in ("5s", "10s", "15s", "30s")},
+                    "truth_known_by_offset": {o: sum(1 for r in trades if r["fast_sl"].get(o)) for o in ("5s", "10s", "15s", "30s")}},
+        "trades": trades}
+
+
 def v12_section(bot):
     """V1.2 price accounting: provenance, discrepancy classes, staleness, slippage decomposition, pair consistency,
     migration price jumps, CURRENT vs DEXSCREENER vs COMMON-SOURCE (Jupiter) reconciliation, money-flow coverage."""
@@ -792,6 +879,7 @@ def report(bot, eng, shocks, es_pass, liq_blocked, best, promo=None, cand_first=
     out["lifecycle"] = lifecycle_section(bot, paths)
     out["v11"] = v11_section(bot, paths)
     out["v12"] = v12_section(bot)
+    out["v13"] = v13_section(bot)
     rugs = []
     for k, c in cand_first.items():
         f = fwd(paths.get(k), c["ts"], c["price"])

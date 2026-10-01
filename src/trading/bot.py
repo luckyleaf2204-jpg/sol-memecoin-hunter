@@ -37,6 +37,7 @@ FAST_SCORE_MARGIN, FAST_CONF_MARGIN = 0.05, 0.10   # fast getAsset lane: "genuin
 QUOTE_RETRY_WINDOW_S = 60.0     # transient Jupiter failures (429 / timeout / 5xx) are retried this long
 NO_ROUTE_BLOCK_S = 120.0        # after a confirmed "no route": no re-quote of that CA for this long
 MAX_ENTRIES_PER_TICK = 2
+TRUTH_QUOTES_PER_MIN = 24       # V1.3 truth SELL quotes: own budget, below Jupiter's 50/min (BUY quotes first)
 
 
 class PaperBot:
@@ -80,7 +81,9 @@ class PaperBot:
         self.provenance: dict[str, dict] = {}  # V1.2: price provenance per paper trade (entry obs, marks, exits)
         self.quote_obs_log: list[dict] = []     # every BUY quote: market print vs Jupiter implied price
         self.market_trail: dict[str, deque] = {}   # market prints right after a quote (validation of discrepancies)
-        self.cs_shadow: dict[str, object] = {}  # EXIT_MODEL_COMMON_SOURCE trackers (Jupiter sell-quote marks)
+        self.cs_shadow: dict[str, object] = {}  # V1.3 TRUTH trackers (trading.truth_price.TruthTracker), per trade
+        self.truth_quotes: deque = deque(maxlen=200)   # timestamps of truth SELL quotes (own budget)
+        self.truth_skipped_budget = 0
         self._last_cs = 0.0
         self._mf_sticky: dict[str, float] = {}
         self._last_onchain = 0.0
@@ -637,7 +640,7 @@ class PaperBot:
         return market_obs(st, now).as_dict()
 
     def _provenance_open(self, st, it: dict, qobs: dict, m_at_quote: dict, ex, fill: dict, now: float) -> None:
-        from trading.price_provenance import CommonSourceExit, pct
+        from trading.price_provenance import pct
         p = self.book.positions.get(st.mint)
         if p is None:
             return
@@ -657,13 +660,17 @@ class PaperBot:
             if qobs.get("ts") else None, "quote_to_fill_ms": ex.latency_ms,
             "marks": [], "jupiter_marks": [], "exit": None, "tokens": p.initial_tokens,
             "pair_at_entry": m_at_quote.get("pair"), "route_pool": qobs.get("pair")}
+        from trading.truth_price import TruthTracker
         c = self.cfg
-        cs = CommonSourceExit(ex.fill_price, now, c.stop_loss_pct, c.tp1_pct, c.tp1_sell_frac, c.tp2_pct,
-                              c.trailing_pct, c.max_hold_min * 60)
-        cs.mint, cs.tokens, cs.pending_mirror, cs.last_quote = st.mint, p.initial_tokens, None, 0.0
+        m = st.market
+        cs = TruthTracker(f"{p.id}:{st.mint}", st.mint, st.info.symbol, it.get("lifecycle"), ex.fill_price, now,
+                          p.initial_tokens, c.stop_loss_pct, c.tp1_pct, c.tp1_sell_frac, c.tp2_pct, c.trailing_pct,
+                          c.max_hold_min * 60, pair=(m.pair_address or "") if m else "", dex=(m.dex_id or "") if m else "",
+                          entry_quote_price=qobs.get("price"), execution_impact_pct=ex.price_impact_pct,
+                          latency_model_pct=ex.slippage_pct)
         self.cs_shadow[st.mint] = cs
         if len(self.cs_shadow) > 50:
-            for k in list(self.cs_shadow)[:10]:
+            for k in [k for k, t in self.cs_shadow.items() if not t.due(time.time())][:10]:
                 self.cs_shadow.pop(k, None)
 
     def _provenance_tick(self, states: dict, now: float) -> None:
@@ -685,39 +692,143 @@ class PaperBot:
                 trail.append(o)
 
     async def common_source_round(self, now: float | None = None) -> int:
-        """Jupiter SELL-quote marks for EXIT_MODEL_COMMON_SOURCE (shadow). BUY quotes have priority: skipped while
-        BUY intents are pending. Each tracker runs until its own exit or 30 min."""
+        """V1.3 TRUTH PRICE round (shadow): Jupiter SELL quote for each tracked trade's OWN position size, 5 s for the
+        first minute then 15 s, up to 30 min. BUY quotes have priority (skipped while BUY intents are pending) and
+        the round has its own budget (TRUTH_QUOTES_PER_MIN). Nothing here is read by entries, exits or the book."""
         from trading.jupiter import WSOL
         from trading.price_provenance import sell_quote_obs
+        from trading.truth_price import compare_sources, curve_spot, snapshot_from_quote
         now = now or time.time()
         if self.jupiter is None or self.intents or not hasattr(self.jupiter, "quote_result"):
             return 0
         n = 0
-        for mint, cs in list(self.cs_shadow.items()):
-            if cs.closed_at is not None or now - cs.opened_at > 1800 or now - cs.last_quote < 15:
+        states = {x.mint: x for x in (self.engine.published or [])}
+        for mint, tr in list(self.cs_shadow.items()):
+            if not tr.due(now):
                 continue
-            st = next((s for s in (self.engine.published or []) if s.mint == mint), None)
+            while self.truth_quotes and now - self.truth_quotes[0] > 60:
+                self.truth_quotes.popleft()
+            if len(self.truth_quotes) >= TRUTH_QUOTES_PER_MIN:
+                self.truth_skipped_budget += 1
+                break
+            st = states.get(mint)
             dec = (st.info.decimals if st else None) or 6
-            t_req = time.time()
-            r = await self.jupiter.quote_result(mint, WSOL, int(cs.tokens * 10 ** dec), int(self.cfg.max_slippage_pct * 100))
-            t_resp = time.time()
-            cs.last_quote = now
-            n += 1
-            if not r.ok:
+            pos = self.book.positions.get(mint)
+            # the EXACT size held: production's tokens while it holds, else the truth shadow's own remaining size
+            size = pos.tokens if pos is not None and pos.tokens > 0 else tr.size_now()
+            if size <= 0:
+                tr.last_quote = now
                 continue
-            o = sell_quote_obs(r.quote, cs.tokens, self._sol(), mint, t_req, t_resp).as_dict()
+            t_req = time.time()
+            r = await self.jupiter.quote_result(mint, WSOL, int(size * 10 ** dec), int(self.cfg.max_slippage_pct * 100))
+            t_resp = time.time()
+            self.truth_quotes.append(now)
+            tr.last_quote = now
+            n += 1
+            snap = snapshot_from_quote(r, mint=mint, tokens=size, sol_price=self._sol(), t_req=t_req, t_resp=t_resp)
+            snap.timestamp = max(snap.timestamp, now)        # bot clock (tests drive `now`)
+            rec = self.decisions.get(mint) or {}
+            snap.lifecycle = rec.get("lifecycle_name") or tr.lifecycle
+            if st is not None and st.market is not None:
+                m = st.market
+                snap.pair_address, snap.pair_identity = m.pair_address or "", f"{m.dex_id or '?'}:{m.pair_address or ''}"
+                conflict = (m.is_curve and st.info.complete is True) or (not m.is_curve and st.info.complete is False)
+                snap.migration_state = "MIGRATING" if conflict else ("CURVE" if m.is_curve else "AMM")
+                if m.price_usd:
+                    snap.ds_price = m.price_usd
+                    snap.ds_age_s = round(now - m.updated_at, 1) if m.updated_at else None
+            if st is not None:
+                snap.curve_price, snap.curve_status, _ = curve_spot(st.info, self._sol(), now)
+            if pos is not None and pos.entry_price and pos.last_price:
+                snap.old_pnl_pct = round(100 * (pos.last_price / pos.entry_price - 1), 3)
+            elif tr.old_exit:
+                snap.old_pnl_pct = tr.old_exit.get("pnl_pct")
+            compare_sources(snap)
+            before = len(tr.snapshots), tr.rejected
+            event = tr.add(snap)
+            if tr.rejected == before[1]:
+                self._rec("truth_snapshot", tr.snapshots[-1])
+            if event is not None:
+                self._rec("truth_epoch", event)
             pv = self.provenance.get(mint)
             if pv is not None:
-                pv["jupiter_marks"].append(o)
-                del pv["jupiter_marks"][:-200]
-            if cs.pending_mirror is not None:
-                cs.force_close(o["price"], cs.pending_mirror[0], "mirror:" + cs.pending_mirror[1])
-            else:
-                cs.on_price(o["price"], now)
-            if pv is not None:
-                pv["common_source"] = cs.summary()
+                if r.ok:
+                    pv["jupiter_marks"].append(sell_quote_obs(r.quote, size, self._sol(), mint, t_req, t_resp).as_dict())
+                    del pv["jupiter_marks"][:-200]
+                pv["common_source"] = tr.summary(now)
                 self._rec("price_provenance", mint, pv)
+            self._truth_trade_rec(tr, now)
         return n
+
+    def _truth_trade_rec(self, tr, now: float) -> None:
+        """trade_price_truth (+ truth_exit_shadow once production closed). DS-only P&L = the production rules on
+        post-entry DexScreener marks from the DexScreener entry price (no Jupiter at all)."""
+        from trading.price_provenance import CommonSourceExit
+        pv = self.provenance.get(tr.mint) or {}
+        sm = tr.summary(now)
+        c = self.cfg
+        pnl_ds = None
+        dm = (pv.get("quote_market") or {}).get("price")
+        if dm:
+            mc = CommonSourceExit(dm, tr.entry_ts, c.stop_loss_pct, c.tp1_pct, c.tp1_sell_frac, c.tp2_pct,
+                                  c.trailing_pct, c.max_hold_min * 60)
+            for mk in pv.get("marks") or []:
+                if mk.get("price") and mk.get("post_entry"):
+                    mc.on_price(mk["price"], mk["ts"])
+            ex = pv.get("exit") or {}
+            if mc.closed_at is None and (ex.get("exit_market") or {}).get("price"):
+                mc.force_close(ex["exit_market"]["price"], ex["ts"], "mirror:" + (ex.get("reason") or "open"))
+            pnl_ds = mc.summary()["pnl_pct"]
+        path = (pv.get("exit") or {}).get("path") or {}
+        imp, lat = tr.execution_impact_pct, tr.latency_model_pct
+        row = {"trade_id": tr.trade_id, "token_ca": tr.mint, "symbol": tr.symbol, "entry_ts": tr.entry_ts,
+               "lifecycle": tr.lifecycle, "pair_address": tr.pair, "entry_fill_price": tr.entry_fill,
+               "jupiter_buy_quote_price": tr.entry_quote_price, "execution_impact_pct": imp,
+               "latency_model_pct": lat,
+               "total_simulated_entry_cost_pct": None if imp is None or lat is None
+               else round(100 * ((1 + imp / 100) * (1 + lat / 100) - 1), 4),
+               "pnl_ds": pnl_ds, "pnl_truth": sm["pnl_pct"], "pnl_common_source": sm["pnl_common_source"],
+               "old_pnl": (tr.old_exit or {}).get("pnl_pct"), "mfe_truth": sm["mfe_pct"], "mae_truth": sm["mae_pct"],
+               "time_to_mfe_s": sm["time_to_mfe_s"], "time_to_mae_s": sm["time_to_mae_s"],
+               "mfe_ds": path.get("mfe_pct"), "mae_ds": path.get("mae_pct"),
+               "truth_coverage_pct": sm["coverage_valid_pct"], "label": sm["label"], "data": sm}
+        tr.trade_row = row
+        self._rec("truth_trade", row)
+        if tr.old_exit:
+            self._rec("truth_exit", {"trade_id": tr.trade_id, "token_ca": tr.mint, "timestamp": tr.old_exit["ts"],
+                                     "exit_reason_old": sm["exit_reason_old"], "exit_reason_truth": sm["exit_reason_truth"],
+                                     "exit_reason_old_raw": tr.old_exit["reason"], "exit_reason_truth_raw": sm["exit_reason"],
+                                     "old_price": tr.old_exit["price"], "truth_price": sm["truth_price"],
+                                     "old_pnl": tr.old_exit["pnl_pct"], "truth_pnl": sm["pnl_pct"],
+                                     "pnl_common_source": sm["pnl_common_source"],
+                                     "old_fast_sl_class": sm["old_fast_sl_class"]})
+
+    def truth_panel(self, now: float | None = None) -> dict:
+        """Dashboard PRICE TRUTH: no executable quote (or older than 30 s) -> TRUTH UNKNOWN, never a substitute."""
+        from trading.truth_price import is_fresh
+        now = now or time.time()
+        opened = []
+        for p in self.book.positions.values():
+            tr = self.cs_shadow.get(p.mint)
+            lv = tr.summary(now)["last_valid"] if tr is not None else None
+            fresh = lv is not None and is_fresh(lv, now)
+            opened.append({"symbol": p.symbol, "mint": p.mint, "entry": p.entry_price, "ds_mark": p.last_price,
+                           "ds_mark_post_entry": p.last_price_ts is not None and p.last_price_ts > p.opened_at,
+                           "jup_sell": lv["price_usd"] if fresh else None,
+                           "old_pnl_pct": round(p.pnl_pct(), 2) if p.pnl_pct() is not None else None,
+                           "truth_pnl_pct": lv["truth_pnl_pct"] if fresh else None,
+                           "truth": "VALID" if fresh else "TRUTH UNKNOWN",
+                           "truth_age_s": round(now - lv["timestamp"], 1) if lv else None})
+        recent = []
+        for tr in self.cs_shadow.values():
+            for x in tr.snapshots[-3:]:
+                recent.append({"symbol": tr.symbol, "ts": x["timestamp"], "ds": x["ds_price"], "jup_sell": x["price_usd"],
+                               "entry": tr.entry_fill, "discrepancy_pct": x["ds_vs_truth_pct"], "ds_age_s": x["ds_age_s"],
+                               "status": x["source_status"], "class": x["ds_class"], "confidence": x["confidence"]})
+        recent.sort(key=lambda r: -r["ts"])
+        return {"open": opened, "recent": recent[:15], "label": "TRUTH_PNL_CANDIDATE (shadow, not validated)",
+                "quotes_last_min": sum(1 for t in self.truth_quotes if now - t <= 60),
+                "skipped_budget": self.truth_skipped_budget}
 
     def _shadow(self, st, rec: dict, su, ld, h, now: float) -> None:
         """V1.1 SHADOW research on the decision record: money flow, independence, cluster risk, exit liquidity,
@@ -930,9 +1041,10 @@ class PaperBot:
                           "realized_pnl_pct": round(100 * (p.realized_usd - p.cost_usd) / p.cost_usd, 3) if p.cost_usd else None,
                           "path": p.path_log()}
             cs = self.cs_shadow.get(p.mint)
-            if cs is not None and reason not in ("stop_loss", "break_even_stop", "take_profit_1", "take_profit_2",
-                                                 "trailing_stop", "max_hold"):
-                cs.pending_mirror = (now, reason)          # valued on the next Jupiter sell quote
+            if cs is not None:                         # non-price exits are mirrored on the next executable quote
+                cs.on_production_exit(reason, ex.fill_price, pv["exit"]["realized_pnl_pct"], now,
+                                      pv["exit"]["exit_fill_source"], pv["exit"]["exit_market"])
+                self._truth_trade_rec(cs, now)
             self._rec("price_provenance", p.mint, pv)
         if ex.status == "FILLED":
             if reason == "take_profit_1":
@@ -1179,7 +1291,7 @@ class PaperBot:
                 if self.recorder is not None and time.time() - self._last_followup >= 30:
                     self._last_followup = time.time()
                     await self.recorder.run_followups()
-                if self.cs_shadow and time.time() - self._last_cs >= 5:
+                if self.cs_shadow and time.time() - self._last_cs >= 2.5:
                     self._last_cs = time.time()
                     try:
                         await self.common_source_round(time.time())

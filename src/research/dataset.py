@@ -17,6 +17,11 @@ Tables (SQLite, its own file, default data/research.db):
                     simulated_pnl_if_forced (simplified: entry + estimated cost, first of TP +30 % / SL -15 % /
                     1 h time stop, exit cost) — measures missed edge separately from execution.
 
+V1.3 TRUTH PRICE (shadow, trading.truth_price): truth_price_snapshots (every Jupiter SELL quote for a paper position's
+own size + the DexScreener / curve prices observed at the same moment), price_source_comparison, migration_price_epochs
+(pair changes: new price epoch), trade_price_truth (entry cost decomposition, pnl_ds / pnl_truth / pnl_common_source,
+MFE / MAE per source; label TRUTH_PNL_CANDIDATE), truth_exit_shadow (exit_reason_old vs exit_reason_truth).
+
 D-columns (-1 unknown, 0 fail, 1 pass) — the Early Signal design rules as observable per snapshot:
   d1 direction OK (no volume/txn spike during a sell-off)   d2 buy-pressure signal fired
   d3 whale holder increase >= +10                            d4 not suppressed by risk (top10 > 35 %, rug flag, Risk > 60)
@@ -87,6 +92,28 @@ CREATE TABLE IF NOT EXISTS latency_samples (id INTEGER PRIMARY KEY AUTOINCREMENT
 CREATE TABLE IF NOT EXISTS onchain_research (ca TEXT PRIMARY KEY, fetched_ts REAL, data TEXT);
 CREATE TABLE IF NOT EXISTS price_provenance (ca TEXT NOT NULL, entry_ts REAL NOT NULL, data TEXT,
   PRIMARY KEY (ca, entry_ts));
+CREATE TABLE IF NOT EXISTS truth_price_snapshots (id INTEGER PRIMARY KEY AUTOINCREMENT, timestamp REAL, token_ca TEXT,
+  trade_id TEXT, lifecycle TEXT, pair_address TEXT, pair_identity TEXT, migration_state TEXT, epoch INTEGER,
+  position_size REAL, entry_fill_price REAL, ds_price REAL, ds_age REAL, jupiter_sell_price REAL, sol_out REAL,
+  jupiter_price_impact REAL, jupiter_route TEXT, route_pool TEXT, context_slot INTEGER, latency_ms REAL,
+  curve_price REAL, curve_status TEXT, truth_status TEXT, truth_confidence INTEGER, truth_pnl REAL, old_pnl REAL,
+  price_discrepancy REAL, ds_class TEXT, reason TEXT);
+CREATE INDEX IF NOT EXISTS ix_truth_trade ON truth_price_snapshots(trade_id, timestamp);
+CREATE TABLE IF NOT EXISTS price_source_comparison (id INTEGER PRIMARY KEY AUTOINCREMENT, timestamp REAL,
+  token_ca TEXT, trade_id TEXT, lifecycle TEXT, migration_state TEXT, ds_price REAL, ds_age REAL,
+  jupiter_sell_price REAL, jupiter_mid_price REAL, curve_price REAL, ds_vs_truth_pct REAL, curve_vs_truth_pct REAL,
+  ds_vs_curve_pct REAL, ds_class TEXT, curve_status TEXT, truth_status TEXT);
+CREATE TABLE IF NOT EXISTS migration_price_epochs (id INTEGER PRIMARY KEY AUTOINCREMENT, timestamp REAL,
+  token_ca TEXT, trade_id TEXT, epoch INTEGER, old_pair TEXT, new_pair TEXT, old_dex TEXT, new_dex TEXT,
+  price_before REAL, price_after REAL, jump_pct REAL, flag TEXT);
+CREATE TABLE IF NOT EXISTS trade_price_truth (trade_id TEXT PRIMARY KEY, token_ca TEXT, symbol TEXT, entry_ts REAL,
+  lifecycle TEXT, pair_address TEXT, entry_fill_price REAL, jupiter_buy_quote_price REAL, execution_impact_pct REAL,
+  latency_model_pct REAL, total_simulated_entry_cost_pct REAL, pnl_ds REAL, pnl_truth REAL, pnl_common_source REAL,
+  old_pnl REAL, mfe_truth REAL, mae_truth REAL, time_to_mfe_s REAL, time_to_mae_s REAL, mfe_ds REAL, mae_ds REAL,
+  truth_coverage_pct REAL, label TEXT, data TEXT);
+CREATE TABLE IF NOT EXISTS truth_exit_shadow (trade_id TEXT PRIMARY KEY, token_ca TEXT, timestamp REAL,
+  exit_reason_old TEXT, exit_reason_truth TEXT, exit_reason_old_raw TEXT, exit_reason_truth_raw TEXT, old_price REAL,
+  truth_price REAL, old_pnl REAL, truth_pnl REAL, pnl_common_source REAL, old_fast_sl_class TEXT);
 """
 
 AB_SNAP_COLS = {"engine": "TEXT", "old_decision": "TEXT", "new_decision": "TEXT", "blocked_by_old": "TEXT",
@@ -484,6 +511,63 @@ class DatasetRecorder:
     def price_provenance(self, ca: str, pv: dict) -> None:
         self.db.execute("INSERT OR REPLACE INTO price_provenance VALUES (?,?,?)",
                         (ca, pv.get("entry_ts"), json.dumps(pv, default=str)))
+        self.db.commit()
+
+    # ------------------------------------------------------------------ V1.3 truth price layer (shadow)
+    def truth_snapshot(self, x: dict) -> None:
+        mid = None
+        if x.get("price_usd") is not None:
+            imp = (x.get("price_impact_pct") or 0) / 100
+            mid = x["price_usd"] / (1 - imp) if imp < 1 else None
+        self.db.execute(
+            "INSERT INTO truth_price_snapshots (timestamp, token_ca, trade_id, lifecycle, pair_address, pair_identity, "
+            "migration_state, epoch, position_size, entry_fill_price, ds_price, ds_age, jupiter_sell_price, sol_out, "
+            "jupiter_price_impact, jupiter_route, route_pool, context_slot, latency_ms, curve_price, curve_status, "
+            "truth_status, truth_confidence, truth_pnl, old_pnl, price_discrepancy, ds_class, reason) "
+            "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+            (x["timestamp"], x["token_ca"], x.get("trade_id"), x.get("lifecycle"), x.get("pair_address"),
+             x.get("pair_identity"), x.get("migration_state"), x.get("epoch"), x.get("position_size"),
+             x.get("entry_fill_price"), x.get("ds_price"), x.get("ds_age_s"), x.get("price_usd"), x.get("sol_out"),
+             x.get("price_impact_pct"), x.get("route"), x.get("route_pool"), x.get("context_slot"), x.get("latency_ms"),
+             x.get("curve_price"), x.get("curve_status"), x.get("source_status"), x.get("confidence"),
+             x.get("truth_pnl_pct"), x.get("old_pnl_pct"), x.get("ds_vs_truth_pct"), x.get("ds_class"), x.get("reason")))
+        self.db.execute(
+            "INSERT INTO price_source_comparison (timestamp, token_ca, trade_id, lifecycle, migration_state, ds_price, "
+            "ds_age, jupiter_sell_price, jupiter_mid_price, curve_price, ds_vs_truth_pct, curve_vs_truth_pct, "
+            "ds_vs_curve_pct, ds_class, curve_status, truth_status) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+            (x["timestamp"], x["token_ca"], x.get("trade_id"), x.get("lifecycle"), x.get("migration_state"),
+             x.get("ds_price"), x.get("ds_age_s"), x.get("price_usd"), mid, x.get("curve_price"),
+             x.get("ds_vs_truth_pct"), x.get("curve_vs_truth_pct"), x.get("ds_vs_curve_pct"), x.get("ds_class"),
+             x.get("curve_status"), x.get("source_status")))
+        self.db.commit()
+
+    def truth_epoch(self, e: dict) -> None:
+        self.db.execute("INSERT INTO migration_price_epochs (timestamp, token_ca, trade_id, epoch, old_pair, new_pair, "
+                        "old_dex, new_dex, price_before, price_after, jump_pct, flag) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)",
+                        (e["timestamp"], e["token_ca"], e.get("trade_id"), e.get("epoch"), e.get("old_pair"),
+                         e.get("new_pair"), e.get("old_dex"), e.get("new_dex"), e.get("price_before"),
+                         e.get("price_after"), e.get("jump_pct"), e.get("flag")))
+        self.db.commit()
+
+    TRUTH_TRADE_COLS = ("trade_id", "token_ca", "symbol", "entry_ts", "lifecycle", "pair_address", "entry_fill_price",
+                        "jupiter_buy_quote_price", "execution_impact_pct", "latency_model_pct",
+                        "total_simulated_entry_cost_pct", "pnl_ds", "pnl_truth", "pnl_common_source", "old_pnl",
+                        "mfe_truth", "mae_truth", "time_to_mfe_s", "time_to_mae_s", "mfe_ds", "mae_ds",
+                        "truth_coverage_pct", "label")
+    TRUTH_EXIT_COLS = ("trade_id", "token_ca", "timestamp", "exit_reason_old", "exit_reason_truth",
+                       "exit_reason_old_raw", "exit_reason_truth_raw", "old_price", "truth_price", "old_pnl",
+                       "truth_pnl", "pnl_common_source", "old_fast_sl_class")
+
+    def truth_trade(self, r: dict) -> None:
+        cols = self.TRUTH_TRADE_COLS + ("data",)
+        self.db.execute(f"INSERT OR REPLACE INTO trade_price_truth ({', '.join(cols)}) VALUES ({','.join('?' * len(cols))})",
+                        (*[r.get(c) for c in self.TRUTH_TRADE_COLS], json.dumps(r.get("data"), default=str)))
+        self.db.commit()
+
+    def truth_exit(self, r: dict) -> None:
+        cols = self.TRUTH_EXIT_COLS
+        self.db.execute(f"INSERT OR REPLACE INTO truth_exit_shadow ({', '.join(cols)}) VALUES ({','.join('?' * len(cols))})",
+                        tuple(r.get(c) for c in cols))
         self.db.commit()
 
     def onchain(self, rec: dict) -> None:
