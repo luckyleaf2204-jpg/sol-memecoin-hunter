@@ -16,9 +16,13 @@ SCORE   component scores 0-100 reuse the scanner's sub-scores (None = not availa
         WATCH  "waiting for confirmation": no real failure, but data still missing (UNKNOWN / PENDING) or a trade
                threshold not reached yet; `waiting` lists exactly what is missing (Early Signal, holder data, VET,
                Risk, identity verification, market data, opportunity / confidence)
+        PENDING_IDENTITY  identity not verified yet and no conflict: classified WATCH / REJECT only once the
+               identity is known; never rejected for it, never bought
+        Early Signal FALSE rejects only when confirmed on all 7 signal groups; FALSE with groups still missing
+               waits (WATCH), because more data may change it. UNKNOWN always waits.
         REJECT only for a REAL reason: identity CONFLICT, a check that really FAILED (incl. Early Signal FALSE,
                liquidity, rug / shock / Risk > 60, dev dump, authorities, Token-2022, migration, volume / buy
-               pressure, wrong data), or Opportunity AND Momentum known and both below the watch level.
+               pressure, wrong data), or Opportunity AND Momentum both KNOWN and both below the watch level.
                UNKNOWN / PENDING data is never a reason to reject.
 SIZE    risk-based: equity × risk_per_trade / stop distance, then capped by max position %, % of pool liquidity,
         free cash and exposure room; scaled by Opportunity, Confidence and short-term volatility.
@@ -30,7 +34,7 @@ import time
 
 from core.models import INVALID, VALID, TokenState
 from trading.config import TradingConfig
-from trading.models import FAIL, PASS, REJECT, TRADE, UNKNOWN, WATCH, Check, Score, Size, Vet
+from trading.models import FAIL, PASS, PENDING_IDENTITY, REJECT, TRADE, UNKNOWN, WATCH, Check, Score, Size, Vet
 
 NA = "N/A"
 MINT_RE = re.compile(r"^[1-9A-HJ-NP-Za-km-z]{32,44}$")
@@ -48,6 +52,9 @@ WAIT_GROUP = {"early_signal": "early_signal", "holders": "holders", "top_holders
               "authorities": "vet_onchain", "token_2022": "vet_onchain", "ca": "identity", "identity": "identity",
               "liquidity": "market_data", "volume_buy_pressure": "market_data", "data_quality": "market_data",
               "rug": "risk", "migration": "market_data"}
+# VET FAILs that are "not yet" rather than "wrong": too little volume / holders, concentrated early supply, a pair change
+# in the last 5 min. They still fail VET (so they can never TRADE) but the token is WATCHed, not REJECTed.
+SOFT_FAIL = {"volume_buy_pressure", "holders", "top_holders", "migration"}
 EARLY_WATCH_MIN_RANK = 60      # failing only these -> WATCH, not REJECT
 
 
@@ -70,7 +77,10 @@ def scan_reasons(st: TokenState) -> list[str]:
 
 
 def scan(states: list[TokenState]) -> list[tuple[TokenState, list[str]]]:
-    cands = [(st, r) for st in states if (r := scan_reasons(st))]
+    """EVERY tracked token is classified (WATCH / PENDING_IDENTITY / REJECT / TRADE) so none is lost for missing data.
+    This cannot create a new trade: TRADE needs Early Signal TRUE, which is itself a scan reason, so tokens without a
+    reason (sorted after all others, same key as before) can never be TRADE."""
+    cands = [(st, scan_reasons(st)) for st in states]
     cands.sort(key=lambda x: (-len(x[1]), -((x[0].score.total if x[0].score else 0))))
     return cands
 
@@ -201,7 +211,7 @@ def score(st: TokenState, v: Vet, cfg: TradingConfig) -> Score:
         waiting += ["confidence"] if conf < cfg.trade_min_confidence else []
     else:
         decision, waiting, rejected = _classify_untradable(st, v, opp, comp["momentum"], cfg)
-    if decision == WATCH and waiting:
+    if decision in (WATCH, PENDING_IDENTITY) and waiting:
         why = ["waiting: " + " + ".join(waiting)] + why
     elif decision == REJECT and rejected:
         why = ["reject: " + ", ".join(rejected)] + why
@@ -209,39 +219,91 @@ def score(st: TokenState, v: Vet, cfg: TradingConfig) -> Score:
 
 
 def _classify_untradable(st: TokenState, v: Vet, opp: int | None, mom: int | None, cfg: TradingConfig):
-    """WATCH vs REJECT for a token that cannot trade (yet). Never changes what TRADE requires."""
+    """WATCH / PENDING_IDENTITY / REJECT for a token that cannot trade (yet). Never changes what TRADE requires."""
     from scoring.groups import _missing_only
     rejected, waiting = [], []
+    pending_identity = False
     if st.identity.status == "CONFLICT":
         rejected.append("identity_conflict")
     elif st.identity.status != "VERIFIED":
-        waiting.append("identity")                       # no canonical source yet: data missing, not a conflict
+        pending_identity = True                          # no canonical source yet: data missing, not a conflict
+        waiting.append("identity")
     for c in v.checks:
         if c.result in (PASS, NA):
             continue
         if c.result == FAIL:
             if c.key == "identity":
                 continue                                 # handled above (CONFLICT rejects, UNVERIFIED waits)
+            if c.key == "early_signal" and st.early is not None and st.early.groups_computable < 7:
+                waiting.append("early_signal")           # FALSE with groups still missing: more data may change it
+                continue
             if c.key == "data_quality":
-                if st.dq_status == INVALID and not _missing_only(st):
+                if st.dq_status == INVALID and not _missing_only(st) and not _no_activity_only(st):
                     rejected.append("data_invalid")      # wrong data
                 else:
                     waiting.append("market_data")        # stale / not yet available
+                continue
+            if c.key in SOFT_FAIL:
+                waiting.append(WAIT_GROUP.get(c.key, "vet"))  # not yet enough volume/holders: may still develop
                 continue
             rejected.append(c.key)                       # a real failure
         else:                                            # UNKNOWN = not enough data yet
             waiting.append(WAIT_GROUP.get(c.key, "vet"))
     waiting = list(dict.fromkeys(waiting))
+    if pending_identity:
+        return PENDING_IDENTITY, waiting, []           # WATCH or REJECT is decided once the identity is known
     if rejected:
         return REJECT, waiting, rejected
-    attention = (opp is not None and opp >= cfg.watch_min_opportunity) or (mom is not None and mom >= WATCH_MIN_MOMENTUM)
-    if attention or (opp is None and mom is None):
-        if opp is None and mom is None:
-            waiting.append("scores")
-        elif opp is None or opp < cfg.trade_min_opportunity:
-            waiting.append("opportunity")
-        return WATCH, waiting, []
-    return REJECT, waiting, ["low_opportunity"]
+    opp_low = opp is not None and opp < cfg.watch_min_opportunity
+    mom_low = mom is not None and mom < WATCH_MIN_MOMENTUM
+    if opp_low and mom_low:                              # both KNOWN and both weak: a real reason
+        return REJECT, waiting, ["low_opportunity"]
+    if opp is None or mom is None:
+        waiting.append("scores")
+    if opp is not None and opp < cfg.trade_min_opportunity:
+        waiting.append("opportunity")
+    return WATCH, list(dict.fromkeys(waiting)), []
+
+
+def _no_activity_only(st: TokenState) -> bool:
+    """INVALID only because data is missing or 5m/1h volume is 0 (no trades yet): not yet, not wrong."""
+    from scoring.groups import MISSING_KEYS, RAW_MISSING_KEYS
+    crit = [i for i in (st.quality.issues if st.quality else []) if i.severity == "critical"]
+    return bool(crit) and all(
+        i.key in MISSING_KEYS or (i.key in RAW_MISSING_KEYS and i.params.get("raw") in (None, "None"))
+        or (i.key == "volume_bad" and i.params.get("raw") in ("0", "0.0", 0, 0.0)) for i in crit)
+
+
+def trade_blockers(st: TokenState, v: Vet, sc: Score, cfg: TradingConfig) -> list[str]:
+    """READ-ONLY diagnostics: every gate that currently stops this token from being a Trade Candidate, in gate
+    order (identity, early, risk, liquidity, VET, opportunity, confidence). Decides nothing."""
+    out = []
+    ident = st.identity.status
+    if ident != "VERIFIED":
+        out.append("identity_conflict" if ident == "CONFLICT" else "identity_pending")
+    es = st.early
+    if es is None or es.strength is None:
+        out.append("early_unknown")
+    elif es.is_early is not True:
+        out.append("early_false" if es.groups_computable >= 7 else "early_false_partial")
+    checks = {c.key: c for c in v.checks}
+    rug = checks.get("rug")
+    if rug is not None and rug.result != PASS:
+        out.append("risk" if rug.result == FAIL else "risk_unknown")
+    liq = checks.get("liquidity")
+    if liq is not None and liq.result != PASS:
+        out.append("liquidity" if liq.result == FAIL else "liquidity_unknown")
+    for c in v.checks:
+        if c.key in ("identity", "early_signal", "rug", "liquidity") or c.result in (PASS, NA):
+            continue
+        out.append(("vet:" if c.result == FAIL else "vet_unknown:") + c.key)
+    if sc.opportunity is None:
+        out.append("opportunity_unknown")
+    elif sc.opportunity < cfg.trade_min_opportunity:
+        out.append("opportunity")
+    if sc.confidence < cfg.trade_min_confidence:
+        out.append("confidence")
+    return out
 
 
 # ---------------------------------------------------------------- SIZE

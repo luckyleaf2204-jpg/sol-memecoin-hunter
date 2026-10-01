@@ -71,6 +71,8 @@ T = {
     "web.pre.need.holder_growth": ("cần 2 lần đọc holder hợp lệ từ Helius", "needs 2 valid Helius holder snapshots"),
     "web.nav.bot": ("Bot", "Bot"),
     "web.wait.title": ("ĐANG CHỜ XÁC NHẬN", "WAITING FOR CONFIRMATION"), "web.wait.for": ("Chờ", "Waiting for"),
+    "web.wait.pending_id": ("PENDING IDENTITY — chờ xác minh danh tính", "PENDING IDENTITY — waiting for identity verification"),
+    "web.bot.most_blocking": ("cổng chặn nhiều nhất", "most blocking gate"),
     "web.wait.badge": ("WATCH", "WATCH"),
     "web.wait.identity": ("Identity verification", "Identity verification"), "web.wait.early_signal": ("Early Signal", "Early Signal"),
     "web.wait.holders": ("Holder data", "Holder data"), "web.wait.vet_dev": ("VET dev", "VET dev"),

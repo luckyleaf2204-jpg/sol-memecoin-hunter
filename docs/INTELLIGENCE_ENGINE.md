@@ -364,6 +364,19 @@ Lớp riêng, **không** thay đổi Early Signal / D1–D8. Early Signal cần 
 | 06 BOOK | `book.py` | NET P&L = gross − phí − phí mạng (gồm lệnh lỗi) − slippage. Có win rate, TB thắng/thua, profit factor, max drawdown |
 | EXIT | `exits.py` | identity conflict, holder bất thường, risk tăng, liquidity sụp, cá voi xả, SL, TP1 (bán một phần + dời stop về hoà vốn + bật trailing), TP2, trailing, momentum xấu, volume sụp, giữ quá lâu. Không có giá đã validate thì không bán theo phỏng đoán |
 
+### Phân loại quyết định (TRADE / WATCH / PENDING IDENTITY / REJECT)
+
+- **TRADE** (không đổi): VERIFIED + Early Signal TRUE + VET PASS mọi kiểm tra + Risk PASS + Opportunity ≥ 65 + Confidence ≥ 60.
+- **PENDING IDENTITY**: danh tính chưa xác minh, không có xung đột → không bao giờ REJECT, không bao giờ BUY.
+- **WATCH** ("Chờ: …"): không có FAIL thật, còn dữ liệu UNKNOWN; hoặc FAIL "chưa đủ" (`SOFT_FAIL`: volume/lực mua,
+  holders < 50, top10 tập trung, đổi pair < 5 phút); hoặc Early FALSE khi chưa đủ 7/7 nhóm; hoặc thiếu giá / volume 5m = 0
+  (chưa có giao dịch). Các FAIL này vẫn chặn TRADE vì VET chưa PASS.
+- **REJECT** chỉ khi có lý do thật: identity CONFLICT, rug / liquidity SHOCK / Risk > 60, thanh khoản nguy hiểm, dev bán,
+  mint/freeze authority, Token-2022 nguy hiểm, CA sai, dữ liệu sai (vd. MC < $1,000), Early FALSE 7/7, hoặc
+  Opportunity < 45 và Momentum < 70 (cả hai đã biết).
+- Chẩn đoán: `blocked_by` cho từng token, log `PIPELINE:` mỗi 60 s, `tools/blocking_report.py --minutes 10`.
+
+
 - **Chế độ:** chỉ có `PAPER`. `CONFIRM` / `AUTO` bị từ chối trong code (`ModeNotAllowed`) và trong API (HTTP 403). File cấu hình không thể bật AUTO.
 - **Khoá và ví:** không có private key, ví, hay code ký giao dịch (có test kiểm tra).
 - **Backtest:** `tools/backtest_bot.py` phát lại snapshot SQLite qua đúng `PaperBot.tick`. Các kiểm tra chỉ có lúc chạy live (identity, authority, Token-2022, dev) không được lưu trong snapshot, nên backtest dùng giả định và liệt kê rõ trong kết quả.

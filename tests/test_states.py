@@ -74,13 +74,14 @@ def test_each_unknown_alone_waits(make_unknown):
     st = complete(napoleon())
     make_unknown(st)
     sc = decide(st)
-    assert sc.decision == WATCH and not sc.rejected and sc.waiting
+    assert sc.decision in (WATCH, "PENDING_IDENTITY") and not sc.rejected and sc.waiting
+    assert (sc.decision == "PENDING_IDENTITY") == (st.identity.status != "VERIFIED")
 
 
 # ---------------------------------------------------------------- real reasons still REJECT
 @pytest.mark.parametrize("make_bad,reason", [
     (lambda st: (record_claim(st.identity, "pumpportal", "OTHER", ""), apply_identity(st)), "identity_conflict"),
-    (lambda st: setattr(st, "early", EarlySignal(40, False, False, 2, groups_computable=6)), "early_signal"),
+    (lambda st: setattr(st, "early", EarlySignal(40, False, False, 2, groups_computable=7)), "early_signal"),
     (lambda st: setattr(st.market, "liquidity_usd", 2_000), "liquidity"),
     (lambda st: setattr(st, "risk", RiskResult(75, "HIGH")), "rug"),
     (lambda st: setattr(st, "risk", RiskResult(20, "LOW", [RiskFactor("dev_dump", 10, "rug")])), "rug"),
@@ -183,3 +184,14 @@ def test_trade_gate_is_unchanged_on_random_states():
         if sc.decision == WATCH:
             assert not sc.rejected
     assert all(seen.values()), seen                              # every state was exercised
+
+
+
+def test_early_false_with_missing_groups_waits_and_confirmed_false_rejects():
+    st = complete(napoleon())
+    st.early = EarlySignal(40, False, False, 2, groups_computable=5)      # FALSE but 2 groups still missing
+    sc = decide(st)
+    assert sc.decision == WATCH and "early_signal" in sc.waiting and not sc.rejected
+    st.early = EarlySignal(40, False, False, 2, groups_computable=7)      # FALSE on complete data
+    sc = decide(st)
+    assert sc.decision == REJECT and "early_signal" in sc.rejected

@@ -57,6 +57,7 @@ class PaperBot:
         self.mode = PAPER                      # operating mode: PAPER | CONFIRM (AUTO needs a live executor)
         self._next_order = 1
         self._discovered: set[str] = set()
+        self._pipe_logged = 0.0
         self.last_buy_attempt: dict[str, float] = {}
 
     # ---------------------------------------------------------------- helpers
@@ -111,6 +112,7 @@ class PaperBot:
                   f"equity ${eq:,.2f} · {len(self.book.positions)} open · net {self.book.stats(now)['net_pnl']:+,.2f}", now=now)
         self.ticks += 1
         self.last_tick = now
+        self._log_pipeline(now)
         self.tick_ms = round((time.monotonic() - t0) * 1000, 1)
         self.ops.append((now, len(states) + len(self.book.positions)))
         self.persist()
@@ -149,12 +151,13 @@ class PaperBot:
         try:
             cands = D.scan(list(states.values()))
             for st, reasons in cands:
-                if st.mint not in self._discovered:
+                if reasons and st.mint not in self._discovered:
                     self._discovered.add(st.mint)
                     self.log("DISCOVER", "scan: " + ", ".join(reasons), st, now=now)
-            self._set("scan", RUN if cands else READY, f"{len(cands)} candidates from {len(states)} tokens · "
+            scanned = sum(1 for _, r in cands if r)
+            self._set("scan", RUN if scanned else READY, f"{scanned} with scan signals · {len(cands)} classified · "
                       "X Alpha / smart money: NOT AVAILABLE",
-                      items=[{"mint": s.mint, "symbol": s.info.symbol, "why": r} for s, r in cands[:30]], now=now)
+                      items=[{"mint": s.mint, "symbol": s.info.symbol, "why": r} for s, r in cands[:30] if r], now=now)
         except Exception as e:
             self._set("scan", ERROR, f"{type(e).__name__}: {e}", now=now)
             return
@@ -171,6 +174,7 @@ class PaperBot:
                        "ts": now}
                 prev = self.decisions.get(st.mint, {}).get("state")
                 rec["vet_passed"] = D.vet_passed(v)
+                rec["blocked_by"] = D.trade_blockers(st, v, sc, self.cfg)
                 rec["risk_allowed"], rec["risk_reasons"], rec["state"] = None, [], sc.decision
                 self.decisions[st.mint] = rec
                 vet_items.append(rec)
@@ -192,6 +196,8 @@ class PaperBot:
                                            feeds_ok=feeds_ok, feeds_reason=feeds_reason)
                 risk_items.append({"mint": st.mint, "symbol": st.info.symbol, "allowed": rd.allowed, "reasons": rd.reasons})
                 rec["risk_allowed"], rec["risk_reasons"], rec["size_usd"] = rd.allowed, rd.reasons, sz.usd
+                if not rd.allowed:
+                    rec["blocked_by"] = rec.get("blocked_by", []) + ["risk_engine: " + r for r in rd.reasons]
                 if not rd.allowed:
                     rec["state"] = "BLOCKED"
                     if prev != "BLOCKED":
@@ -392,6 +398,78 @@ class PaperBot:
             except asyncio.TimeoutError:
                 pass
 
+    def pipeline(self, now: float | None = None) -> dict:
+        """Decision-state counts over every fresh decision + real REJECT reasons by category."""
+        now = now or time.time()
+        states = {s.mint: s for s in (self.engine.published or [])}
+        cands = {st.mint for st, _, _ in self.trade_candidates(now)}
+        counts = {"WATCH": 0, "PENDING_IDENTITY": 0, "TRADE_CANDIDATE": 0, "REJECT": 0, "TRADE_BLOCKED": 0}
+        reasons: dict[str, int] = {}
+        for mint, rec in self.decisions.items():
+            st = states.get(mint)
+            if st is None or now - rec.get("ts", 0) > 30:
+                continue
+            d = rec.get("decision")
+            if mint in cands:
+                counts["TRADE_CANDIDATE"] += 1
+            elif d == TRADE:
+                counts["TRADE_BLOCKED"] += 1             # TRADE decision held back by Risk / Early / identity gate
+            elif d in counts:
+                counts[d] += 1
+            if d == "REJECT":
+                for r in rec.get("rejected") or ["other"]:
+                    for cat in REJECT_CATEGORY(r, st):
+                        reasons[cat] = reasons.get(cat, 0) + 1
+        out = dict(counts)
+        out["reject_reasons"] = dict(sorted(reasons.items(), key=lambda x: -x[1]))
+        out["summary"] = self.block_summary(now)
+        if hasattr(self.engine, "pipeline_counts"):
+            out |= self.engine.pipeline_counts(now)
+        return out
+
+    def block_summary(self, now: float | None = None) -> dict:
+        """Totals in the owner's format: REJECT by gate, UNKNOWN/PENDING, Trade Candidate, and the gate that blocks
+        the most tokens from TRADE (first blocker of each non-candidate)."""
+        now = now or time.time()
+        states = {s.mint: s for s in (self.engine.published or [])}
+        cands = {st.mint for st, _, _ in self.trade_candidates(now)}
+        rej = {"identity": 0, "risk": 0, "liquidity": 0, "early": 0, "vet": 0, "opportunity": 0, "confidence": 0}
+        pending, first, any_block = 0, {}, {}
+        gate = {"identity_conflict": "identity", "rug": "risk", "liquidity": "liquidity", "early_signal": "early",
+                "low_opportunity": "opportunity"}
+        for mint, rec in self.decisions.items():
+            st = states.get(mint)
+            if st is None or now - rec.get("ts", 0) > 30 or mint in cands:
+                continue
+            d = rec.get("decision")
+            if d == "REJECT":
+                for r in rec.get("rejected") or []:
+                    rej[gate.get(r, "vet")] += 1
+            elif d in ("WATCH", "PENDING_IDENTITY"):
+                pending += 1
+            blocks = rec.get("blocked_by") or []
+            if blocks:
+                b0 = blocks[0].split(":")[0]
+                first[b0] = first.get(b0, 0) + 1
+            for b in {x.split(":")[0] for x in blocks}:
+                any_block[b] = any_block.get(b, 0) + 1
+        top = max(first.items(), key=lambda x: x[1]) if first else None
+        return {"reject_by": rej, "unknown_pending": pending, "trade_candidates": len(cands),
+                "first_blocker": dict(sorted(first.items(), key=lambda x: -x[1])),
+                "blocked_by_any": dict(sorted(any_block.items(), key=lambda x: -x[1])),
+                "most_blocking": top[0] if top else None}
+
+    def _log_pipeline(self, now: float) -> None:
+        if now - self._pipe_logged < 60 or not hasattr(self.engine, "log"):
+            return
+        self._pipe_logged = now
+        p = self.pipeline(now)
+        top = ", ".join(f"{k} {v}" for k, v in list(p["reject_reasons"].items())[:6]) or "—"
+        self.engine.log(f"PIPELINE: discovery {p.get('discovery_per_min', '—')}/min · pre-early {p.get('pre_early_per_min', '—')}/min"
+                        f" · early-watch {p.get('early_watch_per_min', '—')}/min · WATCH {p['WATCH']} · PENDING-ID "
+                        f"{p['PENDING_IDENTITY']} · TRADE CANDIDATE {p['TRADE_CANDIDATE']} · REJECT {p['REJECT']} ({top})"
+                        f" · evicted {p.get('evicted', 0)} · pruned no-data {p.get('pruned_no_data', 0)}")
+
     def trade_candidates(self, now: float | None = None) -> list[tuple]:
         """🟢 TRADE CANDIDATE: Early Signal TRUE + identity VERIFIED + VET passed + Decision TRADE + Risk allowed
         (fresh decision of a token still published). An open position on the CA is shown as a candidate being held."""
@@ -417,6 +495,17 @@ class PaperBot:
             return 0.0
         span = self.ops[-1][0] - self.ops[0][0]
         return round(sum(n for _, n in self.ops) / span, 1) if span > 0 else 0.0
+
+
+def REJECT_CATEGORY(reason: str, st: TokenState) -> list[str]:
+    """Real REJECT reason -> report category."""
+    if reason == "rug":
+        return ["risk"] if st.risk is not None and st.risk.score > 60 else ["rug_shock"]
+    if reason == "low_opportunity":
+        return ["weak_opportunity", "weak_momentum"]
+    return [{"identity_conflict": "identity_conflict", "liquidity": "liquidity", "dev": "dev",
+             "authorities": "authority", "token_2022": "token_2022", "data_invalid": "data_invalid",
+             "early_signal": "early_signal_false"}.get(reason, "other:" + reason)]
 
 
 def is_trade_candidate(st: TokenState, rec: dict, allow_unchecked_risk: bool = False) -> bool:

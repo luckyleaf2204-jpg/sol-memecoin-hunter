@@ -103,9 +103,16 @@ def bot_status(bot: PaperBot, engine=None, now: float | None = None) -> dict:
             "risk": st.risk.score if st.risk else None, "identity": st.identity.status,
             "vet": "PASS" if not failed else f"{len(checks) - len(failed)}/{len(checks)}",
             "vet_failed": [f"{c['key']}: {c['result']}" for c in failed][:4],
-            "action": "BUY" if is_cand else ("WATCH" if rec.get("decision") == WATCH else "REJECT"),
+            "action": "BUY" if is_cand else ("WATCH" if rec.get("decision") in (WATCH, TRADE) else
+                                             "PENDING" if rec.get("decision") == "PENDING_IDENTITY" else "REJECT"),
             "state": rec.get("state"), "why": rec.get("why", [])[:4],
-            "waiting": rec.get("waiting", []), "rejected": rec.get("rejected", [])})
+            "waiting": rec.get("waiting", []), "rejected": rec.get("rejected", []),
+            "blocked_by": rec.get("blocked_by", []),
+            "early": ("TRUE" if st.early and st.early.is_early is True else
+                      "UNKNOWN" if st.early is None or st.early.strength is None else f"FALSE {st.early.groups_computable}/7"),
+            "liquidity": st.market.liquidity_usd if st.market else None,
+            "holders": st.holders.holder_count if st.holders and st.holder_status == "ok" else None,
+            "dev": st.dev.status if st.dev and st.dev.balance_verified else None})
     evaluated.sort(key=lambda x: (x["action"] != "BUY", -((x["opportunity"] or 0) + (x["confidence"] or 0) - (x["risk"] or 100))))
     if bot.cfg.kill_switch:
         doing = {"kind": "kill"}
@@ -135,8 +142,9 @@ def bot_status(bot: PaperBot, engine=None, now: float | None = None) -> dict:
                             "hit": states_.count("hit"), "near": states_.count("near"),
                             "unknown": states_.count("unknown"), "watching": len(states_)})
     return {
+        "pipeline": bot.pipeline(now),
         "doing": doing, "scan": scan, "evaluated": evaluated, "exit_rules": exits, "exit_engine": engine_rows,
-        "version": "web-5",
+        "version": "web-6",
         "live_available": False,
         "pending": [{"id": o["id"], "symbol": o["symbol"], "mint": o["mint"], "usd": o["usd"],
                      "expires_in": max(0, round(o["expires"] - now)), "why": o["why"][:4]} for o in bot.pending.values()],

@@ -6,6 +6,7 @@ from dataclasses import dataclass, field
 
 PASS, FAIL, UNKNOWN = "PASS", "FAIL", "UNKNOWN"
 TRADE, WATCH, REJECT = "TRADE", "WATCH", "REJECT"
+PENDING_IDENTITY = "PENDING_IDENTITY"      # identity not verified yet (no conflict): never REJECT, never BUY
 RUN, READY, BLOCKED, ERROR = "RUN", "READY", "BLOCKED", "ERROR"
 
 

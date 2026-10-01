@@ -766,9 +766,13 @@ function stageOf(a) {
   return { WATCH: ["🟡", "VET"], REJECT: ["❌", "VET"], BLOCK: ["⛔", "RISK"], BUY: ["🟢", "BUY"], SELL: ["🔴", "SELL"],
            FAILED: ["⚠️", "FAILED"], KILL: ["⛔", "KILL"], INFO: ["ℹ️", "INFO"] }[a.kind] || ["•", a.kind];
 }
-function decisionCls(a) { return a === "BUY" ? "d-buy" : a === "WATCH" ? "d-watch" : "d-reject"; }
+function decisionCls(a) { return a === "BUY" ? "d-buy" : a === "WATCH" || a === "PENDING" ? "d-watch" : "d-reject"; }
 function nn(v) { return v === null || v === undefined ? "—" : esc(v); }
 function waitLine(x) {
+  if (x.action === "PENDING") {
+    const w = (x.waiting || []).map((k) => t("web.wait." + k));
+    return `<div class="c-wait">⏳ ${esc(t("web.wait.pending_id"))}${w.length ? " — " + esc(t("web.wait.for")) + ": " + esc(w.join(" + ")) : ""}</div>`;
+  }
   if (x.action === "WATCH") {
     const w = (x.waiting || []).map((k) => t("web.wait." + k));
     return `<div class="c-wait">🟡 ${esc(t("web.wait.title"))}${w.length ? " — " + esc(t("web.wait.for")) + ": " + esc(w.join(" + ")) : ""}</div>`;
@@ -791,7 +795,7 @@ function candRow(x) {
     <div class="c-n ${x.identity === "VERIFIED" ? "c-green" : x.identity === "CONFLICT" ? "c-red" : "c-muted"}" data-l="ID">${x.identity === "VERIFIED" ? "✓ VERIFIED" : esc(x.identity)}</div>
     <div class="c-n ${x.vet === "PASS" ? "c-green" : "c-orange"}" data-l="VET">${esc(x.vet)}</div>
     <div class="c-dec"><span class="dec ${decisionCls(x.action)}">${esc(x.action === "WATCH" ? t("web.wait.badge") : x.action)}</span></div>
-    <div class="c-why">${waitLine(x)}<div>${esc(why)}</div></div></div>`;
+    <div class="c-why">${waitLine(x)}${x.action !== "BUY" && (x.blocked_by || []).length ? `<div class="c-muted">BLOCKED_BY: ${esc(x.blocked_by.slice(0, 5).join(", "))}</div>` : ""}<div>${esc(why)}</div></div></div>`;
 }
 async function renderBot(silent) {
   let d;
@@ -864,10 +868,14 @@ async function renderBot(silent) {
 
   <section class="b-scan panel" id="bot-scan"><h3><span>🔍 ${esc(t("web.bot.scanning"))}</span><span class="meta">${hc ? `Helius ${esc(hc.used.toLocaleString("en-US"))} / ${esc(hc.daily_budget.toLocaleString("en-US"))} · ${esc(hc.per_hour.toLocaleString("en-US"))}/h · ${esc(t("web.feed.projected"))} ${esc((hc.projected_month / 1e6).toFixed(2))}M / ${esc((hc.monthly_plan / 1e6).toFixed(0))}M${hc.quota_exhausted ? " · ⚠ QUOTA" : ""}` : ""}</span></h3>
     <div class="cnts">${cnt("web.bot.sc.total", sc.total)}${cnt("web.bot.sc.pre", sc.pre_early)}${cnt("web.bot.sc.watch", sc.early_watch)}${cnt("web.bot.sc.signal", sc.early_signal)}${cnt("web.bot.sc.trade", sc.trade_candidates, true)}</div>
+    ${d.pipeline ? `<div class="meta">PIPELINE: discovery ${esc(d.pipeline.discovery_per_min ?? "—")}/min · pre-early ${esc(d.pipeline.pre_early_per_min ?? "—")}/min · early-watch ${esc(d.pipeline.early_watch_per_min ?? "—")}/min ·
+      WATCH ${esc(d.pipeline.WATCH)} · PENDING-ID ${esc(d.pipeline.PENDING_IDENTITY)} · TRADE ${esc(d.pipeline.TRADE_CANDIDATE)} · REJECT ${esc(d.pipeline.REJECT)}
+      ${Object.keys(d.pipeline.reject_reasons || {}).length ? "(" + esc(Object.entries(d.pipeline.reject_reasons).slice(0, 5).map(([k, v]) => k + " " + v).join(", ")) + ")" : ""}
+      ${d.pipeline.summary && d.pipeline.summary.most_blocking ? " · " + esc(t("web.bot.most_blocking")) + ": <b>" + esc(d.pipeline.summary.most_blocking) + "</b>" : ""}</div>` : ""}
   </section>
 
   <section class="b-cands panel" id="bot-candidates"><h3><span>🟢 ${esc(t("web.bot.evaluating"))}</span><span>${esc(all.length)}</span></h3>
-    <div class="ctools"><div class="chips">${chip("ALL")}${chip("BUY")}${chip("WATCH")}${chip("REJECT")}</div>
+    <div class="ctools"><div class="chips">${chip("ALL")}${chip("BUY")}${chip("WATCH")}${chip("PENDING")}${chip("REJECT")}</div>
       <select class="select" id="botsort">${Object.keys(CAND_SORTS).map(sortOpt).join("")}</select></div>
     <div class="ctable">
       <div class="crow chead"><div class="c-tok">CA / Symbol</div><div class="c-n">MC</div><div class="c-n">Age</div><div class="c-n">Opp</div><div class="c-n">Mom</div><div class="c-n">Risk</div><div class="c-n">Conf</div><div class="c-n">Identity</div><div class="c-n">VET</div><div class="c-dec">Decision</div><div class="c-why">WHY</div></div>

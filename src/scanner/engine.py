@@ -19,6 +19,7 @@ from __future__ import annotations
 import asyncio
 import copy
 import time
+from collections import deque
 from typing import Callable
 
 from alerts.report import telegram_alert
@@ -56,7 +57,9 @@ MAX_EVENTS = 500
 PUMP_LATEST_S, PUMP_ACTIVE_S, CURVE_S = 10.0, 20.0, 10.0
 REEVALUATE_S = 20.0               # tokens without fresh data are re-evaluated at the historic cadence
 LOG_EVERY_S = 60.0
-MC_STASH_MAX = 20_000             # MC journeys of pruned tokens kept in memory (anchor survives re-discovery)
+MC_STASH_MAX = 20_000
+NO_DATA_GRACE_S = 3600            # a token whose MC is still UNKNOWN is kept this long (data may arrive late)
+KNOWN_LOW_MC_AFTER_S = 900        # known MC below tracking_min_mc after this age = dead coin (real reason)             # MC journeys of pruned tokens kept in memory (anchor survives re-discovery)
 
 
 class ScannerEngine:
@@ -99,6 +102,10 @@ class ScannerEngine:
         self._deep_times: list[float] = []
         self.deep_extra: set[str] = set()                 # mints the paper bot holds (registered by the bot)
         self.deep_skipped: list[tuple[str, str]] = []
+        self.pipe = {"discovered": deque(maxlen=5000), "pre_early": deque(maxlen=5000), "early_watch": deque(maxlen=5000),
+                     "evicted": 0, "pruned_low_mc": 0, "pruned_no_data": 0, "pruned_age": 0}
+        self._seen_pre: set[str] = set()
+        self._seen_watch: set[str] = set()
         self._skip_logged_at = 0.0
         self._logged_at = 0.0
         self._round_new = 0
@@ -319,10 +326,12 @@ class ScannerEngine:
             self._merge_info(st, info)
             return False
         age_h = (time.time() - info.created_at) / 3600 if info.created_at else 0
-        if info.mint not in self.watch and (age_h > self.settings.max_age_hours
-                                            or len(self.tracked) >= self.settings.max_tracked):
+        if info.mint not in self.watch and age_h > self.settings.max_age_hours:
             return False
+        if info.mint not in self.watch and len(self.tracked) >= self.settings.max_tracked and not self._evict_one():
+            return False                                  # full of starred / held tokens only
         st = self.tracked[info.mint] = TokenState(info=info, watch=info.mint in self.watch)
+        self.pipe["discovered"].append(time.time())
         claim_from_info(st, info.sources, info.symbol, info.name)   # a feed only CLAIMS a symbol/name
         apply_identity(st)
         self._restore_mc(st)
@@ -349,6 +358,60 @@ class ScannerEngine:
             return
         for st in dirty:
             st.mc_track.dirty = False
+
+    def _evict_one(self) -> bool:
+        """Make room for a NEW token instead of silently dropping it (pipeline retention). Order: a token excluded for
+        a REAL reason (wrong data / rug / Risk > 60 / identity conflict / holder anomaly / top10), then a known dead
+        coin (MC below tracking_min_mc), then the oldest token still without market data, then the oldest other one.
+        Never a starred token or one the paper bot holds."""
+        cands = [st for st in self.tracked.values() if not st.watch and st.mint not in self.deep_extra]
+        if not cands:
+            return False
+
+        def rank(st):
+            mc = st.market.market_cap if st.market else None
+            age = st.info.discovered_at
+            if st.group == "excluded":
+                return (0, age)
+            if mc is not None and mc < self.settings.tracking_min_mc:
+                return (1, age)
+            if st.market is None:
+                return (2, age)
+            return (3, age)
+        victim = min(cands, key=rank)
+        self._drop(victim.mint)
+        self.pipe["evicted"] += 1
+        return True
+
+    def _drop(self, mint: str) -> None:
+        st = self.tracked.get(mint)
+        if st is None:
+            return
+        if st.mc_track and st.mc_track.initial_mc is not None:
+            self._mc_saved[mint] = st.mc_track          # re-discovery restores the same anchor
+            while len(self._mc_saved) > MC_STASH_MAX:
+                self._mc_saved.pop(next(iter(self._mc_saved)))
+        del self.tracked[mint]
+        self.history.drop(mint)
+        self.detector.forget(mint)
+
+    def pipeline_counts(self, now: float | None = None) -> dict:
+        """Tokens entering each stage per minute (first time), plus retention counters."""
+        now = now or time.time()
+        for st in self.tracked.values():
+            pe, ew = st.pre_early, st.early_watch
+            if pe is not None and pe.status != "NOT_ELIGIBLE" and st.mint not in self._seen_pre:
+                self._seen_pre.add(st.mint)
+                self.pipe["pre_early"].append(now)
+            if ew is not None and ew.eligible and st.mint not in self._seen_watch:
+                self._seen_watch.add(st.mint)
+                self.pipe["early_watch"].append(now)
+        per_min = {k: sum(1 for t in self.pipe[k] if now - t <= 60) for k in ("discovered", "pre_early", "early_watch")}
+        return {"discovery_per_min": per_min["discovered"], "pre_early_per_min": per_min["pre_early"],
+                "early_watch_per_min": per_min["early_watch"], "tracked": len(self.tracked),
+                "max_tracked": self.settings.max_tracked, "evicted": self.pipe["evicted"],
+                "pruned_low_mc": self.pipe["pruned_low_mc"], "pruned_no_data": self.pipe["pruned_no_data"],
+                "pruned_age": self.pipe["pruned_age"]}
 
     def _restore_mc(self, st: TokenState) -> None:
         """A restart must not reset the MC at discovery: reload the saved journey (SQLite)."""
@@ -443,10 +506,20 @@ class ScannerEngine:
         for mint, st in list(self.tracked.items()):
             if st.watch:
                 continue
+            if mint in self.deep_extra:
+                continue                                  # the paper bot holds it
             created = st.info.created_at or (st.market.pair_created_at if st.market else None) or st.info.discovered_at
             age = now - created
             mc = st.market.market_cap if st.market else None
-            if age > max_age or (not st.snapshotted and age > 900 and (mc or 0) < self.settings.tracking_min_mc):
+            reason = None
+            if age > max_age:
+                reason = "pruned_age"
+            elif not st.snapshotted and mc is not None and age > KNOWN_LOW_MC_AFTER_S and mc < self.settings.tracking_min_mc:
+                reason = "pruned_low_mc"                  # known MC: a dead coin (real reason)
+            elif not st.snapshotted and mc is None and age > NO_DATA_GRACE_S:
+                reason = "pruned_no_data"                 # UNKNOWN MC is kept 1 h, not treated as 0
+            if reason:
+                self.pipe[reason] += 1
                 if st.mc_track and st.mc_track.initial_mc is not None:
                     self._mc_saved[mint] = st.mc_track      # re-discovery restores the same anchor
                     while len(self._mc_saved) > MC_STASH_MAX:

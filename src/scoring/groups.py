@@ -34,8 +34,8 @@ RAW_MISSING_KEYS = {"price_bad", "mc_bad", "volume_bad", "fdv_bad"}      # missi
 
 def _missing_only(st: TokenState) -> bool:
     crit = [i for i in (st.quality.issues if st.quality else []) if i.severity == "critical"]
-    return bool(crit) and all(i.key in MISSING_KEYS or (i.key in RAW_MISSING_KEYS and i.params.get("raw") is None)
-                              for i in crit)
+    return bool(crit) and all(i.key in MISSING_KEYS or (i.key in RAW_MISSING_KEYS and i.params.get("raw") in (None, "None"))
+                              for i in crit)                   # validation stores raw as repr(): None -> "None"
 
 
 def classify_group(st: TokenState, s: Settings | None = None) -> tuple[str, list[str]]:
