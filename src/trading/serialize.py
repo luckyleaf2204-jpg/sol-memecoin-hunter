@@ -3,7 +3,8 @@ from __future__ import annotations
 
 import time
 
-from trading.bot import MODULES, PaperBot, _ex_dict
+from trading.bot import EXIT_WHY, MODULES, PaperBot, _ex_dict
+from trading.models import TRADE, WATCH
 from trading.config import ALLOWED_MODES
 
 
@@ -35,8 +36,58 @@ def bot_status(bot: PaperBot, engine=None, now: float | None = None) -> dict:
         d["momentum"] = st.subscores["momentum"].score if st and "momentum" in st.subscores and st.subscores["momentum"].score is not None else None
         d["risk"] = st.risk.score if st and st.risk else None
         d["lifecycle"] = st.lifecycle if st else None
+        d["holding_min"] = round((now - p.opened_at) / 60, 1)
         positions.append(d)
+    tracked = list(engine.published) if engine and engine.published else []
+    cands = bot.trade_candidates(now)
+    scan = {"total": len(tracked),
+            "pre_early": sum(1 for x in tracked if x.pre_early is not None and x.pre_early.status == "PRE_EARLY"),
+            "early_watch": sum(1 for x in tracked if x.early_watch is not None and x.early_watch.rank is not None),
+            "early_signal": sum(1 for x in tracked if x.early is not None and x.early.is_early is True),
+            "trade_candidates": len(cands)}
+    evaluated = []
+    for mint, rec in bot.decisions.items():                # every fresh decision — the UI paginates, never the engine
+        st = states.get(mint)
+        if st is None or now - rec.get("ts", 0) > 30:
+            continue
+        checks = rec.get("checks", [])
+        failed = [c for c in checks if c["result"] not in ("PASS", "N/A")]
+        is_cand = any(c[0].mint == mint for c in cands)
+        mom = st.subscores.get("momentum")
+        evaluated.append({
+            "mint": mint, "symbol": st.info.symbol, "mc": st.market.market_cap if st.market else None,
+            "age_min": round(st.age_minutes, 1) if st.age_minutes is not None else None,
+            "opportunity": rec.get("opportunity"), "confidence": rec.get("confidence"),
+            "momentum": mom.score if mom and mom.score is not None else None,
+            "risk": st.risk.score if st.risk else None, "identity": st.identity.status,
+            "vet": "PASS" if not failed else f"{len(checks) - len(failed)}/{len(checks)}",
+            "vet_failed": [f"{c['key']}: {c['result']}" for c in failed][:4],
+            "action": "BUY" if is_cand else ("WATCH" if rec.get("decision") == WATCH else "REJECT"),
+            "state": rec.get("state"), "why": rec.get("why", [])[:4]})
+    evaluated.sort(key=lambda x: (x["action"] != "BUY", -((x["opportunity"] or 0) + (x["confidence"] or 0) - (x["risk"] or 100))))
+    if bot.cfg.kill_switch:
+        doing = {"kind": "kill"}
+    elif bot.book.positions:
+        best = max(bot.book.positions.values(), key=lambda p: p.pnl_pct() or -1e9)
+        doing = {"kind": "holding", "symbol": best.symbol, "pnl_pct": round(best.pnl_pct(), 1) if best.pnl_pct() is not None else None,
+                 "count": len(bot.book.positions)}
+    elif cands:
+        doing = {"kind": "candidates", "count": len(cands)}
+    elif tracked:
+        doing = {"kind": "searching", "count": len(tracked), "evaluated": len(evaluated)}
+    else:
+        doing = {"kind": "starting"}
+    c = bot.cfg
+    exits = [{"key": "take_profit", "value": f"+{c.tp1_pct:.0f}% (bán {100 * c.tp1_sell_frac:.0f}%) · +{c.tp2_pct:.0f}% (bán hết)"},
+             {"key": "trailing", "value": f"-{c.trailing_pct:.0f}% từ đỉnh sau TP1"},
+             {"key": "stop_loss", "value": f"-{c.stop_loss_pct:.0f}% (sau TP1: hoà vốn)"},
+             {"key": "liquidity", "value": "liquidity < 60% lúc vào / SHOCK"},
+             {"key": "momentum", "value": "DISTRIBUTION / DECLINING · volume sụp"},
+             {"key": "risk", "value": "Risk > 60 · cờ rug · cá voi xả · identity conflict"},
+             {"key": "time", "value": f"giữ tối đa {c.max_hold_min:.0f} phút"}]
     return {
+        "doing": doing, "scan": scan, "evaluated": evaluated, "exit_rules": exits,
+        "live_available": False,
         "server_time": now, "mode": bot.cfg.mode, "allowed_modes": list(ALLOWED_MODES), "enabled": bot.cfg.enabled,
         "live": bool(bot.last_tick and now - bot.last_tick < 30),
         "last_tick": bot.last_tick, "tick_ms": bot.tick_ms, "ticks": bot.ticks, "ops_per_s": bot.ops_per_s(),

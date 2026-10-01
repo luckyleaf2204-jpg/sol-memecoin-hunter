@@ -88,6 +88,38 @@ class PaperExecutor:
         return Execution(**base, status="FILLED", usd_in=usd, tokens=tokens, fill_price=fill,
                          price_impact_pct=100 * imp, slippage_pct=100 * slip, fee_usd=fee, network_fee_usd=net_fee)
 
+    def buy_from_quote(self, st: TokenState, usd: float, quote: dict, sol_price: float | None,
+                       now: float | None = None) -> Execution:
+        """PAPER fill on a real Jupiter route: output amount and price impact come from Jupiter for this exact size
+        (pool fees are inside Jupiter's output); latency slippage, failures and network fee are still simulated."""
+        from trading.jupiter import price_impact, route_label
+        now = now or time.time()
+        m = st.market
+        net_fee = self.network_fee(sol_price)
+        latency = self.rng.randint(400, 1500)
+        ref = m.price_usd if m else None
+        imp = price_impact(quote)
+        base = dict(ts=now, mint=st.mint, symbol=st.info.symbol, side="BUY", route=route_label(quote), ref_price=ref,
+                    latency_ms=latency)
+        try:
+            out_tokens = int(quote["outAmount"]) / 10 ** (st.info.decimals or 6)
+        except (KeyError, TypeError, ValueError):
+            out_tokens = 0.0
+        if ref is None or ref <= 0 or imp is None or out_tokens <= 0:
+            return Execution(**base, status="REJECTED", reason="Jupiter quote unusable")
+        slip = self._slip(st)
+        if imp + slip > self.max_slippage:
+            return Execution(**base, status="FAILED", network_fee_usd=net_fee, price_impact_pct=100 * imp,
+                             slippage_pct=100 * slip, reason=f"slippage tolerance exceeded ({100 * (imp + slip):.2f}%)")
+        if self._fail(st, imp):
+            return Execution(**base, status="FAILED", network_fee_usd=net_fee, price_impact_pct=100 * imp,
+                             slippage_pct=100 * slip, reason="transaction failed (simulated: dropped / expired blockhash)")
+        tokens = out_tokens / (1 + slip)
+        fill = usd / tokens
+        return Execution(**base, status="FILLED", usd_in=usd, tokens=tokens, fill_price=fill, price_impact_pct=100 * imp,
+                         slippage_pct=100 * slip, fee_usd=0.0, network_fee_usd=net_fee,
+                         model="PAPER on a real Jupiter quote (no transaction sent)")
+
     def sell(self, st: TokenState, tokens: float, price: float, sol_price: float | None, reason: str,
              now: float | None = None, force: bool = False) -> Execution:
         """`force` (stop loss / emergency): no slippage tolerance — a real bot would accept a worse fill."""

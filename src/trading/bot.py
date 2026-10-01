@@ -14,13 +14,20 @@ from pathlib import Path
 from core.models import TokenState
 from trading import decision as D
 from trading.book import PaperBook
-from trading.config import TradingConfig
+from trading.config import ModeNotAllowed, PAPER, TradingConfig
 from trading.execution import PaperExecutor
 from trading.exits import HARD, exit_signal
 from trading.models import BLOCKED, ERROR, READY, RUN, TRADE, WATCH, Activity, ModuleState
 from trading.risk import RiskEngine
 
 MODULES = ("scan", "vet", "size", "risk", "fills", "book")
+EXIT_WHY = {"stop_loss": "price hit the stop loss", "break_even_stop": "fell back to entry after TP1",
+            "take_profit_1": "TP1 reached — partial profit", "take_profit_2": "TP2 reached",
+            "trailing_stop": "trailing stop from the high", "liquidity_collapse": "liquidity collapsed / SHOCK",
+            "whale_dump": "whales distributing", "risk_spike": "Risk > 60 or a rug flag",
+            "identity_conflict": "token identity conflict", "holder_anomaly": "holder data anomaly",
+            "momentum_deterioration": "momentum reversed (DISTRIBUTION / DECLINING)",
+            "volume_collapse": "volume collapsed below entry", "max_hold_time": "max holding time"}
 TICK_S = 5.0
 MAX_ENTRIES_PER_TICK = 2
 
@@ -43,6 +50,10 @@ class PaperBot:
         self.tick_ms: float | None = None
         self.ops: deque[tuple[float, int]] = deque(maxlen=120)        # (ts, evaluations) for ops/s
         self._stop: asyncio.Event | None = None
+        self.jupiter = None                    # trading.jupiter.JupiterQuotes -> BUYs are filled on real quotes
+        self.intents: dict[str, dict] = {}     # mint -> pending BUY intent (one per CA: duplicate-order guard)
+        self._discovered: set[str] = set()
+        self.last_buy_attempt: dict[str, float] = {}
 
     # ---------------------------------------------------------------- helpers
     def log(self, kind: str, text: str, st: TokenState | None = None, usd=None, price=None, now=None) -> None:
@@ -124,8 +135,10 @@ class PaperBot:
                     if reason == "take_profit_1":
                         p.tp1_done = True
                         p.stop_price = max(p.stop_price, p.entry_price)      # break-even
-                    self.log("SELL", f"{reason} · {100 * frac:.0f}% @ ${ex.fill_price:.8g} · {ex.route}", st,
-                             usd=ex.usd_in, price=ex.fill_price, now=now)
+                    closed = p.status == "CLOSED"
+                    net = f" · NET P&L {p.realized_usd - p.cost_usd:+,.2f}$" if closed else ""
+                    self.log("SELL", f"{reason} · {100 * frac:.0f}% @ ${ex.fill_price:.8g} · {ex.route} · WHY: "
+                                     f"{EXIT_WHY.get(reason, reason)}{net}", st, usd=ex.usd_in, price=ex.fill_price, now=now)
                 else:
                     self.log("FAILED", f"SELL {reason}: {ex.reason}", st, now=now)
             self._set("fills", RUN if self.book.executions and now - self.book.executions[-1].ts < 60 else READY,
@@ -138,6 +151,10 @@ class PaperBot:
         # SCAN
         try:
             cands = D.scan(list(states.values()))
+            for st, reasons in cands:
+                if st.mint not in self._discovered:
+                    self._discovered.add(st.mint)
+                    self.log("DISCOVER", "scan: " + ", ".join(reasons), st, now=now)
             self._set("scan", RUN if cands else READY, f"{len(cands)} candidates from {len(states)} tokens · "
                       "X Alpha / smart money: NOT AVAILABLE",
                       items=[{"mint": s.mint, "symbol": s.info.symbol, "why": r} for s, r in cands[:30]], now=now)
@@ -189,6 +206,15 @@ class PaperBot:
                 if not is_trade_candidate(st, rec):         # defence in depth: never buy outside 🟢
                     rec["state"] = "BLOCKED"
                     continue
+                if st.mint in self.intents or st.mint in self.book.positions:
+                    rec["state"] = "DUPLICATE"              # an order for this CA is already in flight / held
+                    continue
+                if self.jupiter is not None:                # async path: fill on a real Jupiter quote (atick)
+                    self.intents[st.mint] = {"mint": st.mint, "usd": sz.usd, "ts": now, "opportunity": sc.opportunity,
+                                             "why": sc.why}
+                    rec["state"] = "QUOTING"
+                    entries += 1
+                    continue
                 ex = self.exec.buy(st, sz.usd, self._sol(), now)
                 if ex.status == "FILLED":
                     self.book.open(ex, self.cfg, now, sc.opportunity, sc.why, st.market.liquidity_usd, st.market.vol_5m)
@@ -225,11 +251,64 @@ class PaperBot:
             except OSError:
                 pass
 
+    async def execute_intents(self, now: float | None = None) -> None:
+        """BUY intents of this tick: fresh Jupiter quote, then RE-CHECK everything right before the fill
+        (still a 🟢 Trade Candidate, Risk, price impact). No quote -> no BUY (route not verifiable)."""
+        from trading.jupiter import WSOL
+        now = now or time.time()
+        states = {s.mint: s for s in (self.engine.published or [])}
+        for mint, it in list(self.intents.items()):
+            self.intents.pop(mint, None)
+            st = states.get(mint)
+            rec = self.decisions.get(mint, {})
+            sol = self._sol()
+            if st is None or not is_trade_candidate(st, rec) or not sol or mint in self.book.positions:
+                self.log("BLOCK", "BUY cancelled at execution: no longer a valid Trade Candidate", st, now=now)
+                continue
+            usd = it["usd"]
+            q = await self.jupiter.quote(WSOL, mint, int(usd / sol * 1e9), int(self.cfg.max_slippage_pct * 100))
+            if q is None:
+                self.log("FAILED", "BUY skipped: Jupiter quote unavailable — route not verifiable", st, now=now)
+                continue
+            from trading.jupiter import price_impact
+            imp = price_impact(q)
+            feeds_ok, why = self._feeds_ok()
+            last = self.book.last_exit.get(mint)
+            rd = self.risk.check_entry(mint=mint, usd=usd, equity=self.book.equity(), peak=self.book.peak,
+                                       day_start=self.book.day_start, open_positions=len(self.book.positions),
+                                       holding=False, in_cooldown=bool(last and now - last < self.cfg.cooldown_min * 60),
+                                       exposure=self.book.exposure(), est_impact=imp, feeds_ok=feeds_ok, feeds_reason=why)
+            if not rd.allowed:
+                self.log("BLOCK", "risk at execution: " + "; ".join(rd.reasons), st, now=now)
+                continue
+            ex = self.exec.buy_from_quote(st, usd, q, sol, now)
+            if ex.status == "FILLED":
+                self.book.open(ex, self.cfg, now, it.get("opportunity"), it.get("why"), st.market.liquidity_usd,
+                               st.market.vol_5m)
+                self.log("BUY", f"${usd:,.2f} @ ${ex.fill_price:.8g} · impact {ex.price_impact_pct:.2f}% · "
+                                f"slip {ex.slippage_pct:.2f}% · {ex.route} · WHY: {'; '.join((it.get('why') or [])[:3])}",
+                         st, usd=usd, price=ex.fill_price, now=now)
+            else:
+                self.book.record(ex)
+                self.log("FAILED", f"BUY: {ex.reason}", st, now=now)
+        self.persist()
+
+    def set_mode(self, mode: str, confirm: str = "") -> None:
+        """PAPER only in this build: CONFIRM / AUTO need a live executor (transaction signing), which is not
+        installed. AUTO is OFF by default and every restart comes back in PAPER."""
+        if mode == PAPER:
+            self.cfg.mode = PAPER
+            return
+        raise ModeNotAllowed(f"{mode} needs live execution (wallet signing), which is not installed in this build "
+                             "— PAPER only")
+
     async def run(self, stop: asyncio.Event | None = None) -> None:
         self._stop = stop or asyncio.Event()
         while not self._stop.is_set():
             try:
                 self.tick()
+                if self.intents:
+                    await self.execute_intents()
             except Exception as e:                       # the bot never takes the scanner down
                 self.log("INFO", f"bot tick error: {type(e).__name__}: {e}")
             try:

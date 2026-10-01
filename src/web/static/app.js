@@ -732,57 +732,107 @@ function posHtml(p) {
       ${kv(t("col.risk"), p.risk === null || p.risk === undefined ? esc(t("common.unknown")) : esc(p.risk), riskCls(p.risk))}
     </div></div>`;
 }
+const BOT_PAGE = 10;
+const STAGE = { DISCOVER: ["🔍", "DISCOVER"], WATCH: ["🟡", "VET"], REJECT: ["❌", "VET"], BLOCK: ["⛔", "RISK"],
+  BUY: ["🟢", "BUY"], SELL: ["🔴", "SELL"], FAILED: ["⚠️", "FAILED"], KILL: ["⛔", "KILL"], INFO: ["ℹ️", "INFO"] };
+function doingText(d) {
+  const x = d.doing || {};
+  if (x.kind === "kill") return t("web.bot.do.kill");
+  if (x.kind === "holding") return t("web.bot.do.holding", { sym: x.symbol, pnl: x.pnl_pct === null ? "—" : (x.pnl_pct > 0 ? "+" : "") + x.pnl_pct + "%", n: x.count });
+  if (x.kind === "candidates") return t("web.bot.do.candidates", { n: x.count });
+  if (x.kind === "searching") return t("web.bot.do.searching", { n: x.count }) + " · " + t("web.bot.do.no_setup");
+  return t("web.bot.do.starting");
+}
+function evalRow(x) {
+  const act = { BUY: "b-valid", WATCH: "b-partial", REJECT: "b-invalid" }[x.action];
+  const n = (v) => v === null || v === undefined ? "—" : esc(v);
+  return `<div class="ev">
+    <div class="card-head"><a class="sym" href="#/token/${esc(x.mint)}">$${esc(x.symbol)}</a>
+      <span class="name">${x.mc === null ? "MC —" : "MC " + esc(usd(x.mc))} · ${x.age_min === null ? "—" : esc(x.age_min) + "m"}</span>
+      <span class="badge ${act}">${x.action === "BUY" ? "🟢" : x.action === "WATCH" ? "🟡" : "🔴"} ${esc(x.action)}</span></div>
+    <div class="evg"><span>Opp <b>${n(x.opportunity)}</b></span><span>Mom <b>${n(x.momentum)}</b></span>
+      <span>Risk <b class="${riskCls(x.risk)}">${n(x.risk)}</b></span>
+      <span>ID <b class="${x.identity === "VERIFIED" ? "c-green" : x.identity === "CONFLICT" ? "c-red" : "c-muted"}">${x.identity === "VERIFIED" ? "✓" : esc(x.identity)}</b></span>
+      <span>VET <b class="${x.vet === "PASS" ? "c-green" : "c-orange"}">${esc(x.vet)}</b></span></div>
+    <div class="meta">WHY: ${esc((x.action === "BUY" ? x.why : x.vet_failed.concat(x.why)).slice(0, 4).join(" · "))}</div></div>`;
+}
 async function renderBot(silent) {
   let d;
   try { d = await api("/api/bot"); } catch (e) { if (!silent) $("#view").innerHTML = `<div class="empty">${esc(t("web.error"))}: ${esc(e.message)}</div>`; return; }
   syncClock(d.server_time);
-  const s = d.stats;
-  const kpi = (k, v, sub, cls) => `<div class="kpi"><div class="k">${esc(k)}</div><div class="v ${cls || ""}">${v}</div><div class="s">${sub}</div></div>`;
-  const mods = d.modules.map((m, i) => `<button class="mod ${esc(m.status)}" data-mod="${esc(m.key)}">
-      <div class="n"><span>0${i + 1} · ${esc(MOD_NAMES[m.key])}</span><span class="st">${esc(m.status)}</span></div>
-      <div class="t">${esc(t("web.bot.mod." + m.key))}</div></button>`).join("");
-  const acts = d.activity.length ? d.activity.slice(0, 40).map((a) => `<div class="row"><span class="c-muted">${esc(new Date(a.ts * 1000).toLocaleTimeString("vi-VN"))}</span>
-      <span class="${esc(a.kind)}">${a.kind === "BUY" ? "▲ " : a.kind === "SELL" ? "▼ " : ""}${esc(a.kind)}</span>
-      <span>${a.symbol ? "$" + esc(a.symbol) + " " : ""}${a.usd !== null && a.usd !== undefined ? esc(money(a.usd)) + " · " : ""}${esc(a.text)}</span></div>`).join("")
+  const s = d.stats, sc = d.scan, L = d.limits;
+  S.prefs.botFilter = S.prefs.botFilter || "ALL";
+  const f = S.prefs.botFilter;
+  const ev = d.evaluated.filter((x) => f === "ALL" || x.action === f);
+  const pages = Math.max(1, Math.ceil(ev.length / BOT_PAGE));
+  S.prefs.botPage = Math.min(S.prefs.botPage || 0, pages - 1);
+  const page = ev.slice(S.prefs.botPage * BOT_PAGE, (S.prefs.botPage + 1) * BOT_PAGE);
+  const kpi = (k, v, cls) => `<div class="kpi"><div class="k">${esc(k)}</div><div class="v ${cls || ""}">${v}</div></div>`;
+  const cnt = (k, v, hl) => `<div class="cnt${hl ? " hl" : ""}"><b>${esc(v)}</b><span>${esc(t(k))}</span></div>`;
+  const modeBtn = (m) => `<button class="chip${d.mode === m ? " on" : ""}" data-mode="${m}"${m !== "PAPER" && !d.live_available ? " disabled" : ""}>${m === "AUTO" ? "AUTO " + (d.mode === "AUTO" ? "ON" : "OFF") : m}${m !== "PAPER" && !d.live_available ? " 🔒" : ""}</button>`;
+  const chip = (k) => `<button class="chip${f === k ? " on" : ""}" data-evf="${k}">${esc(k === "ALL" ? t("web.bot.all") : k)} ${esc(k === "ALL" ? d.evaluated.length : d.evaluated.filter((x) => x.action === k).length)}</button>`;
+  const posRow = (p) => `<div class="prow"><a class="sym" href="#/token/${esc(p.mint)}">$${esc(p.symbol)}</a>
+      <span>${esc(Number(p.entry).toPrecision(3))} → ${p.current === null ? "—" : esc(Number(p.current).toPrecision(3))}</span>
+      <span>${esc(money(p.size_usd))}</span>
+      <span class="${pnlCls(p.pnl_usd)}">${p.pnl_pct === null ? "—" : (p.pnl_pct > 0 ? "+" : "") + esc(p.pnl_pct.toFixed(1)) + "%"} · ${esc(money(p.pnl_usd, true))}</span>
+      <span class="c-muted">${esc(p.holding_min)}m${p.stale ? " · STALE" : ""}</span></div>`;
+  const tl = d.activity.length ? d.activity.slice(0, 50).map((a) => {
+    const [ico, stage] = STAGE[a.kind] || ["•", a.kind];
+    return `<div class="tl"><span class="ico">${ico}</span><div><div><b>${esc(stage)}</b> ${a.symbol ? "$" + esc(a.symbol) : ""}
+      ${a.usd !== null && a.usd !== undefined ? " · " + esc(money(a.usd)) : ""} <span class="c-muted">${esc(new Date(a.ts * 1000).toLocaleTimeString("vi-VN"))}</span></div>
+      <div class="meta">${esc(a.text)}</div></div></div>`; }).join("")
     : `<div class="muted small">${esc(t("web.bot.no_activity"))}</div>`;
-  const st = (k, v, cls) => `<div class="kv"><span class="k">${esc(k)}</span><span class="v ${cls || ""}">${v}</span></div>`;
-  const L = d.limits;
+  const stt = (k, v, cls) => `<div class="kv"><span class="k">${esc(k)}</span><span class="v ${cls || ""}">${v}</span></div>`;
   $("#view").innerHTML = `
-    <div class="bot-head"><h1>SOL TRADING BOT</h1><span class="paper">${esc(d.mode)}</span>
-      <span class="live${d.live ? "" : " off"}"><i></i>${d.live ? "LIVE" : "OFFLINE"}</span></div>
-    <div class="banner orange">${esc(t("web.bot.paper_note"))}</div>
-    <div class="kpis">
-      ${kpi(t("web.bot.balance"), esc(money(s.equity)), esc(t("web.bot.from", { v: money(s.starting) })))}
-      ${kpi(t("web.bot.pnl_total"), esc(money(s.net_pnl, true)), (s.net_pnl_pct === null ? "" : esc((s.net_pnl_pct > 0 ? "+" : "") + s.net_pnl_pct + "%")) + " · " + esc(t("web.bot.today")) + " " + esc(money(s.today_pnl, true)), pnlCls(s.net_pnl))}
-      ${kpi(t("web.bot.winrate"), s.win_rate === null ? "—" : esc(s.win_rate + "%"), esc(s.wins + "W / " + s.losses + "L"))}
-      ${kpi(t("web.bot.open"), esc(s.open + " / " + L.max_open_positions), esc(t("web.bot.exposure")) + " " + esc(money(s.exposure)))}
-    </div>
-    <div class="kpis">
-      ${kpi(t("web.bot.risk"), esc(d.risk_state), d.kill_switch ? esc(t("web.bot.kill_on")) : esc(t("web.bot.max_dd")) + " " + esc(s.max_drawdown_pct + "%"), d.kill_switch || d.risk_state === "ERROR" ? "c-red" : d.risk_state === "BLOCKED" ? "c-orange" : "c-green")}
-      ${kpi(t("web.bot.updated"), updSpan(d.last_tick), esc(d.ticks + " ticks · " + (d.tick_ms ?? "—") + " ms"))}
-    </div>
-    <div class="panel"><h3><span>${esc(t("web.bot.balance_history"))}</span><span class="${pnlCls(s.net_pnl)}">${esc(money(s.equity))}</span></h3>${areaChart(d.equity_history)}</div>
-    <div class="panel"><h3><span>// MESH HEARTBEAT</span><span class="c-accent">${esc(d.ops_per_s)} ops/s</span></h3>${heartbeat(d.live)}</div>
-    <div class="mods">${mods}</div>
-    <div class="panel"><h3><span>${esc(t("web.bot.positions"))}</span><span>${esc(d.positions.length)}</span></h3>
-      ${d.positions.length ? d.positions.map(posHtml).join("") : `<div class="muted small">${esc(t("web.bot.no_positions"))}</div>`}</div>
-    <div class="panel"><h3><span>ACTIVITY LOG</span><span>${esc(d.activity.length)}</span></h3><div class="log">${acts}</div></div>
-    <div class="panel"><h3><span>NET P&amp;L</span><span></span></h3>
-      ${st(t("web.bot.gross"), esc(money(s.gross_pnl, true)), pnlCls(s.gross_pnl))}${st(t("web.bot.fees"), esc(money(-s.fees)))}
-      ${st(t("web.bot.network_fees"), esc(money(-s.network_fees)))}${st(t("web.bot.slippage"), esc(money(-s.slippage_cost)))}
-      ${st(t("web.bot.failed"), esc(s.failed_trades + " · " + money(-s.failed_fees)))}${st("NET P&L", esc(money(s.net_pnl, true)), pnlCls(s.net_pnl))}
-      ${st(t("web.bot.avg_win_loss"), esc(money(s.avg_win) + " / " + money(s.avg_loss)))}${st("Profit factor", esc(s.profit_factor ?? "—"))}
-      ${st("Max drawdown", esc(s.max_drawdown_pct + "%"))}</div>
-    <div class="panel"><h3><span>${esc(t("web.bot.limits"))}</span><span></span></h3>
-      ${st(t("web.bot.l.risk_trade"), esc(L.risk_per_trade_pct + "%"))}${st(t("web.bot.l.max_pos"), esc(L.max_position_pct + "%"))}
-      ${st(t("web.bot.l.exposure"), esc(L.max_total_exposure_pct + "%"))}${st(t("web.bot.l.daily"), esc("-" + L.max_daily_loss_pct + "%"))}
-      ${st(t("web.bot.l.dd"), esc(L.max_drawdown_pct + "%"))}${st(t("web.bot.l.slip"), esc(L.max_slippage_pct + "%"))}
-      ${st(t("web.bot.l.liq"), esc(money(L.min_liquidity_usd)))}${st("SL / TP1 / TP2 / Trail", esc(`-${L.stop_loss_pct}% / +${L.tp1_pct}% / +${L.tp2_pct}% / ${L.trailing_pct}%`))}
-      ${st(t("web.bot.sources"), esc("X Alpha: " + t("common.not_available") + " · Smart money: " + t("common.not_available")))}
-      <div class="actions two"><button class="btn ${d.kill_switch ? "" : "danger"}" id="killbtn">${esc(d.kill_switch ? t("web.bot.kill_release") : t("web.bot.kill_engage"))}</button>
-      <button class="btn" disabled>${esc(t("web.bot.auto_locked"))}</button></div></div>
+    <div class="doing ${d.doing.kind}"><div class="k">🤖 ${esc(t("web.bot.doing"))}</div><div class="v">${esc(doingText(d))}</div>
+      <div class="meta">${updSpan(d.last_tick)} · <span class="live${d.live ? "" : " off"}"><i></i>${d.live ? "LIVE" : "OFFLINE"}</span></div></div>
+
+    <div class="panel"><h3><span>1 · 🤖 BOT STATUS</span><span class="paper">${esc(d.mode)}</span></h3>
+      <div class="chips">${modeBtn("PAPER")}${modeBtn("CONFIRM")}${modeBtn("AUTO")}</div>
+      ${d.live_available ? "" : `<div class="meta">🔒 ${esc(t("web.bot.live_locked"))}</div>`}
+      <div class="kpis">${kpi(t("web.bot.balance"), esc(money(s.equity)))}${kpi("NET P&L", esc(money(s.net_pnl, true)) + (s.net_pnl_pct === null ? "" : ` <small>${esc((s.net_pnl_pct > 0 ? "+" : "") + s.net_pnl_pct)}%</small>`), pnlCls(s.net_pnl))}
+      ${kpi("Drawdown", esc(s.max_drawdown_pct + "%"), s.max_drawdown_pct >= L.max_drawdown_pct * 0.5 ? "c-orange" : "")}${kpi(t("web.bot.open"), esc(s.open + " / " + L.max_open_positions))}</div></div>
+
+    <div class="panel"><h3><span>2 · 🔍 ${esc(t("web.bot.scanning"))}</span><span></span></h3>
+      <div class="cnts">${cnt("web.bot.sc.total", sc.total)}${cnt("web.bot.sc.pre", sc.pre_early)}${cnt("web.bot.sc.watch", sc.early_watch)}${cnt("web.bot.sc.signal", sc.early_signal)}${cnt("web.bot.sc.trade", sc.trade_candidates, true)}</div></div>
+
+    <div class="panel"><h3><span>3 · 🟢 ${esc(t("web.bot.evaluating"))}</span><span>${esc(d.evaluated.length)}</span></h3>
+      <div class="chips">${chip("ALL")}${chip("BUY")}${chip("WATCH")}${chip("REJECT")}</div>
+      ${page.length ? page.map(evalRow).join("") : `<div class="muted small">${esc(t("web.bot.no_eval"))}</div>`}
+      ${pages > 1 ? `<div class="pager"><button class="btn" data-pg="-1"${S.prefs.botPage === 0 ? " disabled" : ""}>‹</button><span>${esc(S.prefs.botPage + 1)} / ${esc(pages)}</span><button class="btn" data-pg="1"${S.prefs.botPage >= pages - 1 ? " disabled" : ""}>›</button></div>` : ""}</div>
+
+    <div class="panel"><h3><span>4 · 💼 ${esc(t("web.bot.positions"))}</span><span>${esc(d.positions.length)}</span></h3>
+      ${d.positions.length ? `<div class="prow head"><span>Token</span><span>Entry → Now</span><span>Size</span><span>P&amp;L</span><span>${esc(t("web.bot.held"))}</span></div>` + d.positions.map(posRow).join("") : `<div class="muted small">${esc(t("web.bot.no_positions"))}</div>`}</div>
+
+    <div class="panel"><h3><span>5 · 🚪 ${esc(t("web.bot.sell_when"))}</span><span></span></h3>
+      ${d.exit_rules.map((r) => stt(t("web.bot.exit." + r.key), esc(r.value))).join("")}</div>
+
+    <div class="panel"><h3><span>6 · 📜 ACTIVITY LOG</span><span class="meta">DISCOVER → VET → BUY → HOLD → SELL → NET P&amp;L</span></h3><div class="tlw">${tl}</div></div>
+
+    <details class="sec" data-k="bot_more"${S.open.bot_more ? " open" : ""}><summary>${esc(t("web.bot.details"))}</summary><div class="sec-body">
+      <div class="panel"><h3><span>${esc(t("web.bot.balance_history"))}</span><span class="${pnlCls(s.net_pnl)}">${esc(money(s.equity))}</span></h3>${areaChart(d.equity_history)}</div>
+      <div class="panel"><h3><span>// MESH HEARTBEAT</span><span class="c-accent">${esc(d.ops_per_s)} ops/s</span></h3>${heartbeat(d.live)}</div>
+      <div class="mods">${d.modules.map((m, i) => `<button class="mod ${esc(m.status)}" data-mod="${esc(m.key)}"><div class="n"><span>0${i + 1} · ${esc(MOD_NAMES[m.key])}</span><span class="st">${esc(m.status)}</span></div><div class="t">${esc(t("web.bot.mod." + m.key))}</div></button>`).join("")}</div>
+      <div class="panel"><h3><span>NET P&amp;L</span><span></span></h3>
+        ${stt(t("web.bot.gross"), esc(money(s.gross_pnl, true)), pnlCls(s.gross_pnl))}${stt(t("web.bot.fees"), esc(money(-s.fees)))}
+        ${stt(t("web.bot.network_fees"), esc(money(-s.network_fees)))}${stt(t("web.bot.slippage"), esc(money(-s.slippage_cost)))}
+        ${stt(t("web.bot.failed"), esc(s.failed_trades + " · " + money(-s.failed_fees)))}${stt(t("web.bot.winrate"), s.win_rate === null ? "—" : esc(s.win_rate + "% (" + s.wins + "W/" + s.losses + "L)"))}
+        ${stt(t("web.bot.avg_win_loss"), esc(money(s.avg_win) + " / " + money(s.avg_loss)))}${stt("Profit factor", esc(s.profit_factor ?? "—"))}</div>
+      <div class="panel"><h3><span>${esc(t("web.bot.limits"))}</span><span></span></h3>
+        ${stt(t("web.bot.l.risk_trade"), esc(L.risk_per_trade_pct + "%"))}${stt(t("web.bot.l.max_pos"), esc(L.max_position_pct + "%"))}
+        ${stt(t("web.bot.l.exposure"), esc(L.max_total_exposure_pct + "%"))}${stt(t("web.bot.l.daily"), esc("-" + L.max_daily_loss_pct + "%"))}
+        ${stt(t("web.bot.l.dd"), esc(L.max_drawdown_pct + "%"))}${stt(t("web.bot.l.slip"), esc(L.max_slippage_pct + "%"))}</div>
+    </div></details>
+    <div class="actions"><button class="btn ${d.kill_switch ? "" : "danger"} wide" id="killbtn">${esc(d.kill_switch ? t("web.bot.kill_release") : t("web.bot.kill_engage"))}</button></div>
     <div class="disclaimer">${esc(t("web.bot.disclaimer"))}</div>`;
+  document.querySelectorAll("[data-evf]").forEach((b) => { b.onclick = () => { S.prefs.botFilter = b.dataset.evf; S.prefs.botPage = 0; savePrefs(); renderBot(true); }; });
+  document.querySelectorAll("[data-pg]").forEach((b) => { b.onclick = () => { S.prefs.botPage = (S.prefs.botPage || 0) + Number(b.dataset.pg); savePrefs(); renderBot(true); }; });
   document.querySelectorAll("[data-mod]").forEach((b) => { b.onclick = () => { location.hash = "#/bot/" + b.dataset.mod; }; });
+  document.querySelectorAll("[data-mode]").forEach((b) => { b.onclick = async () => {
+    try { await api("/api/bot/mode", { method: "POST", body: { mode: b.dataset.mode } }); renderBot(true); }
+    catch (e) { toast(t("web.bot.live_locked")); } }; });
+  const more = document.querySelector('details[data-k="bot_more"]');
+  if (more) more.addEventListener("toggle", () => { S.open.bot_more = more.open; LS.set("openSecs", S.open); });
   $("#killbtn").onclick = async () => {
     const engage = !d.kill_switch;
     if (engage && !confirm(t("web.bot.kill_confirm"))) return;

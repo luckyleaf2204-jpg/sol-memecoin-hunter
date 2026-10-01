@@ -235,3 +235,27 @@ details.grp .cards { margin-top: 8px; }
 .btn.danger { background: rgba(239, 68, 68, 0.18); border-color: rgba(239, 68, 68, 0.6); color: #ff8a8a; }
 .chk { display: grid; grid-template-columns: 22px 1fr; gap: 6px; padding: 4px 0; border-top: 1px solid var(--border); font-size: 12px; }
 .chk:first-child { border-top: 0; }
+
+/* ---------------------------------------------------------------- bot dashboard v2 */
+.doing { border-radius: 16px; padding: 14px; margin: 4px 0 10px; background: var(--panel); border: 2px solid var(--border); }
+.doing .k { font-size: 12px; font-weight: 800; color: var(--muted); letter-spacing: 0.4px; }
+.doing .v { font-size: 19px; font-weight: 800; margin: 4px 0; }
+.doing.holding { border-color: rgba(20, 241, 149, 0.6); } .doing.candidates { border-color: rgba(250, 204, 21, 0.6); }
+.doing.kill { border-color: rgba(239, 68, 68, 0.7); }
+.kpis.k4 { grid-template-columns: repeat(2, 1fr); }
+.cnts { display: grid; grid-template-columns: repeat(5, 1fr); gap: 4px; }
+.cnt { background: var(--panel2); border-radius: 10px; padding: 6px 4px; text-align: center; min-width: 0; }
+.cnt b { display: block; font-size: 18px; } .cnt span { font-size: 9px; color: var(--muted); display: block; line-height: 1.15; }
+.cnt.hl { outline: 1px solid rgba(20, 241, 149, 0.6); } .cnt.hl b { color: var(--accent); }
+.ev { border-top: 1px solid var(--border); padding: 8px 0; } .ev:first-of-type { border-top: 0; }
+.evg { display: flex; flex-wrap: wrap; gap: 4px 10px; font-size: 12px; color: var(--muted); margin-top: 4px; }
+.evg b { color: var(--text); }
+.pager { display: flex; align-items: center; justify-content: center; gap: 12px; margin-top: 8px; }
+.pager .btn { min-width: 44px; }
+.prow { display: grid; grid-template-columns: 1.1fr 1.3fr 0.8fr 1.4fr 0.7fr; gap: 4px; font-size: 11px; padding: 6px 0;
+  border-top: 1px solid var(--border); align-items: center; }
+.prow.head { color: var(--muted); font-weight: 700; border-top: 0; } .prow > * { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+.tl { display: grid; grid-template-columns: 24px 1fr; gap: 6px; padding: 6px 0; border-top: 1px solid var(--border); font-size: 12px; }
+.tl:first-child { border-top: 0; } .tl .ico { font-size: 15px; text-align: center; }
+.tlw { max-height: 420px; overflow-y: auto; }
+.chip:disabled { opacity: 0.55; }

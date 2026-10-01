@@ -104,6 +104,8 @@ def create_app(engine: ScannerEngine | None = None, start_scanner: bool = True,
                                     state_path=DATA_DIR / "paper_bot.json" if persist else None,
                                     config_path=cfg_path if persist else None)
         if start_scanner:
+            from trading.jupiter import JupiterQuotes
+            state["bot"].jupiter = JupiterQuotes(state["engine"].http)      # paper BUYs on real Jupiter quotes
             state["task"] = asyncio.create_task(state["engine"].run())
             state["bot_stop"] = asyncio.Event()
             state["bot_task"] = asyncio.create_task(state["bot"].run(state["bot_stop"]))
@@ -363,7 +365,7 @@ def create_app(engine: ScannerEngine | None = None, start_scanner: bool = True,
         body = await _json(request)
         mode = body.get("mode") if isinstance(body, dict) else None
         try:
-            state["bot"].cfg.set_mode(str(mode))
+            state["bot"].set_mode(str(mode), str(body.get("confirm", "")) if isinstance(body, dict) else "")
         except ModeNotAllowed as e:
             return JSONResponse({"error": "mode_not_allowed", "detail": str(e)}, status_code=403)
         return {"mode": state["bot"].cfg.mode}

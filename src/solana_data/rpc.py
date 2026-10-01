@@ -166,7 +166,9 @@ class SolanaRpc:
             return None
         payload = {"jsonrpc": "2.0", "id": 1, "method": "getAsset", "params": {"id": mint}}
         if not self.credits.allow(DAS_CREDITS):
-            self.http.health.fail(SOURCE_DAS, "Helius credit budget reached for today (HELIUS_MONTHLY_CREDITS / 30)")
+            self.http.health.fail(SOURCE_DAS, "Helius quota exhausted ('max usage reached') — paused for 1 h"
+                                  if self.credits.state()["quota_exhausted"] else
+                                  "Helius daily credit budget reached (HELIUS_MONTHLY_CREDITS / 30)")
             return None
         self.credits.spend(DAS_CREDITS)
         data = await self.http.post_json(self.helius_url, payload, source=SOURCE_DAS, retries=1)
@@ -190,7 +192,9 @@ class SolanaRpc:
         payload = {"jsonrpc": "2.0", "id": 1, "method": "getTokenAccounts",
                    "params": {"mint": mint, "page": page, "limit": limit}}
         if not self.credits.allow(DAS_CREDITS):
-            self.http.health.fail(SOURCE_DAS, "Helius credit budget reached for today (HELIUS_MONTHLY_CREDITS / 30)")
+            self.http.health.fail(SOURCE_DAS, "Helius quota exhausted ('max usage reached') — paused for 1 h"
+                                  if self.credits.state()["quota_exhausted"] else
+                                  "Helius daily credit budget reached (HELIUS_MONTHLY_CREDITS / 30)")
             return None
         self.credits.spend(DAS_CREDITS)
         data = await self.http.post_json(self.helius_url, payload, source=SOURCE_DAS, retries=1)
