@@ -57,8 +57,8 @@ class RunAudit:
         self.window_s = window_s
         self.started = time.time()
         self.tokens: dict[str, dict] = {}
-        self.funnel = {"buy_candidate": 0, "quote_ok": 0, "buy_executed": 0, "buy_simulated_noquote": 0,
-                       "buy_skipped": 0}
+        self.funnel = {"buy_candidate": 0, "quote_ok": 0, "fill_ok": 0, "fill_fail": 0, "buy_executed": 0,
+                       "buy_simulated_noquote": 0, "buy_skipped": 0}
         self.skips: dict[str, int] = {}          # "jupiter:NO_ROUTE", "risk_at_execution", ...
         self.events: list[dict] = []             # last execution events (Candidate -> Quote -> BUY / SKIP)
         self._saved = 0.0
@@ -98,6 +98,8 @@ class RunAudit:
             t["ever"].append(d)
         t["cand"] = t["cand"] or candidate
         t["old_cand"] = t.get("old_cand", False) or bool(rec.get("old_candidate"))
+        if rec.get("old_liquidity") == "FAIL" and rec.get("new_liquidity") == "PASS":
+            t["liq_promoted"] = True
         es = rec.get("early_score") or {}
         if es.get("score") is not None and es["score"] >= es["theta"] and es["confidence"] >= es["gamma"]:
             t["es_pass"] = True
@@ -142,6 +144,8 @@ class RunAudit:
             self.funnel["buy_candidate"] += 1
         elif kind == "quote_ok":
             self.funnel["quote_ok"] += 1
+        elif kind in ("fill_ok", "fill_fail"):
+            self.funnel[kind] = self.funnel.get(kind, 0) + 1
         elif kind == "buy":
             self.funnel["buy_executed"] += 1
             if reason == "simulated_noquote":
@@ -172,6 +176,8 @@ class RunAudit:
             "early_score_pass": n(lambda t: t.get("es_pass")),
             "early_score_pass_by_age": {b: n(lambda t, b=b: b in t.get("es_buckets", [])) for b in ("<90s", "90s-5m", ">5m")},
             "old_candidates": n(lambda t: t.get("old_cand")), "new_candidates": n(lambda t: t["cand"]),
+            "liquidity_promoted": n(lambda t: t.get("liq_promoted")),
+            "liquidity_promoted_candidates": n(lambda t: t.get("liq_promoted") and t["cand"]),
             **self.funnel, "skips": dict(sorted(self.skips.items(), key=lambda x: -x[1])),
         }
         blocked = {c: n(lambda t, c=c: c in t["blocks"]) for c in CATEGORIES}

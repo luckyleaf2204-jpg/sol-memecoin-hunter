@@ -431,3 +431,79 @@ def test_opportunity_decomposition_is_consistent():
     assert recomputed == rec["opportunity"]
     assert all(v < 65 for v in d["weak_components"].values())
     assert (rec["opportunity"] >= 65) == (d["classification"] == [])
+
+
+# ---------------------------------------------------------------- liquidity floor A/B
+def curve_tok(virtual_sol, real_sol, sol=150.0, age_s=60, **kw):
+    st = hot(age_s=age_s, **kw)
+    m = st.market
+    m.dex_id, m.liquidity_source, m.liquidity_usd = "pumpfun", "pumpfun_curve", real_sol * sol
+    st.info.virtual_sol_reserves, st.info.real_sol_reserves, st.info.sol_price = virtual_sol, real_sol, sol
+    st.info.complete, st.info.quote_mint = False, "11111111111111111111111111111111"
+    return st
+
+
+def test_curve_amm_equivalent_passes_where_old_raw_floor_fails():
+    st = curve_tok(virtual_sol=40, real_sol=10)          # real $1,500 (OLD FAIL) · AMM-equivalent 2*40*150 = $12,000
+    xd, _ = ev(st)
+    lq = xd.es.liquidity
+    assert lq["old"] == D.FAIL and lq["decision"] == "PASS" and lq["model"] == "curve_amm_equivalent"
+    assert lq["equivalent_usd"] == 12_000 and lq["confidence"] == "HIGH"
+    assert "hard:liquidity" not in xd.blocked_by and "gate_unknown:liquidity" not in xd.blocked_by
+
+
+def test_curve_below_floor_still_rejected_same_10k():
+    st = curve_tok(virtual_sol=31, real_sol=1)           # 2*31*150 = $9,300 < $10,000
+    xd, _ = ev(st)
+    assert xd.es.liquidity["decision"] == "FAIL" and "liquidity" in xd.rejected
+
+
+def test_curve_unverifiable_is_watch_never_buy():
+    st = curve_tok(virtual_sol=None, real_sol=10)
+    xd, _ = ev(st)
+    assert xd.es.liquidity["decision"] == "UNKNOWN" and "gate_unknown:liquidity" in xd.blocked_by
+    assert xd.decision == D.WATCH
+
+
+def test_curve_with_shock_or_rug_or_risk_fails_liquidity():
+    for mod in ("shock", "rug", "risk"):
+        st = curve_tok(virtual_sol=60, real_sol=30)
+        if mod == "shock":
+            st.liquidity_intel = LiquidityIntel(state="SHOCK")
+        elif mod == "rug":
+            st.risk = RiskResult(10, "LOW", [RiskFactor("dev_dump", 10, "rug")])
+        else:
+            st.risk = RiskResult(70, "HIGH")
+        xd, _ = ev(st)
+        assert xd.es.liquidity["decision"] == "FAIL" and xd.decision == D.REJECT
+
+
+def test_amm_floor_unchanged():
+    assert ev(hot(liquidity_usd=8_000.0))[0].es.liquidity["decision"] == "FAIL"
+    lq = ev(hot(liquidity_usd=50_000.0))[0].es.liquidity
+    assert lq["decision"] == "PASS" and lq["model"] == "amm_reported" and lq["old"] == D.PASS
+
+
+def test_old_engine_liquidity_rule_untouched():
+    st = curve_tok(virtual_sol=40, real_sol=10)
+    v = D.vet(st, CFG)
+    assert {c.key: c.result for c in v.checks}["liquidity"] == D.FAIL      # OLD/VET still on raw real SOL
+
+
+def test_fill_failure_logs_breakdown_and_keeps_candidate(tmp_path):
+    st = hot(age_s=60)
+    b = bot([st], ScriptedJupiter([J.OK]))
+    b.cfg.experimental = True
+    b.recorder = DatasetRecorder(tmp_path / "r.db")
+    b.exec._slip = lambda s: 0.029                       # simulated latency slippage 2.9 % + impact 0.4 % > 3 %
+    b.tick()
+    asyncio.run(b.execute_intents())
+    assert not b.book.positions
+    f = b.fill_log[-1]
+    assert f["status"] == "FAILED" and f["max_slippage_pct"] == 3.0
+    assert abs(f["total_slippage_pct"] - (f["jupiter_impact_pct"] + f["latency_slippage_pct"])) < 1e-6
+    assert any("PAPER FILL FAILED" in a.text and "candidate kept" in a.text for a in b.activity)
+    row = b.recorder.db.execute("SELECT fill_status, total_slippage_pct, max_slippage_pct, fill_fail_reason, "
+                                "new_liquidity_decision, liquidity_model_used FROM candidates").fetchone()
+    assert row[0] == "FAILED" and row[1] > row[2] and "slippage" in row[3] and row[4] == "PASS"
+    assert b.audit.funnel["fill_fail"] == 1

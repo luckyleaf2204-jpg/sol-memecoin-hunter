@@ -70,6 +70,7 @@ class PaperBot:
         self.recorder = None                   # research.dataset.DatasetRecorder (read-only research log)
         self._gate_waiting: set[str] = set()   # experimental: ever WATCH because authority / Token-2022 unchecked
         self.fast_promoted: set[str] = set()   # ...and later a NEW candidate after the fast lane checked them
+        self.fill_log: list[dict] = []          # every paper BUY fill attempt: impact / latency slip / total / max
         self._last_followup = 0.0
 
     # ---------------------------------------------------------------- helpers
@@ -212,6 +213,11 @@ class PaperBot:
                                 "early_score": xd.es.as_dict(), "new_opportunity": xd.opportunity,
                                 "new_confidence": xd.confidence,
                                 "new_early": "PASS" if xd.es.passed else ("UNKNOWN" if xd.es.score is None else "LOW")})
+                    lq = xd.es.liquidity or {}
+                    rec.update({"old_liquidity": lq.get("old"), "new_liquidity": lq.get("decision"),
+                                "liquidity_model": lq.get("model"), "liquidity_equivalent_usd": lq.get("equivalent_usd"),
+                                "liquidity_confidence": lq.get("confidence"), "curve_real_sol": lq.get("real_sol"),
+                                "curve_virtual_sol": lq.get("virtual_sol")})
                 else:
                     rec["early_score"] = X.early_score(st, now, self.cfg).as_dict()   # logged only (A/B)
                 rec["risk_allowed"], rec["risk_reasons"], rec["state"] = None, [], decision
@@ -553,6 +559,16 @@ class PaperBot:
             ex = self.exec.buy_from_quote(st, usd, q, sol, now)
             self._rec("quote", st, rec, now, "OK", "filled" if ex.status == "FILLED" else f"paper fill failed: {ex.reason}",
                       q, ex.status == "FILLED", int(self.cfg.max_slippage_pct * 100))
+            fill = {"jupiter_impact_pct": round(ex.price_impact_pct, 3), "latency_slippage_pct": round(ex.slippage_pct, 3),
+                    "total_slippage_pct": round(ex.price_impact_pct + ex.slippage_pct, 3),
+                    "max_slippage_pct": self.cfg.max_slippage_pct, "status": ex.status,
+                    "fail_reason": "" if ex.status == "FILLED" else ex.reason}
+            self.fill_log.append({"ts": now, "mint": mint, "symbol": st.info.symbol, **fill})
+            del self.fill_log[:-300]
+            self.audit.execution("fill_ok" if ex.status == "FILLED" else "fill_fail", st, now,
+                                 f"impact {fill['jupiter_impact_pct']}% + latency {fill['latency_slippage_pct']}% = "
+                                 f"{fill['total_slippage_pct']}% (max {fill['max_slippage_pct']}%)", reason=fill["fail_reason"])
+            self._rec("fill", st, now, fill)
             if ex.status == "FILLED":
                 self.book.open(ex, self.cfg, now, it.get("opportunity"), it.get("why"), st.market.liquidity_usd,
                                st.market.vol_5m, setup=it.get("setup", ""))
@@ -562,7 +578,10 @@ class PaperBot:
                 self.audit.execution("buy", st, now, f"${usd:,.2f} @ {ex.fill_price:.8g} · {ex.route}")
             else:
                 self.book.record(ex)
-                self.log("FAILED", f"BUY: {ex.reason}", st, now=now)
+                self.log("FAILED", f"BUY → QUOTE → MATCH → PAPER FILL FAILED: {ex.reason} · Jupiter impact "
+                                   f"{fill['jupiter_impact_pct']:.2f}% + simulated latency slippage "
+                                   f"{fill['latency_slippage_pct']:.2f}% = {fill['total_slippage_pct']:.2f}% "
+                                   f"(max {fill['max_slippage_pct']}%) · candidate kept", st, now=now)
                 self.audit.execution("skip", st, now, ex.reason, reason="paper_fill_failed")
         self.persist()
 

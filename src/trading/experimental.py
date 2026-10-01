@@ -78,6 +78,7 @@ class EarlyScore:
     prior_risk: int = 0
     final_risk: int | None = None
     prior_reasons: list = field(default_factory=list)
+    liquidity: dict | None = None        # NEW liquidity model (A/B of the floor), set by evaluate()
 
     def as_dict(self) -> dict:
         d = asdict(self)
@@ -185,6 +186,65 @@ def s_lifecycle(st: TokenState) -> float | None:
     return max(vals) if vals else None
 
 
+# ---------------------------------------------------------------- liquidity model (A/B of the $10K floor)
+def liquidity_model(st: TokenState, cfg: TradingConfig, old_result: str | None = None) -> dict:
+    """NEW liquidity floor (A/B vs the OLD VET rule "liquidity_usd >= floor"). Same floor (cfg.min_liquidity_usd).
+
+    AMM (DexScreener pool): equivalent = reported liquidity (both sides).
+    Bonding curve: the OLD rule compared the REAL SOL in the curve (starts at ~0, i.e. only near-graduation curves
+    pass). The curve prices trades on its VIRTUAL reserve, so its AMM-equivalent depth = 2 x virtual SOL x SOL price —
+    computed only from REPORTED Pump.fun reserves that passed validation (fresh, consistent, SOL quote).
+    PASS requires: equivalent >= floor · data verified · no liquidity SHOCK · no rug signature · observed Risk <= 60 ·
+    identity VERIFIED. Unverified / missing curve data -> UNKNOWN (WATCH, never BUY)."""
+    from pumpfun.client import SOL_QUOTES
+    m, info = st.market, st.info
+    out = {"old": old_result, "model": "none", "equivalent_usd": None, "confidence": "NONE", "verified": False,
+           "real_sol": info.real_sol_reserves, "virtual_sol": info.virtual_sol_reserves,
+           "source": m.liquidity_source if m else "", "decision": "UNKNOWN", "why": []}
+    if m is None or m.liquidity_usd is None:
+        out["why"].append("no liquidity data")
+    elif m.liquidity_source == "dexscreener_amm":
+        out.update(model="amm_reported", equivalent_usd=m.liquidity_usd, confidence="HIGH",
+                   verified=time.time() - m.updated_at <= cfg.max_data_age_s)
+        if not out["verified"]:
+            out["why"].append("AMM liquidity stale")
+    elif m.liquidity_source == "pumpfun_curve":
+        real, virt = info.real_sol_reserves, info.virtual_sol_reserves
+        sol = info.sol_price or ((m.liquidity_usd / real) if real else None)
+        quote_ok = (info.quote_mint or "11111111111111111111111111111111") in SOL_QUOTES
+        if virt and real is not None and virt > real and sol and quote_ok and not info.complete:
+            out.update(model="curve_amm_equivalent", equivalent_usd=2 * virt * sol, confidence="HIGH", verified=True)
+        else:
+            out.update(model="curve_amm_equivalent", confidence="LOW")
+            out["why"].append("curve reserves not verifiable (virtual/real/SOL price/quote)")
+    else:
+        out["why"].append(f"unknown liquidity source {m.liquidity_source!r}")
+    eq = out["equivalent_usd"]
+    rk = st.risk
+    blocks = []
+    if st.liquidity_intel is not None and st.liquidity_intel.state == "SHOCK":
+        blocks.append("liquidity SHOCK")
+    if rk is not None and any(f.category == "rug" for f in rk.factors):
+        blocks.append("rug signature")
+    if rk is not None and rk.score > 60:
+        blocks.append("Risk > 60")
+    if st.identity.status == "CONFLICT":
+        blocks.append("identity CONFLICT")
+    if blocks:
+        out["decision"], out["why"] = "FAIL", out["why"] + blocks
+    elif not out["verified"] or eq is None:
+        out["decision"] = "UNKNOWN"
+    elif eq < cfg.min_liquidity_usd:
+        out["decision"] = "FAIL"
+        out["why"].append(f"equivalent ${eq:,.0f} < ${cfg.min_liquidity_usd:,.0f}")
+    elif st.identity.status != "VERIFIED" or rk is None:
+        out["decision"] = "UNKNOWN"
+        out["why"].append("identity / risk not established yet")
+    else:
+        out["decision"] = "PASS"
+    return out
+
+
 # ---------------------------------------------------------------- risk prior
 def prior_risk(st: TokenState, age_s: float) -> tuple[int, list[str]]:
     m = st.market
@@ -277,10 +337,14 @@ def hard_gates(st: TokenState, v: Vet, es: EarlyScore) -> list[str]:
         out.append("rug")
     if st.liquidity_intel is not None and st.liquidity_intel.state == "SHOCK":
         out.append("liquidity_shock")
-    for k in ("authorities", "token_2022", "dev", "ca", "liquidity"):
+    for k in ("authorities", "token_2022", "dev", "ca"):
         c = checks.get(k)
         if c is not None and c.result == FAIL:
             out.append(k)
+    lq = getattr(es, "liquidity", None)
+    below_floor = lq is not None and lq["verified"] and any(w.startswith("equivalent $") for w in lq["why"])
+    if below_floor:
+        out.append("liquidity")                       # verified depth below the same $10K floor
     h = st.holders if st.holder_status == "ok" and st.holders and st.holders.valid else None
     if h is not None and h.top10_pct is not None and h.top10_pct > TOP10_EXTREME and es.age_s > TOP10_EXTREME_AGE_S:
         out.append("top10_extreme")
@@ -294,6 +358,8 @@ def evaluate(st: TokenState, v: Vet, sc: Score, cfg: TradingConfig, now: float |
     now = now or time.time()
     es = early_score(st, now, cfg)
     checks = {c.key: c for c in v.checks}
+    old_liq = checks["liquidity"].result if "liquidity" in checks else None
+    es.liquidity = liquidity_model(st, cfg, old_liq)
     hard = hard_gates(st, v, es)
     blocked, waiting = [], []
     ident = st.identity.status
@@ -303,6 +369,11 @@ def evaluate(st: TokenState, v: Vet, sc: Score, cfg: TradingConfig, now: float |
     blocked += ["hard:" + h for h in hard]
     for k in MUST_CHECK:
         c = checks.get(k)
+        if k == "liquidity":                               # NEW liquidity model replaces the raw VET floor
+            if es.liquidity["decision"] == "UNKNOWN" and "liquidity" not in hard:
+                blocked.append("gate_unknown:liquidity")
+                waiting.append("market_data")
+            continue
         if c is not None and c.result != PASS and k not in hard and not (k == "rug" and {"risk_gt_60", "rug"} & set(hard)):
             blocked.append("gate_unknown:" + k)
             waiting.append({"authorities": "vet_onchain", "token_2022": "vet_onchain", "rug": "risk",

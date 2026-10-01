@@ -87,11 +87,17 @@ AB_SNAP_COLS = {"engine": "TEXT", "old_decision": "TEXT", "new_decision": "TEXT"
                 "early_score": "REAL", "early_confidence": "REAL", "early_theta": "REAL", "early_gamma": "REAL",
                 "age_bucket": "TEXT", "prior_risk": "REAL", "final_risk": "REAL", "old_early": "TEXT",
                 "new_early": "TEXT", "old_opportunity": "REAL", "new_opportunity": "REAL", "old_confidence": "REAL",
-                "new_confidence": "REAL"}
+                "new_confidence": "REAL", "old_liquidity_decision": "TEXT", "new_liquidity_decision": "TEXT",
+                "liquidity_model_used": "TEXT", "liquidity_equivalent_usd": "REAL", "liquidity_confidence": "TEXT",
+                "curve_real_sol": "REAL", "curve_virtual_sol": "REAL"}
 AB_CAND_COLS = {"engine": "TEXT", "old_decision": "TEXT", "new_decision": "TEXT", "old_candidate": "INTEGER",
                 "new_candidate": "INTEGER", "blocked_by_old": "TEXT", "blocked_by_new": "TEXT", "early_score": "REAL",
                 "early_confidence": "REAL", "early_theta": "REAL", "early_gamma": "REAL", "age_bucket": "TEXT",
-                "age_sec": "REAL", "prior_risk": "REAL", "final_risk": "REAL", "simulated_fill": "INTEGER"}
+                "age_sec": "REAL", "prior_risk": "REAL", "final_risk": "REAL", "simulated_fill": "INTEGER",
+                "old_liquidity_decision": "TEXT", "new_liquidity_decision": "TEXT", "liquidity_model_used": "TEXT",
+                "liquidity_equivalent_usd": "REAL", "liquidity_confidence": "TEXT", "jupiter_impact_pct": "REAL",
+                "latency_slippage_pct": "REAL", "total_slippage_pct": "REAL", "max_slippage_pct": "REAL",
+                "fill_status": "TEXT", "fill_fail_reason": "TEXT"}
 
 
 def migrate(db: sqlite3.Connection) -> None:
@@ -114,7 +120,12 @@ def ab_fields(rec: dict | None) -> dict:
             "early_gamma": es.get("gamma"), "age_bucket": es.get("bucket"), "prior_risk": es.get("prior_risk"),
             "final_risk": es.get("final_risk"), "old_early": rec.get("old_early"), "new_early": rec.get("new_early"),
             "old_opportunity": rec.get("old_opportunity"), "new_opportunity": rec.get("new_opportunity"),
-            "old_confidence": rec.get("old_confidence"), "new_confidence": rec.get("new_confidence")}
+            "old_confidence": rec.get("old_confidence"), "new_confidence": rec.get("new_confidence"),
+            "old_liquidity_decision": rec.get("old_liquidity"), "new_liquidity_decision": rec.get("new_liquidity"),
+            "liquidity_model_used": rec.get("liquidity_model"),
+            "liquidity_equivalent_usd": rec.get("liquidity_equivalent_usd"),
+            "liquidity_confidence": rec.get("liquidity_confidence"), "curve_real_sol": rec.get("curve_real_sol"),
+            "curve_virtual_sol": rec.get("curve_virtual_sol")}
 
 
 SNAP_COLS = ("snapshot_id", "ca", "ts", "age_sec", "source", "stage", "reason", "mc_usd", "price_usd", "liq_usd",
@@ -376,12 +387,14 @@ class DatasetRecorder:
         self.db.execute(
             "UPDATE candidates SET engine=?, old_decision=?, new_decision=?, old_candidate=?, new_candidate=?, "
             "blocked_by_old=?, blocked_by_new=?, early_score=?, early_confidence=?, early_theta=?, early_gamma=?, "
-            "age_bucket=?, age_sec=?, prior_risk=?, final_risk=? WHERE id=?",
+            "age_bucket=?, age_sec=?, prior_risk=?, final_risk=?, old_liquidity_decision=?, new_liquidity_decision=?, "
+            "liquidity_model_used=?, liquidity_equivalent_usd=?, liquidity_confidence=? WHERE id=?",
             (ab["engine"], ab["old_decision"], ab["new_decision"], int(bool(rec.get("old_candidate"))),
              int(exp and rec.get("decision") == "TRADE"), ab["blocked_by_old"],
              json.dumps(rec.get("blocked_by") or []) if exp else None, ab["early_score"], ab["early_confidence"],
              ab["early_theta"], ab["early_gamma"], ab["age_bucket"], es.get("age_s"), ab["prior_risk"],
-             ab["final_risk"], cid))
+             ab["final_risk"], ab["old_liquidity_decision"], ab["new_liquidity_decision"], ab["liquidity_model_used"],
+             ab["liquidity_equivalent_usd"], ab["liquidity_confidence"], cid))
         self.cand_open[ca] = cid
         if p is not None and "candidate" not in t["anchors"]:
             t["anchors"]["candidate"] = (now, p)
@@ -389,6 +402,17 @@ class DatasetRecorder:
         self.counters["candidates"] += 1
         self._flush()
         return cid
+
+    def fill(self, st, now: float, f: dict) -> None:
+        """Paper fill attempt on a real quote: Jupiter impact / simulated latency slippage / total / max / reason."""
+        cid = self.cand_open.get(st.mint)
+        if cid is None:
+            return
+        self.db.execute("UPDATE candidates SET jupiter_impact_pct=?, latency_slippage_pct=?, total_slippage_pct=?, "
+                        "max_slippage_pct=?, fill_status=?, fill_fail_reason=? WHERE id=?",
+                        (f["jupiter_impact_pct"], f["latency_slippage_pct"], f["total_slippage_pct"],
+                         f["max_slippage_pct"], f["status"], f["fail_reason"] or None, cid))
+        self.db.commit()
 
     def candidate_ended(self, ca: str) -> None:
         self.cand_open.pop(ca, None)

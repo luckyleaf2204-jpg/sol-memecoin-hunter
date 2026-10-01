@@ -158,6 +158,7 @@ async def run(minutes):
     stop = asyncio.Event()
     tasks = [asyncio.create_task(eng.run()), asyncio.create_task(bot.run(stop))]
     shocks, es_pass, liq_blocked, best = {}, {}, {}, {}
+    promo, cand_first, paths = {}, {}, {}
     end = time.time() + minutes * 60
     while time.time() < end:
         await asyncio.sleep(10)
@@ -191,6 +192,28 @@ async def run(minutes):
                    "decision": rec.get("decision"), "old_decision": rec.get("old_decision"),
                    "blocked_by": rec.get("blocked_by"), "curve": bool(m and m.is_curve), "graduated": bool(st.info.complete)}
             k = st.mint
+            px = m.price_usd if m else None
+            if rec.get("old_liquidity") == D.FAIL and rec.get("new_liquidity") == "PASS":
+                g = {"early_score": bool(es.get("score") is not None and es["score"] >= es["theta"]
+                                         and es["confidence"] >= es["gamma"]),
+                     "opportunity_ge_65": (rec.get("opportunity") or 0) >= 65,
+                     "confidence_ge_60": (rec.get("confidence") or 0) >= 60,
+                     "risk_le_60": st.risk is not None and st.risk.score <= 60,
+                     "vet_no_true_fail": not any(b.startswith("hard:") for b in rec.get("blocked_by") or []),
+                     "candidate": rec.get("decision") == "TRADE"}
+                if k not in promo:
+                    promo[k] = {"ca": k, "symbol": st.info.symbol, "ts": now, "price": px, "age_s": row["age_s"],
+                                "real_usd": m.liquidity_usd if m else None,
+                                "equivalent_usd": rec.get("liquidity_equivalent_usd"),
+                                "gates_ever": dict(g), "blocked_by_first": rec.get("blocked_by")}
+                else:
+                    for gk, gv in g.items():
+                        promo[k]["gates_ever"][gk] = promo[k]["gates_ever"][gk] or gv
+            if rec.get("decision") == "TRADE" and k not in cand_first:
+                cand_first[k] = {"ts": now, "price": px, "symbol": st.info.symbol,
+                                 "liquidity_promoted": k in promo, "liquidity_model": rec.get("liquidity_model")}
+            if (k in promo or k in cand_first) and px:
+                paths.setdefault(k, []).append((now, px))
             if k not in best or (row["opportunity"] or 0) >= (best[k]["opportunity"] or 0):
                 best[k] = row
             if es.get("score") is not None and es["score"] >= es["theta"] and es["confidence"] >= es["gamma"]:
@@ -201,11 +224,88 @@ async def run(minutes):
     stop.set()
     eng.stop()
     await asyncio.gather(*tasks, return_exceptions=True)
-    return bot, eng, shocks, es_pass, liq_blocked, best
+    return bot, eng, shocks, es_pass, liq_blocked, best, promo, cand_first, paths
 
 
-def report(bot, eng, shocks, es_pass, liq_blocked, best):
+def fwd(path, t0, p0, horizons=(60, 300, 600, 900)):
+    if not path or not p0:
+        return {}
+    after = [(t, p) for t, p in path if t >= t0]
+    rets = [p / p0 - 1 for _, p in after]
+    out = {"mfe_pct": round(100 * max(rets), 1) if rets else None, "mae_pct": round(100 * min(rets), 1) if rets else None,
+           "observed_s": round(after[-1][0] - t0) if after else 0}
+    for h in horizons:
+        pts = [p for t, p in after if t0 + h - 15 <= t <= t0 + h + 15]
+        out[f"ret_{h // 60}m_pct"] = round(100 * (pts[-1] / p0 - 1), 1) if pts else None
+    return out
+
+
+def sim_trade(path, t0, p0, cost):
+    """Simplified: entry p0*(1+cost); first of +30 % / -15 %; else marked at the last observed price (end of run)."""
+    if not path or not p0:
+        return None, "no_price"
+    entry = p0 * (1 + cost)
+    last = None
+    for t, p in path:
+        if t < t0:
+            continue
+        r = p / entry - 1
+        last = p
+        if r >= 0.30:
+            return round(100 * (p * (1 - cost) / entry - 1), 1), "tp30"
+        if r <= -0.15:
+            return round(100 * (p * (1 - cost) / entry - 1), 1), "sl15"
+    return (round(100 * (last * (1 - cost) / entry - 1), 1), "mark_end_of_run") if last else (None, "no_price")
+
+
+def report(bot, eng, shocks, es_pass, liq_blocked, best, promo=None, cand_first=None, paths=None):
     out = {}
+    promo, cand_first, paths = promo or {}, cand_first or {}, paths or {}
+    fills = bot.fill_log
+    ok = [f for f in fills if f["status"] == "FILLED"]
+    fail = [f for f in fills if f["status"] != "FILLED"]
+
+    def avg(xs, k):
+        return round(sum(x[k] for x in xs) / len(xs), 2) if xs else None
+    out["fills"] = {"attempts": len(fills), "filled": len(ok), "failed": len(fail),
+                    "success_rate_pct": round(100 * len(ok) / len(fills), 1) if fills else None,
+                    "failure_reasons": dict(collections.Counter(f["fail_reason"].split(" (")[0] for f in fail)),
+                    "avg_jupiter_impact_pct": avg(fills, "jupiter_impact_pct"),
+                    "avg_latency_slippage_pct": avg(fills, "latency_slippage_pct"),
+                    "avg_total_pct": avg(fills, "total_slippage_pct"), "max_allowed_pct": bot.cfg.max_slippage_pct,
+                    "failed_avg_impact_pct": avg(fail, "jupiter_impact_pct"),
+                    "failed_avg_latency_pct": avg(fail, "latency_slippage_pct")}
+    pr = list(promo.values())
+    gate_counts = collections.Counter(gk for r in pr for gk, gv in r["gates_ever"].items() if gv)
+    all_gates = sum(1 for r in pr if all(v for k, v in r["gates_ever"].items() if k != "candidate"))
+    bought = {e.mint for e in bot.book.executions if e.side == "BUY" and e.status == "FILLED"}
+    fs = [fwd(paths.get(r["ca"]), r["ts"], r["price"]) for r in pr]
+    summary = {}
+    for k in ("ret_1m_pct", "ret_5m_pct", "ret_10m_pct", "ret_15m_pct", "mfe_pct", "mae_pct"):
+        v = [x[k] for x in fs if x.get(k) is not None]
+        if v:
+            summary[k] = {"n": len(v), "median": statistics.median(v), "mean": round(statistics.fmean(v), 1)}
+    out["liquidity_ab"] = {
+        "liquidity_only_promotions": len(pr),
+        "promoted_meeting_each_gate_ever": dict(gate_counts),
+        "promoted_meeting_all_gates_ever": all_gates,
+        "promoted_became_candidate": sum(1 for r in pr if r["ca"] in cand_first),
+        "promoted_paper_buy": sum(1 for r in pr if r["ca"] in bought),
+        "promoted_forward_summary": summary,
+        "promoted_forward": [{"symbol": r["symbol"], "age_s": r["age_s"], "real_usd": r["real_usd"],
+                              "equivalent_usd": r["equivalent_usd"], "gates": r["gates_ever"],
+                              "blocked_by_first": r["blocked_by_first"], **f} for r, f in zip(pr, fs)][:60]}
+    sims = []
+    for k, c in cand_first.items():
+        f = next((x for x in fills if x["mint"] == k), None)
+        cost = ((f["jupiter_impact_pct"] + f["latency_slippage_pct"]) / 100) if f else 0.03
+        pnl, how = sim_trade(paths.get(k), c["ts"], c["price"], cost)
+        sims.append({"symbol": c["symbol"], "liquidity_promoted": c["liquidity_promoted"], "model": c["liquidity_model"],
+                     "bought": k in bought, "sim_pnl_pct": pnl, "exit": how, **fwd(paths.get(k), c["ts"], c["price"])})
+    out["candidates_simulated"] = sims
+    out["risk_spike_after_entry"] = [{"symbol": p.symbol, "after_s": round((p.closed_at or 0) - p.opened_at),
+                                      "net": round(p.realized_usd - p.cost_usd, 2)}
+                                     for p in bot.book.closed if p.exit_reason == "risk_spike"]
     cats = collections.Counter(e["category"] for e in shocks.values())
     n = len(shocks)
     out["liquidity_shock"] = {"events_old_measure": n, "categories": dict(cats),
@@ -246,9 +346,11 @@ def report(bot, eng, shocks, es_pass, liq_blocked, best):
         "counterfactual": r["decomposition"]["counterfactual_opportunity"],
         "unavailable": r["decomposition"]["unavailable_factors"]} for r in rows]
     a = bot.audit.report(top=50)
-    out["run"] = {k: a["stats"][k] for k in ("discovery", "pre_early", "early_watch", "early_score_pass",
-                                              "old_candidates", "new_candidates", "trade_candidate", "buy_candidate",
-                                              "quote_ok", "buy_executed", "buy_simulated_noquote", "buy_skipped")}
+    out["run"] = {k: a["stats"].get(k) for k in ("discovery", "pre_early", "early_watch", "early_score_pass",
+                                                  "old_candidates", "new_candidates", "liquidity_promoted",
+                                                  "liquidity_promoted_candidates", "trade_candidate", "buy_candidate",
+                                                  "quote_ok", "fill_ok", "fill_fail", "buy_executed",
+                                                  "buy_simulated_noquote", "buy_skipped")}
     out["jupiter"] = bot.quote_stats
     out["fast_lane"] = bot.fast_lane_stats()
     out["helius"] = (eng.feeds().get("helius") or {}).get("credits")
