@@ -189,13 +189,14 @@ def test_restart_keeps_positions_and_comes_back_in_paper(tmp_path):
     assert len([e for e in b2.book.executions if e.side == "BUY"]) == 1          # no duplicate after restart
 
 
-def test_live_modes_are_locked_and_auto_is_off():
+def test_auto_is_locked_confirm_runs_on_paper():
     b = bot([good()])
-    assert b.cfg.mode == "PAPER"
-    for m in ("CONFIRM", "AUTO"):
+    assert b.mode == "PAPER" and b.cfg.mode == "PAPER"
+    for m in ("AUTO", "LIVE"):
         with pytest.raises(ModeNotAllowed):
             b.set_mode(m, "BẬT AUTO")
-    assert b.cfg.mode == "PAPER"
+    b.set_mode("CONFIRM")
+    assert b.mode == "CONFIRM" and b.cfg.mode == "PAPER"          # approval layer over the paper executor
 
 
 def test_tslax_is_rejected_never_bought():
@@ -246,9 +247,9 @@ def test_api_mode_locked_and_payload_has_no_secret(tmp_path):
     b.exec.rng.random = lambda: 0.99
     b.tick()
     with TestClient(create_app(engine=eng, start_scanner=False, access_code=CODE, bot=b)) as c:
-        for m in ("CONFIRM", "AUTO"):
-            r = c.post("/api/bot/mode", headers=H, json={"mode": m, "confirm": "BẬT AUTO"})
-            assert r.status_code == 403 and "PAPER only" in r.json()["detail"]
+        r = c.post("/api/bot/mode", headers=H, json={"mode": "AUTO", "confirm": "BẬT AUTO"})
+        assert r.status_code == 403 and "not installed" in r.json()["detail"]
+        assert c.post("/api/bot/mode", headers=H, json={"mode": "CONFIRM"}).json()["mode"] == "CONFIRM"
         assert c.post("/api/bot/mode", headers=H, json={"mode": "PAPER"}).json()["mode"] == "PAPER"
         body = c.get("/api/bot", headers=H).text
     d = json.loads(body)

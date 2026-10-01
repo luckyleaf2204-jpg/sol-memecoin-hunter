@@ -103,6 +103,7 @@ class Position:
     entry_liq: float | None = None
     entry_vol: float | None = None
     stale: bool = False          # no validated price right now -> nothing is sold on a guess
+    setup: str = ""              # how the bot found it (scan reasons), for P&L per setup
     exit_reason: str = ""
     closed_at: float | None = None
 

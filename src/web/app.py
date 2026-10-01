@@ -360,6 +360,27 @@ def create_app(engine: ScannerEngine | None = None, start_scanner: bool = True,
         state["bot"].set_kill(body["engaged"])
         return {"kill_switch": state["bot"].cfg.kill_switch}
 
+    @app.get("/api/bot/pending")
+    async def bot_pending():
+        b = state["bot"]
+        return {"items": list(b.pending.values()) if b else []}
+
+    @app.post("/api/bot/approve/{oid}")
+    async def bot_approve(oid: str):
+        b = state["bot"]
+        if not b or not b.approve(oid):
+            return JSONResponse({"error": "not_pending_or_expired"}, status_code=404)
+        if b.jupiter is not None:
+            await b.execute_intents()
+        else:
+            b.tick()
+        return {"approved": oid}
+
+    @app.post("/api/bot/dismiss/{oid}")
+    async def bot_dismiss(oid: str):
+        b = state["bot"]
+        return {"dismissed": bool(b and b.dismiss(oid))}
+
     @app.post("/api/bot/mode")
     async def bot_mode(request: Request):
         body = await _json(request)
@@ -368,7 +389,7 @@ def create_app(engine: ScannerEngine | None = None, start_scanner: bool = True,
             state["bot"].set_mode(str(mode), str(body.get("confirm", "")) if isinstance(body, dict) else "")
         except ModeNotAllowed as e:
             return JSONResponse({"error": "mode_not_allowed", "detail": str(e)}, status_code=403)
-        return {"mode": state["bot"].cfg.mode}
+        return {"mode": state["bot"].mode, "execution": state["bot"].cfg.mode}
 
     # ------------------------------------------------------------------ PWA static files
     @app.get("/i18n/vi.json")

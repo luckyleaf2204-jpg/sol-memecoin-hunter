@@ -388,3 +388,18 @@ Lớp riêng, **không** thay đổi Early Signal / D1–D8. Early Signal cần 
 - **Sort:** MC (cao / thấp), tuổi, Momentum, Opportunity, Confidence, Risk, volume tăng tốc, buy pressure.
 - **Filter:** VALID, Risk ≤ 60, đủ dữ liệu.
 - **Nguồn quét của Paper Bot:** thêm nguồn `early_watch` (hạng ≥ 60). VET vẫn chặt như cũ.
+
+## 16. Bot — chế độ, thực thi, analytics (bản hiện tại)
+
+- **Một logic quyết định cho mọi chế độ.** Luồng: `TRADE TRIGGER (🟢 Trade Candidate: Early TRUE + VERIFIED + VET + Risk + TRADE) → SIZE → quote Jupiter → kiểm tra lại → FILL → POSITION → EXIT → NET P&L`.
+  - **PAPER:** tự khớp lệnh giả lập trên quote Jupiter thật.
+  - **CONFIRM:** đề xuất lệnh MUA chờ chủ duyệt (hết hạn sau 120 giây). Khi duyệt, lệnh đi qua đúng các bước kiểm tra lại như lệnh tự động. Lệnh BÁN bảo vệ tự chạy.
+  - **AUTO:** giao dịch thật. **Khoá**, vì bản này không có executor thật (`trading.execution.live_available() == False`). Việc tạo/ký giao dịch không được phép trong môi trường phát triển hiện tại, và không có code nào lách giới hạn đó.
+- **Chế độ vận hành vs chế độ thực thi:** `bot.mode` (PAPER/CONFIRM) là chế độ vận hành. `cfg.mode` luôn là `PAPER` (executor đang cài), và Risk Engine không đổi.
+- **Ngay trước MUA:** kiểm tra lại Trade Candidate, Risk, quote Jupiter (khớp mint, price impact ≤ max slippage), kill switch.
+- **Ngay trước BÁN:**
+  - Exit thường (TP, trailing, momentum, volume, thời gian) lấy quote Jupiter. Price impact quá cao thì chờ tick sau; không có quote thì khớp theo mô hình (thoát lệnh không bao giờ bị bỏ).
+  - Exit bảo vệ (SL, risk, liquidity, identity, holder, whale) chạy ngay theo mô hình liquidity.
+- **Không average down / martingale:** mỗi CA chỉ có tối đa một lệnh MUA đang xử lý hoặc chờ duyệt, và không bao giờ mua thêm khi đang giữ.
+- **Restart:** giữ position; xoá lệnh đang xử lý và lệnh chờ duyệt; luôn quay về PAPER.
+- **Analytics:** NET P&L, expectancy/lệnh, TB thắng/thua, profit factor, max drawdown, phí, slippage, P&L theo setup (lý do quét lúc vào lệnh). Dưới 30 lệnh đóng thì hiện cảnh báo "chưa đủ dữ liệu".

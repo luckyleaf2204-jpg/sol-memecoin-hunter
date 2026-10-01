@@ -394,7 +394,7 @@ def test_bot_api_dashboard_payload(web):
 
 def test_mode_auto_is_refused_and_kill_switch_toggles(web):
     c, bot = web
-    for m in ("AUTO", "CONFIRM", "LIVE"):
+    for m in ("AUTO", "LIVE"):
         assert c.post("/api/bot/mode", headers=H, json={"mode": m}).status_code == 403
     assert c.post("/api/bot/kill", headers=H, json={"engaged": True}).json() == {"kill_switch": True}
     assert bot.cfg.kill_switch is True

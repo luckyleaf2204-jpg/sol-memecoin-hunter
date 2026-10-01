@@ -88,7 +88,10 @@ def bot_status(bot: PaperBot, engine=None, now: float | None = None) -> dict:
     return {
         "doing": doing, "scan": scan, "evaluated": evaluated, "exit_rules": exits,
         "live_available": False,
-        "server_time": now, "mode": bot.cfg.mode, "allowed_modes": list(ALLOWED_MODES), "enabled": bot.cfg.enabled,
+        "pending": [{"id": o["id"], "symbol": o["symbol"], "mint": o["mint"], "usd": o["usd"],
+                     "expires_in": max(0, round(o["expires"] - now)), "why": o["why"][:4]} for o in bot.pending.values()],
+        "helius": (engine.feeds().get("helius") if engine is not None and hasattr(engine, "feeds") else None),
+        "server_time": now, "mode": bot.mode, "execution": bot.cfg.mode, "allowed_modes": list(ALLOWED_MODES), "enabled": bot.cfg.enabled,
         "live": bool(bot.last_tick and now - bot.last_tick < 30),
         "last_tick": bot.last_tick, "tick_ms": bot.tick_ms, "ticks": bot.ticks, "ops_per_s": bot.ops_per_s(),
         "kill_switch": bot.cfg.kill_switch, "risk_state": risk_state,

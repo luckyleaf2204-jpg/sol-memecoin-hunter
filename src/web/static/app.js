@@ -769,7 +769,15 @@ async function renderBot(silent) {
   const page = ev.slice(S.prefs.botPage * BOT_PAGE, (S.prefs.botPage + 1) * BOT_PAGE);
   const kpi = (k, v, cls) => `<div class="kpi"><div class="k">${esc(k)}</div><div class="v ${cls || ""}">${v}</div></div>`;
   const cnt = (k, v, hl) => `<div class="cnt${hl ? " hl" : ""}"><b>${esc(v)}</b><span>${esc(t(k))}</span></div>`;
-  const modeBtn = (m) => `<button class="chip${d.mode === m ? " on" : ""}" data-mode="${m}"${m !== "PAPER" && !d.live_available ? " disabled" : ""}>${m === "AUTO" ? "AUTO " + (d.mode === "AUTO" ? "ON" : "OFF") : m}${m !== "PAPER" && !d.live_available ? " 🔒" : ""}</button>`;
+  const locked = (m) => m === "AUTO" && !d.live_available;
+  const modeBtn = (m) => `<button class="chip${d.mode === m ? " on" : ""}" data-mode="${m}"${locked(m) ? " disabled" : ""}>${m === "AUTO" ? "AUTO " + (d.mode === "AUTO" ? "ON" : "OFF") : m}${locked(m) ? " 🔒" : ""}</button>`;
+  const hc = d.helius && d.helius.credits;
+  const pend = (d.pending || []).map((o) => `<div class="ev"><div class="card-head"><a class="sym" href="#/token/${esc(o.mint)}">$${esc(o.symbol)}</a>
+      <span class="name">${esc(money(o.usd))} · ${esc(o.expires_in)}s</span>
+      <button class="btn primary" data-approve="${esc(o.id)}">${esc(t("web.bot.approve"))}</button><button class="btn" data-dismiss="${esc(o.id)}">✕</button></div>
+      <div class="meta">WHY: ${esc(o.why.join(" · "))}</div></div>`).join("");
+  const setupRows = (s.by_setup || []).map((x) => `<div class="kv"><span class="k">${esc(x.setup)}</span><span class="v ${pnlCls(x.net)}">${esc(money(x.net, true))}</span>
+      <div class="meta">${esc(x.trades)} trades · win ${esc(x.win_rate)}% · E ${esc(money(x.expectancy, true))}/trade · PF ${esc(x.profit_factor ?? "—")}</div></div>`).join("");
   const chip = (k) => `<button class="chip${f === k ? " on" : ""}" data-evf="${k}">${esc(k === "ALL" ? t("web.bot.all") : k)} ${esc(k === "ALL" ? d.evaluated.length : d.evaluated.filter((x) => x.action === k).length)}</button>`;
   const posRow = (p) => `<div class="prow"><a class="sym" href="#/token/${esc(p.mint)}">$${esc(p.symbol)}</a>
       <span>${esc(Number(p.entry).toPrecision(3))} → ${p.current === null ? "—" : esc(Number(p.current).toPrecision(3))}</span>
@@ -790,11 +798,14 @@ async function renderBot(silent) {
     <div class="panel"><h3><span>1 · 🤖 BOT STATUS</span><span class="paper">${esc(d.mode)}</span></h3>
       <div class="chips">${modeBtn("PAPER")}${modeBtn("CONFIRM")}${modeBtn("AUTO")}</div>
       ${d.live_available ? "" : `<div class="meta">🔒 ${esc(t("web.bot.live_locked"))}</div>`}
+      ${d.mode === "CONFIRM" ? `<div class="meta c-accent">${esc(t("web.bot.confirm_note"))}</div>` : ""}
       <div class="kpis">${kpi(t("web.bot.balance"), esc(money(s.equity)))}${kpi("NET P&L", esc(money(s.net_pnl, true)) + (s.net_pnl_pct === null ? "" : ` <small>${esc((s.net_pnl_pct > 0 ? "+" : "") + s.net_pnl_pct)}%</small>`), pnlCls(s.net_pnl))}
       ${kpi("Drawdown", esc(s.max_drawdown_pct + "%"), s.max_drawdown_pct >= L.max_drawdown_pct * 0.5 ? "c-orange" : "")}${kpi(t("web.bot.open"), esc(s.open + " / " + L.max_open_positions))}</div></div>
 
     <div class="panel"><h3><span>2 · 🔍 ${esc(t("web.bot.scanning"))}</span><span></span></h3>
-      <div class="cnts">${cnt("web.bot.sc.total", sc.total)}${cnt("web.bot.sc.pre", sc.pre_early)}${cnt("web.bot.sc.watch", sc.early_watch)}${cnt("web.bot.sc.signal", sc.early_signal)}${cnt("web.bot.sc.trade", sc.trade_candidates, true)}</div></div>
+      <div class="cnts">${cnt("web.bot.sc.total", sc.total)}${cnt("web.bot.sc.pre", sc.pre_early)}${cnt("web.bot.sc.watch", sc.early_watch)}${cnt("web.bot.sc.signal", sc.early_signal)}${cnt("web.bot.sc.trade", sc.trade_candidates, true)}</div>
+      ${hc ? `<div class="meta">Helius: ${esc(hc.used.toLocaleString("en-US"))} / ${esc(hc.daily_budget.toLocaleString("en-US"))} ${esc(t("web.bot.credits_today"))} · ${esc(t("web.feed.remaining"))} ${esc(hc.remaining.toLocaleString("en-US"))}${hc.quota_exhausted ? " · ⚠ QUOTA" : ""}${d.helius.deep_skipped && d.helius.deep_skipped.length ? " · " + esc(t("web.feed.skipped")) + ": " + esc(d.helius.deep_skipped.length) : ""}</div>` : ""}</div>
+    ${pend ? `<div class="panel"><h3><span>⏳ ${esc(t("web.bot.pending"))}</span><span>${esc(d.pending.length)}</span></h3>${pend}</div>` : ""}
 
     <div class="panel"><h3><span>3 · 🟢 ${esc(t("web.bot.evaluating"))}</span><span>${esc(d.evaluated.length)}</span></h3>
       <div class="chips">${chip("ALL")}${chip("BUY")}${chip("WATCH")}${chip("REJECT")}</div>
@@ -806,6 +817,14 @@ async function renderBot(silent) {
 
     <div class="panel"><h3><span>5 · 🚪 ${esc(t("web.bot.sell_when"))}</span><span></span></h3>
       ${d.exit_rules.map((r) => stt(t("web.bot.exit." + r.key), esc(r.value))).join("")}</div>
+
+    <div class="panel"><h3><span>📈 PROFIT ANALYTICS</span><span class="${pnlCls(s.net_pnl)}">${esc(money(s.net_pnl, true))}</span></h3>
+      ${s.sample_note === "insufficient" ? `<div class="banner orange">${esc(t("web.bot.sample_small", { n: s.closed }))}</div>` : ""}
+      <div class="kpis">${kpi("Expectancy / trade", esc(money(s.expectancy, true)), pnlCls(s.expectancy))}${kpi("Profit factor", esc(s.profit_factor ?? "—"))}
+      ${kpi(t("web.bot.avg_win_loss"), esc(money(s.avg_win) + " / " + money(s.avg_loss)))}${kpi("Max drawdown", esc(s.max_drawdown_pct + "%"))}
+      ${kpi(t("web.bot.fees"), esc(money(s.fees + s.network_fees)))}${kpi(t("web.bot.slippage"), esc(money(s.slippage_cost)))}
+      ${kpi(t("web.bot.winrate"), s.win_rate === null ? "—" : esc(s.win_rate + "% (" + s.wins + "W/" + s.losses + "L)"))}${kpi(t("web.bot.trades"), esc(s.closed))}</div>
+      <h3><span>${esc(t("web.bot.by_setup"))}</span><span></span></h3>${setupRows || `<div class="muted small">${esc(t("web.bot.no_closed"))}</div>`}</div>
 
     <div class="panel"><h3><span>6 · 📜 ACTIVITY LOG</span><span class="meta">DISCOVER → VET → BUY → HOLD → SELL → NET P&amp;L</span></h3><div class="tlw">${tl}</div></div>
 
@@ -828,6 +847,11 @@ async function renderBot(silent) {
   document.querySelectorAll("[data-evf]").forEach((b) => { b.onclick = () => { S.prefs.botFilter = b.dataset.evf; S.prefs.botPage = 0; savePrefs(); renderBot(true); }; });
   document.querySelectorAll("[data-pg]").forEach((b) => { b.onclick = () => { S.prefs.botPage = (S.prefs.botPage || 0) + Number(b.dataset.pg); savePrefs(); renderBot(true); }; });
   document.querySelectorAll("[data-mod]").forEach((b) => { b.onclick = () => { location.hash = "#/bot/" + b.dataset.mod; }; });
+  document.querySelectorAll("[data-approve]").forEach((b) => { b.onclick = async () => {
+    try { await api("/api/bot/approve/" + encodeURIComponent(b.dataset.approve), { method: "POST" }); toast(t("web.bot.approved")); renderBot(true); }
+    catch (e) { toast(t("web.error") + ": " + e.message); } }; });
+  document.querySelectorAll("[data-dismiss]").forEach((b) => { b.onclick = async () => {
+    try { await api("/api/bot/dismiss/" + encodeURIComponent(b.dataset.dismiss), { method: "POST" }); renderBot(true); } catch (_) { /* ignore */ } }; });
   document.querySelectorAll("[data-mode]").forEach((b) => { b.onclick = async () => {
     try { await api("/api/bot/mode", { method: "POST", body: { mode: b.dataset.mode } }); renderBot(true); }
     catch (e) { toast(t("web.bot.live_locked")); } }; });

@@ -78,7 +78,8 @@ class PaperBook:
             self.slippage += (ex.ref_price - ex.fill_price) * ex.tokens
             self.cash += ex.usd_in
 
-    def open(self, ex: Execution, cfg, now: float, entry_score=None, why=None, entry_liq=None, entry_vol=None) -> Position:
+    def open(self, ex: Execution, cfg, now: float, entry_score=None, why=None, entry_liq=None, entry_vol=None,
+             setup: str = "") -> Position:
         self.record(ex)
         p = Position(id=self.next_id, mint=ex.mint, symbol=ex.symbol, opened_at=now, entry_price=ex.fill_price,
                      tokens=ex.tokens, cost_usd=ex.usd_in + ex.network_fee_usd, initial_tokens=ex.tokens,
@@ -87,7 +88,8 @@ class PaperBook:
                      trailing_pct=cfg.trailing_pct, high_price=ex.fill_price, last_price=ex.ref_price, last_price_ts=now,
                      fees_usd=ex.fee_usd + ex.network_fee_usd,
                      slippage_usd=(ex.fill_price - ex.ref_price) * ex.tokens,
-                     entry_score=entry_score, entry_why=why or [], entry_liq=entry_liq, entry_vol=entry_vol)
+                     entry_score=entry_score, entry_why=why or [], entry_liq=entry_liq, entry_vol=entry_vol,
+                     setup=setup)
         self.next_id += 1
         self.positions[p.mint] = p
         return p
@@ -131,7 +133,28 @@ class PaperBook:
             "profit_factor": round(sum(wins) / abs(sum(losses)), 2) if losses and sum(losses) != 0 else None,
             "max_drawdown_pct": round(self.max_dd, 2),
             "exposure": round(self.exposure(), 2),
+            # long-term edge, not trade count: expected NET $ per closed trade (None until a trade closed)
+            "expectancy": round(sum(closed_net) / len(closed_net), 2) if closed_net else None,
+            "by_setup": self.by_setup(),
+            "sample_note": "insufficient" if len(closed_net) < 30 else "ok",   # < 30 closed trades: no conclusion
         }
+
+    def by_setup(self) -> list[dict]:
+        groups: dict[str, list[float]] = {}
+        for p in self.closed:
+            groups.setdefault(p.setup or "unknown", []).append(p.realized_usd - p.cost_usd)
+        out = []
+        for setup, nets in groups.items():
+            w = [x for x in nets if x > 0]
+            l_ = [x for x in nets if x <= 0]
+            out.append({"setup": setup, "trades": len(nets), "net": round(sum(nets), 2),
+                        "win_rate": round(100 * len(w) / len(nets), 1),
+                        "expectancy": round(sum(nets) / len(nets), 2),
+                        "avg_win": round(sum(w) / len(w), 2) if w else None,
+                        "avg_loss": round(sum(l_) / len(l_), 2) if l_ else None,
+                        "profit_factor": round(sum(w) / abs(sum(l_)), 2) if l_ and sum(l_) != 0 else None})
+        out.sort(key=lambda x: -x["net"])
+        return out
 
     # ---------------------------------------------------------------- persistence (paper data only, no secrets)
     def save(self, path: Path) -> None:

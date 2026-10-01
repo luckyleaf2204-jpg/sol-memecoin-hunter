@@ -40,7 +40,36 @@ def price_impact(usd: float, liquidity_usd: float | None) -> float | None:
     return usd / (liquidity_usd / 2)
 
 
-class PaperExecutor:
+class LiveExecutorUnavailable(RuntimeError):
+    pass
+
+
+class ExecutionInterface:
+    """What every executor provides. The bot's decision logic is identical for PAPER / CONFIRM / AUTO; only the
+    executor differs. This build ships PaperExecutor only: a live executor (transaction building + signing with a
+    dedicated wallet) is NOT included — `live_available()` is False and AUTO stays locked."""
+    name = "interface"
+    live = False
+
+    def buy(self, st, usd, sol_price, now=None):                      # model fill
+        raise NotImplementedError
+
+    def buy_from_quote(self, st, usd, quote, sol_price, now=None):    # fill on a Jupiter route
+        raise NotImplementedError
+
+    def sell(self, st, tokens, price, sol_price, reason, now=None, force=False):
+        raise NotImplementedError
+
+    def sell_from_quote(self, st, tokens, quote, sol_price, reason, now=None):
+        raise NotImplementedError
+
+
+def live_available() -> bool:
+    return False                      # no live executor in this build (signing is not allowed in this environment)
+
+
+class PaperExecutor(ExecutionInterface):
+    name = "PAPER"
     def __init__(self, seed: int = 7, max_slippage_pct: float = 3.0):
         self.rng = random.Random(seed)
         self.max_slippage = max_slippage_pct / 100
@@ -118,6 +147,32 @@ class PaperExecutor:
         fill = usd / tokens
         return Execution(**base, status="FILLED", usd_in=usd, tokens=tokens, fill_price=fill, price_impact_pct=100 * imp,
                          slippage_pct=100 * slip, fee_usd=0.0, network_fee_usd=net_fee,
+                         model="PAPER on a real Jupiter quote (no transaction sent)")
+
+    def sell_from_quote(self, st: TokenState, tokens: float, quote: dict, sol_price: float | None, reason: str,
+                        now: float | None = None) -> Execution:
+        """PAPER SELL on a real Jupiter route (token -> SOL): output, price impact and route from Jupiter."""
+        from trading.jupiter import price_impact, route_label
+        now = now or time.time()
+        net_fee = self.network_fee(sol_price)
+        latency = self.rng.randint(400, 1500)
+        ref = st.market.price_usd if st.market else None
+        imp = price_impact(quote)
+        base = dict(ts=now, mint=st.mint, symbol=st.info.symbol, side="SELL", route=route_label(quote), ref_price=ref,
+                    latency_ms=latency, reason=reason)
+        try:
+            usd_out = int(quote["outAmount"]) / 1e9 * (sol_price or 0)
+        except (KeyError, TypeError, ValueError):
+            usd_out = 0.0
+        if not ref or imp is None or usd_out <= 0 or tokens <= 0:
+            return Execution(**base, status="REJECTED", reason=f"{reason}: Jupiter quote unusable")
+        slip = self._slip(st)
+        if self._fail(st, imp):
+            return Execution(**base, status="FAILED", network_fee_usd=net_fee, price_impact_pct=100 * imp,
+                             slippage_pct=100 * slip, reason=f"{reason}: transaction failed (simulated)")
+        proceeds = usd_out * (1 - slip)
+        return Execution(**base, status="FILLED", usd_in=proceeds, tokens=tokens, fill_price=proceeds / tokens,
+                         price_impact_pct=100 * imp, slippage_pct=100 * slip, fee_usd=0.0, network_fee_usd=net_fee,
                          model="PAPER on a real Jupiter quote (no transaction sent)")
 
     def sell(self, st: TokenState, tokens: float, price: float, sol_price: float | None, reason: str,
