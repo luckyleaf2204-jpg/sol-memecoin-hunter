@@ -161,11 +161,14 @@ async def run(minutes, research_db=""):
         bot.recorder = DatasetRecorder(research_db, dex=eng.dex)
         from research.onchain import OnchainResearch
         bot.onchain = OnchainResearch(eng.rpc, bot.recorder)
+    from trading.money_flow import MoneyFlowCollector
+    bot.money_flow = MoneyFlowCollector(eng.rpc)
     stop = asyncio.Event()
     tasks = [asyncio.create_task(eng.run()), asyncio.create_task(bot.run(stop))]
     shocks, es_pass, liq_blocked, best = {}, {}, {}, {}
     promo, cand_first, paths = {}, {}, {}
-    lc = {"seen": {}, "setup_pass": {}, "es_pass": {}, "old_cand": {}, "exp_cand": {}, "lc_cand": {}}
+    lc = {"seen": {}, "setup_pass": {}, "es_pass": {}, "old_cand": {}, "exp_cand": {}, "lc_cand": {},
+          "b_cand": {}, "c_cand": {}, "pre_would": {}, "edge_cand": {}}
     buffer_only, buffer_any = set(), set()
     end = time.time() + minutes * 60
     while time.time() < end:
@@ -239,7 +242,18 @@ async def run(minutes, research_db=""):
                 su = rec.get("setup") or {}
                 thr = rec.get("setup_threshold")
                 ctx = {"ts": now, "price": px, "lifecycle": name, "setup_type": rec.get("setup_type"),
-                       "setup_score": su.get("score"), "liq_bucket": lc["seen"][k]["liq_bucket"]}
+                       "setup_score": su.get("score"), "liq_bucket": lc["seen"][k]["liq_bucket"],
+                       "money_flow_score": rec.get("money_flow_score"), "exit_liquidity_risk": rec.get("exit_liquidity_risk"),
+                       "entry_location": rec.get("entry_location"), "cluster_risk": rec.get("cluster_risk"),
+                       "independent_buyer_score": rec.get("independent_buyer_score")}
+                if rec.get("shadow_B_would_buy"):
+                    lc["b_cand"].setdefault(k, ctx)
+                if rec.get("shadow_C_would_buy"):
+                    lc["c_cand"].setdefault(k, ctx)
+                if rec.get("new_edge_shadow_would_buy"):
+                    lc["edge_cand"].setdefault(k, ctx)
+                if rec.get("pre_shadow_decision") == "WOULD_BUY":
+                    lc["pre_would"].setdefault(k, ctx)
                 if su.get("score") is not None and thr is not None and su["score"] >= thr \
                         and su.get("data_confidence", 0) >= bot.cfg.min_setup_confidence and k not in lc["setup_pass"]:
                     try:
@@ -257,7 +271,7 @@ async def run(minutes, research_db=""):
                 if rec.get("decision") == "TRADE":
                     lc["lc_cand"].setdefault(k, ctx)
             if (k in promo or k in cand_first or any(k in lc[x] for x in ("setup_pass", "es_pass", "old_cand",
-                                                                         "exp_cand", "lc_cand"))) and px:
+                                                                         "exp_cand", "lc_cand", "pre_would"))) and px:
                 paths.setdefault(k, []).append((now, px))
             if k not in best or (row["opportunity"] or 0) >= (best[k]["opportunity"] or 0):
                 best[k] = row
@@ -345,6 +359,119 @@ def classify_spike(fx, max_age=30.0):
     return {"symbol": fx["symbol"], "class": cls, "risk_path": [(x["at"], x["risk"]) for x in snaps],
             "added_factors": added, "price_change_to_spike_pct": None if px is None else round(px, 1),
             "spike_at_s": spike["t"], "entry_ctx": fx["ctx"]}
+
+
+def v11_section(bot, paths):
+    """Lifecycle V1.1 research: continuation by money flow / exit liquidity / entry location, A/B (A lifecycle, B +MF,
+    C +MF +exit liquidity, D OLD), NEW fast-SL forensics, slippage buckets, PRE shadow outcomes. Net of slippage."""
+    from research.v11_analysis import pattern_effect, sim_net, slippage_bucket, walk_forward_plan
+    lc = getattr(bot, "_audit_lc", None)
+    if not lc:
+        return None
+    fl = bot.fill_log
+    tot = sorted(f["total_slippage_pct"] for f in fl if f.get("total_slippage_pct") is not None)
+    pooled = tot[len(tot) // 2] if tot else 3.0
+
+    def outcome(k, c, cost=None):
+        f = fwd(paths.get(k), c["ts"], c["price"])
+        mae = f.get("mae_pct")
+        f["rug"] = True if mae is not None and mae <= -80 else (False if f.get("observed_s", 0) >= 600 else None)
+        f["sim_net_pct"], f["sim_exit"] = sim_net(paths.get(k) or [], c["ts"], c["price"], cost if cost is not None else pooled)
+        return f
+
+    def group(d):
+        outs = [outcome(k, c) for k, c in d.items()]
+        med = lambda key: statistics.median([o[key] for o in outs if o.get(key) is not None]) \
+            if any(o.get(key) is not None for o in outs) else None  # noqa: E731
+        lab = [o for o in outs if o["rug"] is not None]
+        sims = [o["sim_net_pct"] for o in outs if o["sim_net_pct"] is not None]
+        run, peak, dd = 0.0, 0.0, 0.0
+        for x in sims:
+            run += x
+            peak = max(peak, run)
+            dd = min(dd, run - peak)
+        return {"n": len(d), "rug": sum(1 for o in lab if o["rug"]), "labelled": len(lab),
+                "ret_5m_med": med("ret_5m_pct"), "ret_10m_med": med("ret_10m_pct"), "ret_30m_med": med("ret_30m_pct"),
+                "ret_60m_med": med("ret_60m_pct"), "mfe_med": med("mfe_pct"), "mae_med": med("mae_pct"),
+                "sim_expectancy_net_pct": round(statistics.fmean(sims), 2) if sims else None,
+                "sim_drawdown_pct": round(dd, 2), "sample": "OK" if len(d) >= 30 else "INSUFFICIENT SAMPLE"}
+
+    def split(d, key, buckets):
+        out = {}
+        for name, pred in buckets.items():
+            out[name] = group({k: c for k, c in d.items() if pred(c.get(key))})
+        return out
+    base = lc["setup_pass"]
+    res = {"pooled_total_slippage_pct": pooled,
+           "money_flow": split(base, "money_flow_score", {">=50": lambda v: v is not None and v >= 50,
+                                                          "<50": lambda v: v is not None and v < 50,
+                                                          "UNKNOWN": lambda v: v is None}),
+           "exit_liquidity": split(base, "exit_liquidity_risk", {"<50": lambda v: v is not None and v < 50,
+                                                                 ">=50": lambda v: v is not None and v >= 50,
+                                                                 "UNKNOWN": lambda v: v is None}),
+           "entry_location": split(base, "entry_location", {n: (lambda n: lambda v: (v or "UNKNOWN") == n)(n) for n in
+                                                            ("EARLY_ENTRY", "MID_MOVE", "EXTENDED", "PULLBACK",
+                                                             "SECOND_WAVE", "UNKNOWN")}),
+           "independent_buyers": split(base, "independent_buyer_score",
+                                       {">=50": lambda v: v is not None and v >= 50, "<50": lambda v: v is not None and v < 50,
+                                        "UNKNOWN": lambda v: v is None}),
+           "ab": {"A_lifecycle": group(lc["lc_cand"]), "B_lifecycle+money_flow": group(lc["b_cand"]),
+                  "C_lifecycle+mf+exit_liq": group(lc["c_cand"]), "NEW_EDGE_shadow": group(lc["edge_cand"]),
+                  "D_old": group(lc["old_cand"])},
+           "pre_shadow": group(lc["pre_would"]) | {"note": "hypothetical entry at the would-buy price, cost = pooled slippage"}}
+    # fast stop-loss forensics (NEW buys, production positions)
+    trades = []
+    for fx in bot.forensics.values():
+        if fx.get("lifecycle") != "NEW":
+            continue
+        p = next((x for x in list(bot.book.closed) + list(bot.book.positions.values()) if x.mint == fx["mint"]), None)
+        if p is None:
+            continue
+        sh = fx.get("shadow_at_entry") or {}
+        pre = (fx.get("pre_entry") or {}).get("T-30s") or {}
+        ent = fx["snaps"][0]
+        runup = (100 * (ent["price"] / pre["price"] - 1)) if pre.get("price") and ent.get("price") else None
+        fill = next((f for f in fl if f.get("mint") == fx["mint"] and f.get("status") == "FILLED"), {})
+        pnl = (100 * (p.realized_usd - p.cost_usd) / p.cost_usd) if p.status == "CLOSED" and p.cost_usd else None
+        trades.append({"symbol": fx.get("symbol"), "fast_sl": bool(fx.get("fast_sl_flag")), "pnl_pct": pnl,
+                       "win": pnl is not None and pnl > 0, "mfe_pct": p.path_log()["mfe_pct"],
+                       "rug": (p.path_log()["mae_pct"] or 0) <= -80, "entry_location": sh.get("entry_location"),
+                       "extension": sh.get("entry_extension"), "money_flow": sh.get("money_flow_score"),
+                       "exit_liq": sh.get("exit_liquidity_risk"), "setup_score": fx.get("setup_score"),
+                       "runup_30s_pct": None if runup is None else round(runup, 2),
+                       "fill_vs_ref_pct": fill.get("fill_vs_ref_pct"), "impact_pct": fill.get("jupiter_impact_pct"),
+                       "latency_slip_pct": fill.get("latency_slippage_pct"), "exit": p.exit_reason,
+                       "held_s": p.path_log()["time_to_exit_s"]})
+    patterns = {
+        "entry EXTENDED": lambda t: None if t["entry_location"] in (None, "UNKNOWN") else t["entry_location"] == "EXTENDED",
+        "extension_5m >= 50%": lambda t: None if t["extension"] is None else t["extension"] >= 50,
+        "run-up 30s before entry >= 10%": lambda t: None if t["runup_30s_pct"] is None else t["runup_30s_pct"] >= 10,
+        "fill above market ref >= 5%": lambda t: None if t["fill_vs_ref_pct"] is None else t["fill_vs_ref_pct"] >= 5,
+        "Jupiter impact >= 2%": lambda t: None if t["impact_pct"] is None else t["impact_pct"] >= 2,
+        "money flow UNKNOWN": lambda t: t["money_flow"] is None,
+        "money flow < 50": lambda t: None if t["money_flow"] is None else t["money_flow"] < 50,
+        "exit liquidity >= 50": lambda t: None if t["exit_liq"] is None else t["exit_liq"] >= 50}
+    res["new_fast_sl"] = {"trades": trades, "fast_sl": sum(1 for t in trades if t["fast_sl"]),
+                          "patterns": {n: pattern_effect(trades, pr) for n, pr in patterns.items()}}
+    # slippage forensics: every fill attempt, simulated from the quote time net of its own estimated slippage
+    sb = {}
+    for f in fl:
+        b = slippage_bucket(f.get("total_slippage_pct"))
+        e = sb.setdefault(b, {"attempts": 0, "filled": 0, "sim": [], "by_lifecycle": collections.Counter()})
+        e["attempts"] += 1
+        e["filled"] += f.get("status") == "FILLED"
+        e["by_lifecycle"][f.get("lifecycle") or "?"] += 1
+        if f.get("quote_price") and f.get("quote_ts"):
+            e["sim"].append(sim_net(paths.get(f["mint"]) or [], f["quote_ts"], f["quote_price"],
+                                    f.get("total_slippage_pct") or pooled)[0])
+    res["slippage_buckets"] = {b: {"attempts": e["attempts"], "fill_probability": round(e["filled"] / e["attempts"], 3),
+                                   "sim_expectancy_net_pct": round(statistics.fmean([x for x in e["sim"] if x is not None]), 2)
+                                   if any(x is not None for x in e["sim"]) else None,
+                                   "by_lifecycle": dict(e["by_lifecycle"])} for b, e in sorted(sb.items())}
+    res["walk_forward"] = walk_forward_plan([time.strftime("%Y-%m-%d", time.gmtime(c["ts"])) for c in base.values()])
+    if bot.money_flow is not None:
+        res["money_flow_collector"] = bot.money_flow.stats()
+    return res
 
 
 def lifecycle_section(bot, paths):
@@ -524,6 +651,7 @@ def report(bot, eng, shocks, es_pass, liq_blocked, best, promo=None, cand_first=
                      "bought": k in bought, "sim_pnl_pct": pnl, "exit": how, **fwd(paths.get(k), c["ts"], c["price"])})
     out["candidates_simulated"] = sims
     out["lifecycle"] = lifecycle_section(bot, paths)
+    out["v11"] = v11_section(bot, paths)
     rugs = []
     for k, c in cand_first.items():
         f = fwd(paths.get(k), c["ts"], c["price"])

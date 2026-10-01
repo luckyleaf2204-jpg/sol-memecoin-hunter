@@ -97,7 +97,13 @@ AB_SNAP_COLS = {"engine": "TEXT", "old_decision": "TEXT", "new_decision": "TEXT"
                 "shadow_antirug_score": "REAL", "lifecycle": "TEXT", "lifecycle_confidence": "TEXT",
                 "migration_progress": "REAL", "setup_type": "TEXT", "setup_score": "REAL", "setup_components": "TEXT",
                 "setup_decision": "TEXT", "setup_timestamp": "REAL", "new_score": "REAL", "premigration_score": "REAL",
-                "second_wave_score": "REAL", "post_state": "TEXT", "experimental_decision": "TEXT"}
+                "second_wave_score": "REAL", "post_state": "TEXT", "experimental_decision": "TEXT",
+                "money_flow_score": "REAL", "independent_buyer_score": "REAL", "cluster_risk": "REAL",
+                "exit_liquidity_risk": "REAL", "entry_location": "TEXT", "entry_extension": "REAL",
+                "new_buyer_count": "INTEGER", "repeat_buyer_ratio": "REAL", "buyer_acceleration": "REAL",
+                "sol_inflow": "REAL", "sol_inflow_acceleration": "REAL", "creator_related_buyers": "INTEGER",
+                "funding_cluster": "INTEGER", "edge_shadow_score": "REAL", "pre_shadow_decision": "TEXT",
+                "shadow_b": "INTEGER", "shadow_c": "INTEGER", "money_flow_coverage": "REAL"}
 AB_CAND_COLS = {"engine": "TEXT", "old_decision": "TEXT", "new_decision": "TEXT", "old_candidate": "INTEGER",
                 "new_candidate": "INTEGER", "blocked_by_old": "TEXT", "blocked_by_new": "TEXT", "early_score": "REAL",
                 "early_confidence": "REAL", "early_theta": "REAL", "early_gamma": "REAL", "age_bucket": "TEXT",
@@ -147,7 +153,21 @@ def ab_fields(rec: dict | None) -> dict:
             "setup_decision": rec.get("setup_decision"), "setup_timestamp": rec.get("setup_timestamp"),
             "new_score": rec.get("new_score"), "premigration_score": rec.get("premigration_score"),
             "second_wave_score": rec.get("second_wave_score"), "post_state": rec.get("post_state"),
-            "experimental_decision": rec.get("experimental_decision")}
+            "experimental_decision": rec.get("experimental_decision"),
+            "money_flow_score": rec.get("money_flow_score"), "independent_buyer_score": rec.get("independent_buyer_score"),
+            "cluster_risk": rec.get("cluster_risk"), "exit_liquidity_risk": rec.get("exit_liquidity_risk"),
+            "entry_location": rec.get("entry_location"), "entry_extension": rec.get("entry_extension"),
+            "new_buyer_count": (rec.get("money_flow") or {}).get("new_buyer_count"),
+            "repeat_buyer_ratio": (rec.get("money_flow") or {}).get("repeat_buyer_ratio"),
+            "buyer_acceleration": (rec.get("money_flow") or {}).get("buyer_acceleration"),
+            "sol_inflow": (rec.get("money_flow") or {}).get("net_sol_inflow"),
+            "sol_inflow_acceleration": (rec.get("money_flow") or {}).get("sol_inflow_acceleration"),
+            "creator_related_buyers": (rec.get("money_flow") or {}).get("creator_related_buyers"),
+            "funding_cluster": (rec.get("money_flow") or {}).get("funding_cluster_max"),
+            "edge_shadow_score": rec.get("edge_shadow_score"), "pre_shadow_decision": rec.get("pre_shadow_decision"),
+            "shadow_b": int(bool(rec.get("shadow_B_would_buy"))) if rec.get("engine") == "lifecycle" else None,
+            "shadow_c": int(bool(rec.get("shadow_C_would_buy"))) if rec.get("engine") == "lifecycle" else None,
+            "money_flow_coverage": (rec.get("money_flow") or {}).get("coverage")}
 
 
 SNAP_COLS = ("snapshot_id", "ca", "ts", "age_sec", "source", "stage", "reason", "mc_usd", "price_usd", "liq_usd",

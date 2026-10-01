@@ -59,6 +59,7 @@ class TradingConfig:
     # LIFECYCLE engine (Lifecycle-Aware Hunter V1). Conservative initial thresholds, chosen for A/B and later
     # calibration — not to produce BUYs. The server turns the engine on (LIFECYCLE_ENGINE=1).
     lifecycle: bool = False
+    pre_migration_shadow: bool = True        # V1.1: PRE-MIGRATION setups are SHADOW only (would_buy logged, no BUY)
     premigration_progress_min: float = 70.0  # Pump.fun curve progress (%) that makes a curve PRE_MIGRATION
     new_setup_threshold: float = 70.0
     premigration_setup_threshold: float = 70.0

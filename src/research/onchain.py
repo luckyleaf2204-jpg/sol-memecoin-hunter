@@ -77,7 +77,8 @@ def parse_tx(tx: dict, mint: str, wallet: str | None = None) -> dict | None:
                 sol_out.append((info["destination"], (info.get("lamports") or 0) / 1e9))
     return {"slot": tx.get("slot"), "t": tx.get("blockTime"), "who": who, "side": side, "tokens": round(d_tok, 4),
             "sol": None if d_sol is None else round(d_sol, 6), "sol_out": sol_out,
-            "deltas": {o: round(v, 4) for o, v in deltas.items() if v}}
+            "deltas": {o: round(v, 4) for o, v in deltas.items() if v},
+            "pre_bal": {o: round(v, 4) for o, v in pre.items() if v}}
 
 
 def pool_owners(txs: list[dict]) -> set[str]:

@@ -787,6 +787,22 @@ function lcSummary(d) {
   return `<div class="panel"><h3><span>LIFECYCLE</span><span class="meta">${esc(d.engine || "")}</span></h3>${row("NEW")}${row("PRE_MIGRATION")}${row("POST_MIGRATION")}${row("UNKNOWN")}${unk ? `<div class="meta">UNKNOWN: ${esc(unk)}</div>` : ""}</div>`;
 }
 
+function shadowLine(x) {
+  const s = x.shadow;
+  if (!s) return "";
+  const v = (k) => (s[k] === null || s[k] === undefined ? "—" : esc(s[k]));
+  const any = ["money_flow_score", "exit_liquidity_risk", "entry_location", "pre_shadow_decision"].some((k) => s[k] !== null && s[k] !== undefined);
+  if (!any) return "";
+  return `<div class="c-muted"><b>[SHADOW — không phải lệnh BUY]</b> Money Flow ${v("money_flow_score")} · Independent ${v("independent_buyer_score")} (${v("independence")}) · Cluster ${v("cluster_risk")} · Exit Liquidity ${v("exit_liquidity_risk")} · Entry ${v("entry_location")}${s.pre_shadow_decision ? " · PRE " + v("pre_shadow_decision") : ""}</div>`;
+}
+
+function shadowTables(d) {
+  const rows = (d.evaluated || []).filter((x) => x.shadow && (x.shadow.money_flow_score != null || x.shadow.exit_liquidity_risk != null || x.shadow.entry_location));
+  if (!rows.length) return "";
+  const tr = rows.slice(0, 15).map((x) => `<tr><td>${esc(x.symbol || "")}</td><td>${esc(x.lifecycle || "")}</td><td>${esc(x.shadow.money_flow_score ?? "—")}</td><td>${esc(x.shadow.independent_buyer_score ?? "—")}</td><td>${esc(x.shadow.cluster_risk ?? "—")}</td><td>${esc(x.shadow.exit_liquidity_risk ?? "—")}</td><td>${esc(x.shadow.entry_location || "—")}</td><td>${esc(x.action)}</td></tr>`).join("");
+  return `<div class="panel"><h3><span>MONEY FLOW · EXIT LIQUIDITY · ENTRY LOCATION</span><span class="meta">SHADOW (research only)</span></h3><div class="tblw"><table class="tbl"><thead><tr><th>TOKEN</th><th>LIFECYCLE</th><th>MONEY FLOW</th><th>INDEP.</th><th>CLUSTER</th><th>EXIT LIQ</th><th>ENTRY</th><th>LIVE ACTION</th></tr></thead><tbody>${tr}</tbody></table></div></div>`;
+}
+
 function esLine(x) {
   const e = x.early_score;
   if (!e) return "";
@@ -822,7 +838,7 @@ function candRow(x) {
     <div class="c-n ${x.identity === "VERIFIED" ? "c-green" : x.identity === "CONFLICT" ? "c-red" : "c-muted"}" data-l="ID">${x.identity === "VERIFIED" ? "✓ VERIFIED" : esc(x.identity)}</div>
     <div class="c-n ${x.vet === "PASS" ? "c-green" : "c-orange"}" data-l="VET">${esc(x.vet)}</div>
     <div class="c-dec"><span class="dec ${decisionCls(x.action)}">${esc(x.action === "WATCH" ? t("web.wait.badge") : x.action)}</span></div>
-    <div class="c-why">${waitLine(x)}${x.action !== "BUY" && (x.blocked_by || []).length ? `<div class="c-muted">BLOCKED_BY: ${esc(x.blocked_by.slice(0, 5).join(", "))}</div>` : ""}${lcLine(x)}${esLine(x)}<div>${esc(why)}</div></div></div>`;
+    <div class="c-why">${waitLine(x)}${x.action !== "BUY" && (x.blocked_by || []).length ? `<div class="c-muted">BLOCKED_BY: ${esc(x.blocked_by.slice(0, 5).join(", "))}</div>` : ""}${lcLine(x)}${shadowLine(x)}${esLine(x)}<div>${esc(why)}</div></div></div>`;
 }
 async function renderBot(silent) {
   let d;
@@ -929,6 +945,7 @@ async function renderBot(silent) {
 
   <section class="b-more">
     ${lcSummary(d)}
+    ${shadowTables(d)}
     ${auditPanel(d)}
     <details class="sec" data-k="bot_more"${S.open.bot_more ? " open" : ""}><summary>${esc(t("web.bot.details"))}</summary><div class="sec-body">
       <div class="panel"><h3><span>${esc(t("web.bot.balance_history"))}</span><span class="${pnlCls(s.net_pnl)}">${esc(money(s.equity))}</span></h3>${areaChart(d.equity_history)}</div>

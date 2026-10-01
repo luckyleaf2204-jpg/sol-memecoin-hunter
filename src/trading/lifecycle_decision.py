@@ -33,6 +33,7 @@ class LifecycleDecision:
     why: list = field(default_factory=list)
     es: object | None = None                 # EarlyScore (logged; also carries the liquidity model)
     threshold: float | None = None
+    pre_shadow_would_buy: bool = False       # PRE-MIGRATION in shadow mode: what it WOULD have done
 
 
 def threshold_for(setup_type: str, cfg) -> float:
@@ -114,5 +115,10 @@ def evaluate(st, v, sc, cfg, now: float | None = None, tr=None, h=None, onchain_
     if ident != "VERIFIED":
         return LifecycleDecision(PENDING_IDENTITY, li, setup, blocked, waiting, [], why, es, thr)
     if not blocked:
+        if setup is not None and setup.setup_type == "PRE_MIGRATION" and getattr(cfg, "pre_migration_shadow", False):
+            d = LifecycleDecision(WATCH, li, setup, ["pre_migration_shadow"], [], [],
+                                  ["PRE-MIGRATION SHADOW: would BUY (no order)"] + why, es, thr)
+            d.pre_shadow_would_buy = True
+            return d
         return LifecycleDecision(TRADE, li, setup, [], [], [], why, es, thr)
     return LifecycleDecision(WATCH, li, setup, blocked, waiting, [], ["waiting: " + ", ".join(blocked[:4])] + why, es, thr)

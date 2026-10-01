@@ -233,7 +233,7 @@ def test_exit_engine_mapping_uses_exit_thresholds():
     e = exit_status(p, st, b.cfg)
     assert e["liquidity"]["state"] == "hit" and e["risk"]["state"] == "hit"
     d = bot_status(b, b.engine)
-    assert d["version"] == "web-9" and d["positions"][0]["exit_state"].startswith("EXIT")
+    assert d["version"] == "web-10" and d["positions"][0]["exit_state"].startswith("EXIT")
     rows = {r["key"]: r for r in d["exit_engine"]}
     assert rows["liquidity"]["hit"] == 1 and rows["take_profit"]["watching"] == 1
 
@@ -245,4 +245,4 @@ def test_bot_page_has_the_seven_areas_and_route_alias():
         assert f'id="{area}"' in js, area
     assert '"#/" + h.slice(1)' in js                                  # "#bot" works like "#/bot"
     html = (STATIC / "index.html").read_text(encoding="utf-8")
-    assert "app.js?v=web-9" in html and "styles.css?v=web-9" in html  # cache-busting on deploy
+    assert "app.js?v=web-10" in html and "styles.css?v=web-10" in html  # cache-busting on deploy

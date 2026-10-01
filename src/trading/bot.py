@@ -74,6 +74,9 @@ class PaperBot:
         self.recorder = None                   # research.dataset.DatasetRecorder (read-only research log)
         self.onchain = None                    # research.onchain.OnchainResearch (shadow anti-rug data, budgeted)
         self.lifecycle_tracker = LC.LifecycleTracker()   # NEW -> PRE -> POST transitions per CA
+        self.money_flow = None                 # trading.money_flow.MoneyFlowCollector (shadow research, budgeted)
+        self._last_mf = 0.0
+        self.pre_buf: dict[str, deque] = {}    # recent shadow snapshots per watched CA (T-30s / -10s / -5s at BUY)
         self._last_onchain = 0.0
         self._gate_waiting: set[str] = set()   # experimental: ever WATCH because authority / Token-2022 unchecked
         self.fast_promoted: set[str] = set()   # ...and later a NEW candidate after the fast lane checked them
@@ -503,7 +506,7 @@ class PaperBot:
                 "model": self.cfg.latency_slippage_model}
 
     # ---------------------------------------------------------------- risk-spike forensics
-    FORENSIC_OFFSETS = (5, 10, 15, 30, 60)
+    FORENSIC_OFFSETS = (5, 10, 15, 30, 60, 120, 300, 600, 1800)
 
     @staticmethod
     def _risk_snap(st, label: str, t_off: float, entry: dict | None = None, buy_ts: float | None = None) -> dict:
@@ -524,8 +527,20 @@ class PaperBot:
     def _forensic_open(self, st, now: float, ctx: dict) -> None:
         entry = self._risk_snap(st, "ENTRY", 0, buy_ts=now)
         entry.update({"risk_new": 0, "risk_data_refresh": 0, "risk_data_stale": 0, "changed": []})
+        pre = list(self.pre_buf.get(st.mint) or [])
+        before = {}
+        for lbl, off in (("T-30s", 30), ("T-10s", 10), ("T-5s", 5)):
+            cand = [x for x in pre if x["t"] <= now - off + 2.5]
+            before[lbl] = cand[-1] if cand else None
+        rec = self.decisions.get(st.mint) or {}
         self.forensics[st.mint] = {"mint": st.mint, "symbol": st.info.symbol, "entry_ts": now, "ctx": ctx,
-                                   "snaps": [entry], "done": set(), "exit": None}
+                                   "snaps": [entry], "done": set(), "exit": None, "pre_entry": before,
+                                   "lifecycle": rec.get("lifecycle_name"), "setup_type": rec.get("setup_type"),
+                                   "setup_score": rec.get("setup_score"),
+                                   "shadow_at_entry": {k: rec.get(k) for k in (
+                                       "money_flow_score", "independent_buyer_score", "cluster_risk",
+                                       "exit_liquidity_risk", "entry_location", "entry_extension",
+                                       "edge_shadow_score", "money_flow")}}
 
     def _forensic_tick(self, states: dict, now: float) -> None:
         for mint, fx in list(self.forensics.items()):
@@ -536,8 +551,12 @@ class PaperBot:
             for off in self.FORENSIC_OFFSETS:
                 if off not in fx["done"] and age >= off:
                     fx["done"].add(off)
-                    fx["snaps"].append(self._risk_snap(st, f"+{off}s", age, fx["snaps"][0], fx["entry_ts"]))
-                    if off == max(self.FORENSIC_OFFSETS) and self.recorder is not None:
+                    snap = self._risk_snap(st, f"+{off}s", age, fx["snaps"][0], fx["entry_ts"])
+                    r = self.decisions.get(mint) or {}
+                    snap.update({k: r.get(k) for k in ("money_flow_score", "exit_liquidity_risk", "entry_location",
+                                                       "cluster_risk")})
+                    fx["snaps"].append(snap)
+                    if off >= 60 and self.recorder is not None:      # upsert progressively (+60s .. +30m)
                         self._rec("forensic", fx)
                     break
         if len(self.forensics) > 200:
@@ -560,7 +579,8 @@ class PaperBot:
             self.log("INFO", f"LIFECYCLE → POST_MIGRATION: NEW / PRE-MIGRATION setups closed, second-wave state "
                              f"started on pair {li.pair_address[:8]}", st, now=now)
         oc = self.onchain.done.get(st.mint) if self.onchain is not None else None
-        ld = LD.evaluate(st, v, sc, self.cfg, now, tr, self._history(st.mint), oc, li)
+        h = self._history(st.mint)
+        ld = LD.evaluate(st, v, sc, self.cfg, now, tr, h, oc, li)
         su = ld.setup
         sd = su.as_dict() if su is not None else None
         rec.update({
@@ -583,12 +603,88 @@ class PaperBot:
             "second_wave_score": sd["score"] if su and su.setup_type == "SECOND_WAVE" else None,
             "post_state": (su.extra.get("post_state") or {}).get("state") if su and su.setup_type == "SECOND_WAVE" else None,
             "early_score": ld.es.as_dict() if ld.es is not None else rec.get("early_score"),
-            "risk_at_lifecycle": st.risk.score if st.risk else None})
+            "risk_at_lifecycle": st.risk.score if st.risk else None,
+            "pre_shadow_decision": "WOULD_BUY" if ld.pre_shadow_would_buy else (
+                ld.decision if su is not None and su.setup_type == "PRE_MIGRATION" else None)})
+        self._shadow(st, rec, su, ld, h, now)
         lq = (ld.es.liquidity if ld.es is not None else None) or {}
         rec.update({"old_liquidity": lq.get("old"), "new_liquidity": lq.get("decision"),
                     "liquidity_model": lq.get("model"), "liquidity_equivalent_usd": lq.get("equivalent_usd"),
                     "liquidity_confidence": lq.get("confidence")})
         return ld.decision
+
+    def _shadow(self, st, rec: dict, su, ld, h, now: float) -> None:
+        """V1.1 SHADOW research on the decision record: money flow, independence, cluster risk, exit liquidity,
+        entry location, NEW_EDGE score and the A/B shadow decisions (B = +money flow, C = +money flow +exit liquidity).
+        Logged only: none of it changes `decision`. Computed for tokens that matter (TRADE, near threshold, held)."""
+        from trading.entry_location import entry_location
+        from trading.exit_liquidity import exit_liquidity
+        from trading.money_flow import money_flow_features, score_money_flow
+        thr = rec.get("setup_threshold")
+        near = su is not None and su.score is not None and thr is not None and su.score >= thr - 20
+        if not (near or ld.decision == TRADE or st.mint in self.book.positions or ld.pre_shadow_would_buy):
+            return
+        mf_rec = self.money_flow.recs.get(st.mint) if self.money_flow is not None else None
+        funders = self.money_flow.funders if self.money_flow is not None else {}
+        f = money_flow_features(mf_rec, now, st.info.creator or None, funders,
+                                st.dev.funding_wallet if st.dev else None)
+        s = score_money_flow(f)
+        el = exit_liquidity(mf_rec, st, now, f)
+        pair = st.market.pair_address if st.market else ""
+        pts = [(p.ts, p.price, p.vol_5m, p.liq) for p in (h.points if h is not None else []) if p.pair == pair]
+        loc = entry_location(pts, now, rec.get("post_state"), f.get("buyer_acceleration"))
+        mfs, elr = s["money_flow_score"], el["exit_liquidity_risk"]
+        edge = None
+        if su is not None and su.score is not None and mfs is not None and elr is not None:
+            edge = round(0.40 * su.score + 0.35 * mfs + 0.25 * (100 - elr)
+                         - (15 if loc["entry_location"] == "EXTENDED" else 0), 1)
+        trade = ld.decision == TRADE
+        rec.update({"money_flow": f, "money_flow_score": mfs, "independent_buyer_score": s["independent_buyer_score"],
+                    "cluster_risk": s["cluster_risk"], "independence": s["independence"],
+                    "money_flow_components": s["components"], "exit_liquidity_risk": elr,
+                    "exit_liquidity_components": el["components"], "entry_location": loc["entry_location"],
+                    "entry_location_detail": loc, "entry_extension": loc["extension_5m_pct"],
+                    "edge_shadow_score": edge,
+                    "shadow_B_would_buy": bool(trade and mfs is not None and mfs >= 50),
+                    "shadow_C_would_buy": bool(trade and mfs is not None and mfs >= 50 and elr is not None and elr < 50),
+                    "new_edge_shadow_would_buy": bool(trade and su is not None and su.setup_type == "NEW"
+                                                      and edge is not None and edge >= 60)})
+        buf = self.pre_buf.setdefault(st.mint, deque(maxlen=24))
+        buf.append({"t": now, "price": st.market.price_usd if st.market else None, "money_flow_score": mfs,
+                    "exit_liquidity_risk": elr, "entry_location": loc["entry_location"],
+                    "extension_5m_pct": loc["extension_5m_pct"], "buy_share": (f.get("buyer_count") or 0),
+                    "vol_5m": st.market.vol_5m if st.market else None,
+                    "liq": st.market.liquidity_usd if st.market else None, "setup_score": rec.get("setup_score"),
+                    "tx_rate": f.get("tx_rate_now"), "repeat_buyer_ratio": f.get("repeat_buyer_ratio")})
+        if len(self.pre_buf) > 400:
+            for k in list(self.pre_buf)[:100]:
+                self.pre_buf.pop(k, None)
+
+    def mf_targets(self, now: float, cap: int = 3) -> list:
+        rows = []
+        for mint, rec in self.decisions.items():
+            if now - rec.get("ts", 0) > 30:
+                continue
+            pri = 0 if mint in self.book.positions else 1 if rec.get("decision") == TRADE else \
+                2 if rec.get("pre_shadow_decision") == "WOULD_BUY" else None
+            su, thr = rec.get("setup") or {}, rec.get("setup_threshold")
+            if pri is None and su.get("score") is not None and thr is not None and su["score"] >= thr - 10:
+                pri = 3
+            if pri is not None:
+                rows.append((pri, -(su.get("score") or 0), mint))
+        return [m for _, _, m in sorted(rows)[:cap]]
+
+    async def _money_flow_round(self, now: float) -> None:
+        states = {s.mint: s for s in (self.engine.published or [])}
+        for mint in self.mf_targets(now):
+            st = states.get(mint)
+            if st is None:
+                continue
+            await self.money_flow.refresh(mint, st.info.creator or None, now)
+            if mint in self.book.positions or (self.decisions.get(mint) or {}).get("decision") == TRADE:
+                rec = self.money_flow.recs.get(mint) or {}
+                recent = [x.get("who") for x in rec.get("txs", [])[-20:] if x.get("side") == "buy"]
+                await self.money_flow.lookup_funding(list(dict.fromkeys(recent))[:6], now)
 
     def lifecycle_summary(self, now: float | None = None) -> dict:
         """Per-lifecycle counts for the dashboard: tokens, candidates, open / closed positions, P&L, and what the bot
@@ -623,10 +719,15 @@ class PaperBot:
         for p in held[:3]:
             doing.append(f"Đang giữ token {getattr(p, 'entry_lifecycle', None) or '?'} — "
                          f"{(p.pnl_pct() or 0):+.1f}%")
-        names = {LC.NEW: "Đang săn NEW", LC.PRE_MIGRATION: "Đang săn PRE-MIGRATION", LC.POST_MIGRATION: "Đang chờ SECOND-WAVE"}
+        names = {LC.NEW: "Đang săn NEW", LC.PRE_MIGRATION: "Đang shadow PRE-MIGRATION (không BUY)",
+                 LC.POST_MIGRATION: "Đang chờ SECOND-WAVE"}
         for k, label in names.items():
             if out[k]["tokens"]:
                 doing.append(f"{label} — {out[k]['tokens']} token")
+        mf = [r for r in self.decisions.values() if now - r.get("ts", 0) <= 30 and r.get("lifecycle_name") == LC.NEW
+              and (r.get("independent_buyer_score") or 0) >= 50]
+        if mf:
+            doing.append(f"Đang săn NEW có dòng tiền độc lập — {len(mf)} token [SHADOW]")
         if not any(out[k]["candidates"] for k in names) and not held:
             doing.append("Không BUY — chưa có setup đạt chuẩn")
         return {"by_lifecycle": out, "unknown_reasons": dict(sorted(unknown_reasons.items(), key=lambda x: -x[1])[:8]),
@@ -697,6 +798,9 @@ class PaperBot:
         if fx is not None and st is not None and fx["exit"] is None:
             fx["exit"] = {"reason": reason, **self._risk_snap(st, "EXIT", now - fx["entry_ts"], fx["snaps"][0],
                                                                fx["entry_ts"])}
+            held = now - fx["entry_ts"]
+            fx["fast_sl_flag"] = reason == "stop_loss" and held <= 15
+            fx["fast_sl_reason"] = f"stop_loss after {held:.0f}s" if fx["fast_sl_flag"] else None
             if self.recorder is not None:
                 self._rec("forensic", fx)
         if ex.status == "FILLED":
@@ -866,6 +970,9 @@ class PaperBot:
                     "total_slippage_bps": round(100 * (ex.price_impact_pct + ex.slippage_pct)),
                     "max_slippage_bps": round(100 * self.cfg.max_slippage_pct), "fill_result": ex.status,
                     "latency_model": self.exec.last_model_used, "requote_drift_bps": drift,
+                    "ref_price": ex.ref_price, "fill_price": ex.fill_price,
+                    "fill_vs_ref_pct": round(100 * (ex.fill_price / ex.ref_price - 1), 3)
+                    if ex.fill_price and ex.ref_price else None,
                     "requote_ts": (getattr(self, "_last_probe", None) or {}).get("requote_ts") if drift is not None else None,
                     "latency_actual_s": (getattr(self, "_last_probe", None) or {}).get("latency_s") if drift is not None else None,
                     "route": ex.route, "liquidity_usd": st.market.liquidity_usd if st.market else None,
@@ -925,6 +1032,12 @@ class PaperBot:
                 if self.recorder is not None and time.time() - self._last_followup >= 30:
                     self._last_followup = time.time()
                     await self.recorder.run_followups()
+                if self.money_flow is not None and time.time() - self._last_mf >= 10:
+                    self._last_mf = time.time()
+                    try:
+                        await self._money_flow_round(time.time())
+                    except Exception as e:                # research never breaks trading
+                        self.log("INFO", f"money flow research error: {type(e).__name__}: {e}")
                 if self.onchain is not None and time.time() - self._last_onchain >= 10:
                     self._last_onchain = time.time()
                     try:

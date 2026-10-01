@@ -44,7 +44,7 @@ AUTH_WINDOW_S, AUTH_MAX_FAILS = 600, 10
 REFRESH_PER_MINT_S, REFRESH_GLOBAL_PER_MIN = 60, 10
 MAX_WATCH = 30
 LIST_KINDS = ("top", "new", "early", "whales", "dev", "social")
-VERSION = "web-9"
+VERSION = "web-10"
 HOME_LIMIT = {"opportunity": 60, "watch": 60, "nodata": 40, "excluded": 40}
 
 
@@ -115,6 +115,9 @@ def create_app(engine: ScannerEngine | None = None, start_scanner: bool = True,
             if os.environ.get("RESEARCH_LOG", "1") != "0":                # research dataset (read-only log)
                 from research.dataset import DatasetRecorder
                 state["bot"].recorder = DatasetRecorder(DATA_DIR / "research.db", dex=state["engine"].dex)
+                if os.environ.get("MONEYFLOW", "1") != "0":                         # shadow money flow (budgeted)
+                    from trading.money_flow import MoneyFlowCollector
+                    state["bot"].money_flow = MoneyFlowCollector(state["engine"].rpc)
                 if os.environ.get("RESEARCH_ONCHAIN", "1") != "0":                  # shadow anti-rug data (budgeted)
                     from research.onchain import OnchainResearch
                     state["bot"].onchain = OnchainResearch(state["engine"].rpc, state["bot"].recorder)

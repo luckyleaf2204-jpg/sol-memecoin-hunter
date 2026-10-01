@@ -119,7 +119,12 @@ def bot_status(bot: PaperBot, engine=None, now: float | None = None) -> dict:
             "migration_progress": rec.get("migration_progress"), "setup_type": rec.get("setup_type"),
             "setup_score": rec.get("setup_score"), "setup_threshold": rec.get("setup_threshold"),
             "setup_confidence": (rec.get("setup") or {}).get("data_confidence"), "post_state": rec.get("post_state"),
-            "experimental_decision": rec.get("experimental_decision")})
+            "experimental_decision": rec.get("experimental_decision"),
+            "shadow": {k: rec.get(k) for k in ("money_flow_score", "independent_buyer_score", "cluster_risk",
+                                                "independence", "exit_liquidity_risk", "entry_location",
+                                                "entry_extension", "edge_shadow_score", "pre_shadow_decision",
+                                                "shadow_B_would_buy", "shadow_C_would_buy")}
+            if rec.get("engine") == "lifecycle" else None})
     evaluated.sort(key=lambda x: (x["action"] != "BUY", -((x["opportunity"] or 0) + (x["confidence"] or 0) - (x["risk"] or 100))))
     if bot.cfg.kill_switch:
         doing = {"kind": "kill"}
@@ -151,7 +156,7 @@ def bot_status(bot: PaperBot, engine=None, now: float | None = None) -> dict:
     return {
         "pipeline": bot.pipeline(now),
         "doing": doing, "scan": scan, "evaluated": evaluated, "exit_rules": exits, "exit_engine": engine_rows,
-        "version": "web-9",
+        "version": "web-10",
         "engine": "lifecycle" if bot.cfg.lifecycle else ("experimental" if bot.cfg.experimental else "old"),
         "lifecycle_summary": bot.lifecycle_summary(now) if hasattr(bot, "lifecycle_summary") else None,
         "fast_lane": bot.fast_lane_stats() if hasattr(bot, "fast_lane_stats") else None,
