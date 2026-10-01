@@ -900,6 +900,7 @@ async function renderBot(silent) {
   </section>
 
   <section class="b-more">
+    ${auditPanel(d)}
     <details class="sec" data-k="bot_more"${S.open.bot_more ? " open" : ""}><summary>${esc(t("web.bot.details"))}</summary><div class="sec-body">
       <div class="panel"><h3><span>${esc(t("web.bot.balance_history"))}</span><span class="${pnlCls(s.net_pnl)}">${esc(money(s.equity))}</span></h3>${areaChart(d.equity_history)}</div>
       <div class="panel"><h3><span>// MESH HEARTBEAT</span><span class="c-accent">${esc(d.ops_per_s)} ops/s</span></h3>${heartbeat(d.live)}</div>
@@ -927,12 +928,42 @@ async function renderBot(silent) {
     catch (e) { toast(t("web.bot.live_locked")); } }; });
   const more = document.querySelector('details[data-k="bot_more"]');
   if (more) more.addEventListener("toggle", () => { S.open.bot_more = more.open; LS.set("openSecs", S.open); });
+  const aud = document.querySelector('details[data-k="bot_audit"]');
+  if (aud) aud.addEventListener("toggle", () => { S.open.bot_audit = aud.open; LS.set("openSecs", S.open); });
   $("#killbtn").onclick = async () => {
     const engage = !d.kill_switch;
     if (engage && !confirm(t("web.bot.kill_confirm"))) return;
     try { await api("/api/bot/kill", { method: "POST", body: { engaged: engage } }); renderBot(true); } catch (e) { toast(t("web.error") + ": " + e.message); }
   };
 }
+function auditPanel(d) {
+  const A = d.audit;
+  if (!A) return "";
+  const s = A.stats, nb = A.near || {};
+  const row = (k, v) => `<div class="kv"><span class="k">${esc(k)}</span><span class="v">${esc(v)}</span></div>`;
+  const stats = [["Discovery", s.discovery], ["Pre-Early", s.pre_early], ["Early Watch", s.early_watch],
+    ["Early Signal TRUE", s.early_true], ["Early Signal UNKNOWN", s.early_unknown], ["Early Signal FALSE (7/7)", s.early_false],
+    ["Early FALSE (<7/7 → WATCH)", s.early_false_partial], ["WATCH", s.watch], ["PENDING", s.pending], ["REJECT", s.reject],
+    ["Trade Candidate", s.trade_candidate], ["BUY Candidate", s.buy_candidate], ["Jupiter quote OK", s.quote_ok],
+    ["BUY executed", s.buy_executed], ["BUY skipped", s.buy_skipped]].map(([k, v]) => row(k, v)).join("");
+  const blocks = Object.entries(A.blocked_by || {}).filter(([, v]) => v).map(([k, v]) => row(k, v)).join("");
+  const skips = Object.entries(s.skips || {}).map(([k, v]) => k + " " + v).join(", ");
+  const jq = Object.entries(d.jupiter_quotes || {}).map(([k, v]) => k + " " + v).join(", ");
+  const share = Object.entries(nb.gate_share_of_opp_ge_65_pct || {}).slice(0, 5).map(([k, v]) => k + " " + v + "%").join(", ");
+  const top = (A.top || []).map((x) => `<tr><td>${esc(x.symbol || "")}</td><td>${esc(x.age_min)}</td><td>${esc(x.opp ?? "—")}</td><td>${esc(x.mom ?? "—")}</td><td>${esc(x.conf ?? "—")}</td><td>${esc(x.early)}</td><td>${esc(x.vet)}</td><td>${esc(x.risk ?? "—")}</td><td>${esc(x.holders ?? "—")}</td><td>${esc(x.liquidity ? "$" + Math.round(x.liquidity / 1e3) + "K" : "—")}</td><td class="small">${esc((x.blocked_by || []).slice(0, 4).join(", "))}</td></tr>`).join("");
+  const ev = (A.events || []).slice(0, 12).map((e) => `<div class="small">${esc(new Date(e.ts * 1000).toLocaleTimeString())} · ${esc(e.kind.toUpperCase())} · ${esc(e.symbol || "")} ${esc(e.detail || "")} ${esc(e.reason || "")}</div>`).join("");
+  return `<details class="sec" data-k="bot_audit"${S.open.bot_audit === false ? "" : " open"}><summary>AUDIT ${esc(s.window_h)}h — BUY candidate ${esc(s.buy_candidate)} · BUY ${esc(s.buy_executed)} · skipped ${esc(s.buy_skipped)}</summary><div class="sec-body">
+    <div class="panel"><h3><span>${esc(t("web.bot.audit_stats"))}</span><span></span></h3>${stats}
+      ${skips ? `<div class="meta">BUY skipped: ${esc(skips)}</div>` : ""}${jq ? `<div class="meta">Jupiter quotes: ${esc(jq)}</div>` : ""}</div>
+    <div class="panel"><h3><span>BLOCKED_BY</span><span class="meta">${esc(t("web.bot.audit_distinct"))}</span></h3>${blocks}
+      <div class="meta">OPP ≥ 65: ${esc(nb.opp_ge_65 ?? 0)} · + Risk PASS: ${esc(nb.opp_ge_65_risk_pass ?? 0)} · VET PASS: ${esc(nb.vet_pass ?? 0)} · Early TRUE: ${esc(nb.early_true ?? 0)}</div>
+      ${share ? `<div class="meta">${esc(t("web.bot.audit_share"))}: ${esc(share)}</div>` : ""}
+      ${Object.keys(nb.only_one_condition_left || {}).length ? `<div class="meta">${esc(t("web.bot.audit_one_left"))}: ${esc(Object.entries(nb.only_one_condition_left).map(([k, v]) => k + " " + v).join(", "))}</div>` : ""}</div>
+    ${ev ? `<div class="panel"><h3><span>CANDIDATE → QUOTE → BUY</span><span></span></h3>${ev}</div>` : ""}
+    <div class="panel"><h3><span>TOP 50 OPP</span><span></span></h3><div class="tblw"><table class="tbl"><thead><tr><th>TOKEN</th><th>AGE</th><th>OPP</th><th>MOM</th><th>CONF</th><th>EARLY</th><th>VET</th><th>RISK</th><th>HOLDER</th><th>LIQ</th><th>BLOCKED_BY</th></tr></thead><tbody>${top}</tbody></table></div></div>
+  </div></details>`;
+}
+
 async function renderBotModule(key) {
   let m;
   try { m = await api("/api/bot/module/" + encodeURIComponent(key)); } catch (e) { $("#view").innerHTML = `<div class="empty">${esc(t("web.error"))}</div>`; return; }

@@ -44,7 +44,7 @@ AUTH_WINDOW_S, AUTH_MAX_FAILS = 600, 10
 REFRESH_PER_MINT_S, REFRESH_GLOBAL_PER_MIN = 60, 10
 MAX_WATCH = 30
 LIST_KINDS = ("top", "new", "early", "whales", "dev", "social")
-VERSION = "web-6"
+VERSION = "web-7"
 HOME_LIMIT = {"opportunity": 60, "watch": 60, "nodata": 40, "excluded": 40}
 
 
@@ -106,6 +106,9 @@ def create_app(engine: ScannerEngine | None = None, start_scanner: bool = True,
         if start_scanner:
             from trading.jupiter import JupiterQuotes
             state["bot"].jupiter = JupiterQuotes(state["engine"].http)      # paper BUYs on real Jupiter quotes
+            if os.environ.get("RESEARCH_LOG", "1") != "0":                # research dataset (read-only log)
+                from research.dataset import DatasetRecorder
+                state["bot"].recorder = DatasetRecorder(DATA_DIR / "research.db", dex=state["engine"].dex)
             state["task"] = asyncio.create_task(state["engine"].run())
             state["bot_stop"] = asyncio.Event()
             state["bot_task"] = asyncio.create_task(state["bot"].run(state["bot_stop"]))
@@ -337,6 +340,24 @@ def create_app(engine: ScannerEngine | None = None, start_scanner: bool = True,
     async def bot_api():
         b = state["bot"]
         return bot_status(b, eng()) if b else JSONResponse({"error": "bot_not_started"}, status_code=503)
+
+    @app.get("/api/research/summary")
+    async def research_summary():
+        r = state["bot"].recorder if state["bot"] else None
+        return r.summary() if r else JSONResponse({"error": "research_log_off"}, status_code=404)
+
+    @app.get("/api/research/export")
+    async def research_export(table: str, since: float = 0.0, limit: int = 200000):
+        """CSV download of one research table (Render's disk is ephemeral: export to keep the dataset)."""
+        from research.dataset import EXPORT_TABLES, export_csv
+        r = state["bot"].recorder if state["bot"] else None
+        if r is None:
+            return JSONResponse({"error": "research_log_off"}, status_code=404)
+        if table not in EXPORT_TABLES:
+            return JSONResponse({"error": "bad_table", "tables": sorted(EXPORT_TABLES)}, status_code=400)
+        from fastapi.responses import StreamingResponse
+        return StreamingResponse(export_csv(r.path, table, since, max(1, min(limit, 1_000_000))), media_type="text/csv",
+                                 headers={"Content-Disposition": f'attachment; filename="{table}.csv"'})
 
     @app.get("/api/bot/module/{key}")
     async def bot_module(key: str):

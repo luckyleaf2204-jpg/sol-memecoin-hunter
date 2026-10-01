@@ -144,7 +144,9 @@ def bot_status(bot: PaperBot, engine=None, now: float | None = None) -> dict:
     return {
         "pipeline": bot.pipeline(now),
         "doing": doing, "scan": scan, "evaluated": evaluated, "exit_rules": exits, "exit_engine": engine_rows,
-        "version": "web-6",
+        "version": "web-7",
+        "jupiter_quotes": dict(getattr(bot, "quote_stats", {}) or {}),
+        "audit": _audit_summary(bot, now),
         "live_available": False,
         "pending": [{"id": o["id"], "symbol": o["symbol"], "mint": o["mint"], "usd": o["usd"],
                      "expires_in": max(0, round(o["expires"] - now)), "why": o["why"][:4]} for o in bot.pending.values()],
@@ -181,3 +183,12 @@ def module_detail(bot: PaperBot, key: str) -> dict | None:
     if key == "fills":
         items = [_ex_dict(e) for e in bot.book.executions[-50:]][::-1]
     return {"key": key, "status": m.status, "detail": m.detail, "updated": m.updated, "items": items}
+
+
+def _audit_summary(bot, now) -> dict | None:
+    a = getattr(bot, "audit", None)
+    if a is None:
+        return None
+    r = a.report(now, top=50)
+    return {"stats": r["stats"], "blocked_by": r["blocked_by"], "near": r["near"], "top": r["top"][:50],
+            "events": r["events"][:20]}

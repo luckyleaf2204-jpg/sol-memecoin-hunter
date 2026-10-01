@@ -192,6 +192,43 @@ class HttpClient:
         self.health.trip(source)
         return None
 
+    async def request_once(self, method: str, url: str, *, source: str, params=None, timeout: float | None = None):
+        """ONE attempt that keeps the details callers need to classify a failure (the caller owns retries).
+        Returns (http_status | None, json | None, error, retry_after_s | None); error is "timeout", "network: ...",
+        "invalid JSON" or "" ; 4xx bodies are returned too (their error codes matter)."""
+        host = urlparse(url).netloc
+        endpoint = safe_endpoint(url)
+        await self._throttle(host)
+        t0 = time.monotonic()
+        try:
+            r = await self._client.request(method, url, params=params,
+                                           **({"timeout": timeout} if timeout is not None else {}))
+        except httpx.TimeoutException:
+            self.health.mark(source, status=None, endpoint=endpoint, call=method, ms=None)
+            return None, None, "timeout", None
+        except (httpx.HTTPError, OSError) as e:
+            self.health.mark(source, status=None, endpoint=endpoint, call=method, ms=None)
+            return None, None, redact(f"network: {type(e).__name__}: {e}")[:200], None
+        self.health.mark(source, status=r.status_code, endpoint=endpoint, call=method,
+                         ms=round((time.monotonic() - t0) * 1000))
+        ra = r.headers.get("retry-after")
+        retry_after = float(ra) if ra and ra.replace(".", "", 1).isdigit() else None
+        if r.status_code == 429:
+            self._slow_down(host)
+        try:
+            data = r.json()
+        except ValueError:
+            data = None
+        if r.status_code == 200:
+            if data is None:
+                self.health.fail(source, "invalid JSON")
+                return 200, None, "invalid JSON", None
+            self.health.ok(source)
+            self._speed_up(host)
+            return 200, data, "", None
+        self.health.fail(source, f"HTTP {r.status_code}: {r.text[:150]}")
+        return r.status_code, data, f"HTTP {r.status_code}", retry_after
+
     async def get_json(self, url: str, *, source: str, params=None, headers=None, retries: int = 2,
                        timeout: float | None = None, respect_cooldown: bool = True):
         return await self.request_json("GET", url, source=source, params=params, headers=headers, retries=retries,

@@ -319,3 +319,7 @@ details.grp .cards { margin-top: 8px; }
   .b-status h3 { flex-wrap: wrap; gap: 6px; }
   .mode { min-height: 30px; padding: 3px 9px; font-size: 11px; }
 }
+
+.tblw { overflow-x: auto; max-width: 100%; }
+.tbl { border-collapse: collapse; width: 100%; font-size: 12px; white-space: nowrap; }
+.tbl th, .tbl td { padding: 3px 6px; border-bottom: 1px solid var(--line, rgba(127,127,127,.2)); text-align: left; }

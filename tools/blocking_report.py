@@ -25,11 +25,14 @@ from trading.jupiter import JupiterQuotes  # noqa: E402
 from trading.serialize import bot_status  # noqa: E402
 
 
-async def run(minutes: float):
+async def run(minutes: float, research_db: str = ""):
     eng = ScannerEngine(Settings(), Database(Path(tempfile.mkdtemp()) / "b.db"), keys=ApiKeys.from_env(),
                         on_log=lambda m: print(m, flush=True) if ("PIPELINE" in m or "FEEDS" in m) else None)
     bot = PaperBot(eng, TradingConfig())
     bot.jupiter = JupiterQuotes(eng.http)
+    if research_db:
+        from research.dataset import DatasetRecorder
+        bot.recorder = DatasetRecorder(research_db, dex=eng.dex)
     stop = asyncio.Event()
     tasks = [asyncio.create_task(eng.run()), asyncio.create_task(bot.run(stop))]
     ever_cand, ever_seen = set(), set()
@@ -49,8 +52,9 @@ def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--minutes", type=float, default=10)
     ap.add_argument("--out", default="")
+    ap.add_argument("--research-db", default="", help="also record the research dataset (spec Part 1) here")
     a = ap.parse_args()
-    d, seen, cand_ever, bot = asyncio.run(run(a.minutes))
+    d, seen, cand_ever, bot = asyncio.run(run(a.minutes, a.research_db))
     ev = sorted(d["evaluated"], key=lambda x: (x["action"] != "BUY", -(x["opportunity"] or -1)))
     print(f"\n{'TOKEN':<12}{'OPP':>5}{'MOM':>5}{'CONF':>6} {'EARLY':<11}{'IDENTITY':<11}{'VET':<7}{'RISK':>5}{'LIQ':>9}"
           f"{'HOLD':>6} {'DEV':<11}ACTION   BLOCKED_BY")
@@ -76,7 +80,36 @@ def main():
           f"open {st['open']} · NET P&L {st['net_pnl']}")
     hc = (d.get("helius") or {}).get("credits") or {}
     print(f"helius: {hc.get('used')} credits today · {hc.get('per_hour')}/h · projected month {hc.get('projected_month')}")
+    au = bot.audit.report(top=50)
+    s_ = au["stats"]
+    print(f"\n==== RUN AUDIT ({s_['window_h']} h) ====")
+    for k in ("discovery", "pre_early", "early_watch", "early_true", "early_unknown", "early_false", "early_false_partial",
+              "watch", "pending", "reject", "trade_candidate", "buy_candidate", "quote_ok", "buy_executed", "buy_skipped"):
+        print(f"  {k:<22}{s_[k]}")
+    print(f"  skips                 {s_['skips']}")
+    print(f"  jupiter quote stats   {bot.quote_stats}")
+    print("BLOCKED_BY (distinct tokens, any time):")
+    for k, v in au["blocked_by"].items():
+        print(f"  {k:<22}{v}")
+    print("NEAR BUY:", json.dumps(au["near"], ensure_ascii=False))
+    print(f"\n{'TOKEN':<12}{'AGE':>6}{'OPP':>5}{'MOM':>5}{'CONF':>6} {'EARLY':<11}{'VET':<26}{'RISK':>5}{'HOLD':>6}{'LIQ':>9}  BLOCKED_BY")
+    for x in au["top"]:
+        liq = f"${x['liquidity'] / 1e3:.0f}K" if x["liquidity"] else "—"
+        print(f"{(x['symbol'] or '')[:11]:<12}{x['age_min']:>6}{str(x['opp']):>5}{str(x['mom'] if x['mom'] is not None else '—'):>5}"
+              f"{str(x['conf']):>6} {x['early']:<11}{x['vet'][:25]:<26}{str(x['risk'] if x['risk'] is not None else '—'):>5}"
+              f"{str(x['holders'] or '—'):>6}{liq:>9}  {', '.join(x['blocked_by'][:5])}")
+    print("\nEXECUTION EVENTS:")
+    for e in au["events"][:30]:
+        print(f"  {time.strftime('%H:%M:%S', time.localtime(e['ts']))} {e['kind']:<9}{(e['symbol'] or '')[:12]:<13}{e['detail'][:90]} {e['reason']}")
+    acts = [x for x in bot.activity if x.text.startswith(("BUY CANDIDATE", "BUY → QUOTE")) or x.kind in ("BUY", "FAILED")]
+    print("\nACTIVITY (Candidate -> Quote -> BUY):")
+    for x in acts[-30:]:
+        print(f"  {time.strftime('%H:%M:%S', time.localtime(x.ts))} {x.kind:<7}{(x.symbol or '')[:12]:<13}{x.text[:140]}")
+    if bot.recorder is not None:
+        print("\nRESEARCH DATASET:", json.dumps(bot.recorder.summary()))
+        bot.recorder.close()
     if a.out:
+        d["audit_full"] = au
         Path(a.out).write_text(json.dumps(d, default=str), encoding="utf-8")
 
 

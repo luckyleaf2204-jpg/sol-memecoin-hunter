@@ -88,8 +88,11 @@ def test_buy_is_filled_on_a_real_jupiter_quote():
 def test_jupiter_failure_means_no_buy():
     st = good()
     b = bot([st], FakeJupiter(fail=True))
-    run(b)
-    assert not b.book.positions and any(a.kind == "FAILED" and "Jupiter" in a.text for a in b.activity)
+    t = time.time()
+    run(b, t)                                                   # transient failure: retried, not skipped yet
+    assert st.mint in b.intents and any("RETRY" in a.text for a in b.activity)
+    asyncio.run(b.execute_intents(t + 61))                      # still failing after the retry window -> SKIP
+    assert not b.book.positions and any(a.kind == "FAILED" and "JUPITER" in a.text for a in b.activity)
 
 
 def test_quote_mismatch_is_rejected():

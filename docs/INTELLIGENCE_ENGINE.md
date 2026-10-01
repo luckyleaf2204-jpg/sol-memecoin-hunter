@@ -416,3 +416,36 @@ Lớp riêng, **không** thay đổi Early Signal / D1–D8. Early Signal cần 
 - **Không average down / martingale:** mỗi CA chỉ có tối đa một lệnh MUA đang xử lý hoặc chờ duyệt, và không bao giờ mua thêm khi đang giữ.
 - **Restart:** giữ position; xoá lệnh đang xử lý và lệnh chờ duyệt; luôn quay về PAPER.
 - **Analytics:** NET P&L, expectancy/lệnh, TB thắng/thua, profit factor, max drawdown, phí, slippage, P&L theo setup (lý do quét lúc vào lệnh). Dưới 30 lệnh đóng thì hiện cảnh báo "chưa đủ dữ liệu".
+
+## Research dataset (đo bias / predictive power — không đổi logic BUY)
+
+Theo *Implementation Spec — Logging / Predictive Power / Early Signal Redesign*, Phần 1–2.
+
+- `src/research/dataset.py` — `DatasetRecorder` (bật mặc định trên server, tắt bằng `RESEARCH_LOG=0`), ghi vào
+  `data/research.db`:
+  - `token_discovery`: mọi CA; mốc thời gian pre-early / early watch / đủ 7/7 nhóm / Early TRUE / candidate / bought;
+    nhãn kết quả + MFE/MAE 24 h.
+  - `token_snapshots`: snapshot lúc discovery, +30s, +1m, +2m, +5m, +10m, +30m, +1h và mỗi lần đổi stage /
+    candidate / quote Jupiter. Gồm d1..d8, 7 nhóm Early Signal, VET, Risk, `blocked_by` chi tiết, trạng thái quote.
+  - `price_path`: 15 s (< 15 phút), 60 s (< 1 h), 5 phút; cộng follow-up DexScreener ở 30m / 1h / 6h / 24h sau khi
+    scanner ngừng theo dõi.
+  - `forward_returns`: anchor discovery / candidate × 30s..24h.
+  - `candidates`: mọi Trade Candidate, kể cả bị chặn ở Risk hoặc quote fail; có `would_have_bought_if_quote_ok` và
+    `simulated_pnl_if_forced` (giản lược: TP+30 / SL-15 / 1 h).
+- Thiếu dữ liệu thì để NULL, không bao giờ bịa. Recorder không thể thay đổi quyết định (có test chứng minh), lỗi
+  ghi log không làm hỏng bot.
+- Render free có ổ đĩa tạm (mất khi deploy hoặc restart). Tải dữ liệu bằng
+  `GET /api/research/export?table=token_snapshots&since=<unix>` (CSV, cần access code), hoặc chạy collector trên máy:
+  `python tools/blocking_report.py --minutes 1440 --research-db data/research.db`.
+- `tools/analyze_dataset.py --db data/research.db --out report.md`: đo coverage / precision / recall / lift /
+  conditional lift / E[ret | pass, fail, unknown] / time-to-pass cho từng rule, cùng Experiment 1–5 và phân tích
+  execution. Đánh giá không look-ahead: rule đo tại snapshot +1/+2/+5/+10 phút, kết quả lấy từ price path sau thời
+  điểm đó.
+- Phần 3 (Early Signal soft-score, prior risk theo tuổi) **chưa** triển khai: theo spec, chỉ làm khi đã có số liệu.
+
+## Jupiter quote (execution)
+
+`QuoteResult`: OK (MATCH) · NO_ROUTE (400 TOKEN_NOT_TRADABLE / COULD_NOT_FIND_ANY_ROUTE → SKIP, không quote lại
+trong 2 phút) · INVALID · RATE_LIMITED / TIMEOUT / API_ERROR / COOLDOWN (tạm thời → retry backoff trong lần gọi, rồi
+xếp lại intent tối đa 60 s). Log: `BUY CANDIDATE → BUY → QUOTE → MATCH → BUY` hoặc
+`BUY → QUOTE FAILED (…) → SKIP · BUY SKIPPED — JUPITER`.

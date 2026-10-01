@@ -29,6 +29,8 @@ EXIT_WHY = {"stop_loss": "price hit the stop loss", "break_even_stop": "fell bac
             "momentum_deterioration": "momentum reversed (DISTRIBUTION / DECLINING)",
             "volume_collapse": "volume collapsed below entry", "max_hold_time": "max holding time"}
 TICK_S = 5.0
+QUOTE_RETRY_WINDOW_S = 60.0     # transient Jupiter failures (429 / timeout / 5xx) are retried this long
+NO_ROUTE_BLOCK_S = 120.0        # after a confirmed "no route": no re-quote of that CA for this long
 MAX_ENTRIES_PER_TICK = 2
 
 
@@ -59,6 +61,12 @@ class PaperBot:
         self._discovered: set[str] = set()
         self._pipe_logged = 0.0
         self.last_buy_attempt: dict[str, float] = {}
+        self.quote_block: dict[str, float] = {}  # mint -> until: Jupiter confirmed NO route (no re-quote spam)
+        self.quote_stats: dict[str, int] = {}    # Jupiter BUY-quote outcomes by status
+        from trading.audit import RunAudit
+        self.audit = RunAudit(Path(state_path).with_name("bot_audit.json") if state_path else None)
+        self.recorder = None                   # research.dataset.DatasetRecorder (read-only research log)
+        self._last_followup = 0.0
 
     # ---------------------------------------------------------------- helpers
     def log(self, kind: str, text: str, st: TokenState | None = None, usd=None, price=None, now=None) -> None:
@@ -105,6 +113,12 @@ class PaperBot:
         self._positions(states, now)
         if self.cfg.enabled:
             self._entries(states, now)
+        self._observe(states, now)
+        if self.recorder is not None:
+            self._rec("observe", list(states.values()), self.decisions, now,
+                      {m for m, r in self.decisions.items() if r.get("ts") == now and m in states
+                       and is_trade_candidate(states[m], r, allow_unchecked_risk=True)},
+                      set(self.book.positions), {m for m, t in self.book.last_exit.items() if now - t < 30})
         if hasattr(self.engine, "deep_extra"):
             self.engine.deep_extra = set(self.book.positions)
         eq = self.book.mark(now)
@@ -196,6 +210,9 @@ class PaperBot:
                                            feeds_ok=feeds_ok, feeds_reason=feeds_reason)
                 risk_items.append({"mint": st.mint, "symbol": st.info.symbol, "allowed": rd.allowed, "reasons": rd.reasons})
                 rec["risk_allowed"], rec["risk_reasons"], rec["size_usd"] = rd.allowed, rd.reasons, sz.usd
+                if self.recorder is not None and is_trade_candidate(st, rec, allow_unchecked_risk=True):
+                    self._rec("candidate", st, rec, now, sz.usd, rd.allowed,
+                              100 * ((est.get("impact") or 0) + (est.get("fee_rate") or 0)))
                 if not rd.allowed:
                     rec["blocked_by"] = rec.get("blocked_by", []) + ["risk_engine: " + r for r in rd.reasons]
                 if not rd.allowed:
@@ -224,9 +241,15 @@ class PaperBot:
                                       f"{'; '.join(sc.why[:3])}", st, now=now)
                     continue
                 if self.jupiter is not None:                # async path: fill on a real Jupiter quote (atick)
+                    if self.quote_block.get(st.mint, 0) > now:
+                        rec["state"] = "NO_ROUTE"           # Jupiter confirmed no route moments ago: no re-quote spam
+                        rec["blocked_by"] = rec.get("blocked_by", []) + ["jupiter: no route"]
+                        continue
                     self.intents[st.mint] = {"mint": st.mint, "usd": sz.usd, "ts": now, "opportunity": sc.opportunity,
                                              "why": sc.why, "setup": "+".join(sorted(reasons))}
                     rec["state"] = "QUOTING"
+                    self.audit.execution("candidate", st, now, f"${sz.usd:,.2f}")
+                    self.log("INFO", f"BUY CANDIDATE ${sz.usd:,.2f} → requesting Jupiter quote", st, now=now)
                     entries += 1
                     continue
                 ex = self.exec.buy(st, sz.usd, self._sol(), now)
@@ -258,6 +281,26 @@ class PaperBot:
         self.log("KILL", "kill switch ENGAGED — no new positions" if engaged else "kill switch released")
         if self.config_path:
             self.cfg.save(self.config_path)
+
+    def _observe(self, states: dict, now: float) -> None:
+        """Feed the read-only run audit (stages of every published token + this tick's decisions)."""
+        try:
+            for st in states.values():
+                self.audit.observe_stage(st, now)
+            for mint, rec in self.decisions.items():
+                st = states.get(mint)
+                if st is not None and rec.get("ts") == now:
+                    self.audit.observe_decision(st, rec, now, is_trade_candidate(st, rec, allow_unchecked_risk=True))
+            self.audit.save(now)
+        except Exception as e:                           # diagnostics never break trading
+            self.log("INFO", f"audit error: {type(e).__name__}: {e}", now=now)
+
+    def _rec(self, fn: str, *args) -> None:
+        """Research-log call that can never break trading."""
+        try:
+            getattr(self.recorder, fn)(*args)
+        except Exception as e:
+            self.log("INFO", f"research log error ({fn}): {type(e).__name__}: {e}")
 
     def persist(self) -> None:
         if self.state_path:
@@ -324,27 +367,65 @@ class PaperBot:
             if now > o["expires"]:
                 self.pending.pop(oid, None)
 
+    async def _buy_quote(self, mint: str, lamports: int):
+        """Classified Jupiter quote (trading.jupiter.QuoteResult); a quote-only client is wrapped."""
+        from trading.jupiter import API_ERROR, OK, WSOL, QuoteResult
+        slip = int(self.cfg.max_slippage_pct * 100)
+        if hasattr(self.jupiter, "quote_result"):
+            return await self.jupiter.quote_result(WSOL, mint, lamports, slip)
+        q = await self.jupiter.quote(WSOL, mint, lamports, slip)
+        return QuoteResult(OK, quote=q, http=200, attempts=1) if q else QuoteResult(API_ERROR, detail="no quote", attempts=1)
+
     async def execute_intents(self, now: float | None = None) -> None:
-        """BUY intents of this tick: fresh Jupiter quote, then RE-CHECK everything right before the fill
-        (still a 🟢 Trade Candidate, Risk, price impact). No quote -> no BUY (route not verifiable)."""
-        from trading.jupiter import WSOL
+        """BUY intents: Candidate -> fresh Jupiter quote -> MATCH -> RE-CHECK everything right before the fill
+        (still a 🟢 Trade Candidate, Risk, real price impact) -> BUY. A transient quote failure (429 / timeout / 5xx /
+        cooldown) is retried with backoff for QUOTE_RETRY_WINDOW_S; a confirmed "no route" is a final SKIP.
+        Nothing is skipped silently: every outcome is logged and counted."""
+        from trading.jupiter import NO_ROUTE, price_impact
         now = now or time.time()
         states = {s.mint: s for s in (self.engine.published or [])}
         for mint, it in list(self.intents.items()):
+            if it.get("next", 0) > now:
+                continue                                   # quote retry scheduled later
             self.intents.pop(mint, None)
             st = states.get(mint)
             rec = self.decisions.get(mint, {})
             sol = self._sol()
             if st is None or not is_trade_candidate(st, rec) or not sol or mint in self.book.positions:
                 self.log("BLOCK", "BUY cancelled at execution: no longer a valid Trade Candidate", st, now=now)
+                self.audit.execution("skip", st, now, reason="no_longer_candidate")
                 continue
             usd = it["usd"]
-            q = await self.jupiter.quote(WSOL, mint, int(usd / sol * 1e9), int(self.cfg.max_slippage_pct * 100))
-            if q is None:
-                self.log("FAILED", "BUY skipped: Jupiter quote unavailable — route not verifiable", st, now=now)
+            qr = await self._buy_quote(mint, int(usd / sol * 1e9))
+            self.quote_stats[qr.status] = self.quote_stats.get(qr.status, 0) + 1
+            if not qr.ok:
+                first = it.setdefault("first", it["ts"])
+                if qr.transient and now - first < QUOTE_RETRY_WINDOW_S:
+                    it["retries"] = it.get("retries", 0) + 1
+                    wait = min(20.0, 2.5 * 2 ** (it["retries"] - 1))
+                    it["next"] = now + wait
+                    self.intents[mint] = it
+                    rec["state"] = "QUOTE_RETRY"
+                    self._rec("quote", st, rec, now, qr.status, qr.label() + " (retrying)", None, False,
+                              int(self.cfg.max_slippage_pct * 100))
+                    self.log("INFO", f"BUY → QUOTE FAILED ({qr.label()}) → RETRY in {wait:.0f}s "
+                                     f"(attempt {it['retries'] + 1})", st, now=now)
+                    self.audit.execution("retry", st, now, qr.label())
+                    continue
+                if qr.status == NO_ROUTE:
+                    self.quote_block[mint] = now + NO_ROUTE_BLOCK_S
+                rec["state"] = "QUOTE_FAILED"
+                self._rec("quote", st, rec, now, qr.status, qr.label(), None, False, int(self.cfg.max_slippage_pct * 100))
+                self.log("FAILED", f"BUY → QUOTE FAILED ({qr.label()}) → SKIP · BUY SKIPPED — JUPITER", st, now=now)
+                self.audit.execution("skip", st, now, qr.label(), reason="jupiter:" + qr.status)
                 continue
-            from trading.jupiter import price_impact
+            q = qr.quote
             imp = price_impact(q)
+            from trading.jupiter import route_label
+            self.log("INFO", f"BUY → QUOTE → MATCH · {route_label(q)} · impact "
+                             f"{100 * imp:.2f}%" if imp is not None else f"BUY → QUOTE → MATCH · {route_label(q)}",
+                     st, now=now)
+            self.audit.execution("quote_ok", st, now, route_label(q))
             feeds_ok, why = self._feeds_ok()
             last = self.book.last_exit.get(mint)
             rd = self.risk.check_entry(mint=mint, usd=usd, equity=self.book.equity(), peak=self.book.peak,
@@ -352,18 +433,25 @@ class PaperBot:
                                        holding=False, in_cooldown=bool(last and now - last < self.cfg.cooldown_min * 60),
                                        exposure=self.book.exposure(), est_impact=imp, feeds_ok=feeds_ok, feeds_reason=why)
             if not rd.allowed:
-                self.log("BLOCK", "risk at execution: " + "; ".join(rd.reasons), st, now=now)
+                self.log("BLOCK", "risk at execution: " + "; ".join(rd.reasons) + " → SKIP", st, now=now)
+                self.audit.execution("skip", st, now, "; ".join(rd.reasons), reason="risk_at_execution")
+                self._rec("quote", st, rec, now, "OK", "risk at execution: " + "; ".join(rd.reasons), q, False,
+                          int(self.cfg.max_slippage_pct * 100))
                 continue
             ex = self.exec.buy_from_quote(st, usd, q, sol, now)
+            self._rec("quote", st, rec, now, "OK", "filled" if ex.status == "FILLED" else f"paper fill failed: {ex.reason}",
+                      q, ex.status == "FILLED", int(self.cfg.max_slippage_pct * 100))
             if ex.status == "FILLED":
                 self.book.open(ex, self.cfg, now, it.get("opportunity"), it.get("why"), st.market.liquidity_usd,
                                st.market.vol_5m, setup=it.get("setup", ""))
                 self.log("BUY", f"${usd:,.2f} @ ${ex.fill_price:.8g} · impact {ex.price_impact_pct:.2f}% · "
                                 f"slip {ex.slippage_pct:.2f}% · {ex.route} · WHY: {'; '.join((it.get('why') or [])[:3])}",
                          st, usd=usd, price=ex.fill_price, now=now)
+                self.audit.execution("buy", st, now, f"${usd:,.2f} @ {ex.fill_price:.8g} · {ex.route}")
             else:
                 self.book.record(ex)
                 self.log("FAILED", f"BUY: {ex.reason}", st, now=now)
+                self.audit.execution("skip", st, now, ex.reason, reason="paper_fill_failed")
         self.persist()
 
     def set_mode(self, mode: str, confirm: str = "") -> None:
@@ -391,6 +479,9 @@ class PaperBot:
                     await self.execute_sells()
                 if self.intents:
                     await self.execute_intents()
+                if self.recorder is not None and time.time() - self._last_followup >= 30:
+                    self._last_followup = time.time()
+                    await self.recorder.run_followups()
             except Exception as e:                       # the bot never takes the scanner down
                 self.log("INFO", f"bot tick error: {type(e).__name__}: {e}")
             try:
