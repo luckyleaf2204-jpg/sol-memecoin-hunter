@@ -27,12 +27,15 @@ from fastapi.staticfiles import StaticFiles
 
 from analytics.narratives import aggregate_narratives
 from api.serialize import card, view
-from core.config import DB_PATH, Settings, env
+from core.config import DATA_DIR, DB_PATH, Settings, env
 from database.db import Database
 from i18n import load as load_lang, set_language, t
 from scanner.engine import ScannerEngine
 from scoring.groups import GROUPS, confirm_key
 from scoring.ranking import rank_early, rank_opportunities
+from trading.bot import PaperBot
+from trading.config import ModeNotAllowed, TradingConfig
+from trading.serialize import bot_status, module_detail
 
 STATIC = Path(__file__).resolve().parent / "static"
 MINT_RE = re.compile(r"^[1-9A-HJ-NP-Za-km-z]{32,44}$")
@@ -83,18 +86,31 @@ class Guard:
 
 
 def create_app(engine: ScannerEngine | None = None, start_scanner: bool = True,
-               access_code: str | None = None) -> FastAPI:
+               access_code: str | None = None, bot: PaperBot | None = None) -> FastAPI:
     set_language("vi")
     guard = Guard(access_code if access_code is not None else env("APP_ACCESS_CODE"))
-    state: dict = {"engine": engine, "task": None, "started_at": time.time()}
+    state: dict = {"engine": engine, "task": None, "started_at": time.time(), "bot": bot, "bot_task": None,
+                   "bot_stop": None}
 
     @contextlib.asynccontextmanager
     async def lifespan(app: FastAPI):
         if state["engine"] is None:
             state["engine"] = ScannerEngine(Settings.load(), Database(DB_PATH), on_log=lambda m: print(m, flush=True))
+        if state["bot"] is None:                         # PAPER trading bot: reads scanner results only
+            persist = start_scanner
+            cfg_path = DATA_DIR / "trading.json"
+            state["bot"] = PaperBot(state["engine"], TradingConfig.load(cfg_path) if persist else TradingConfig(),
+                                    state_path=DATA_DIR / "paper_bot.json" if persist else None,
+                                    config_path=cfg_path if persist else None)
         if start_scanner:
             state["task"] = asyncio.create_task(state["engine"].run())
+            state["bot_stop"] = asyncio.Event()
+            state["bot_task"] = asyncio.create_task(state["bot"].run(state["bot_stop"]))
         yield
+        if state["bot_task"]:
+            state["bot_stop"].set()
+            with contextlib.suppress(Exception):
+                await asyncio.wait_for(state["bot_task"], 10)
         eng = state["engine"]
         if state["task"]:
             eng.stop()
@@ -284,6 +300,44 @@ def create_app(engine: ScannerEngine | None = None, start_scanner: bool = True,
             st = find(m)
             items.append(card(st) if st else {"mint": m, "pending": True})
         return {"items": items}
+
+    # ------------------------------------------------------------------ PAPER trading bot (no real execution)
+    @app.get("/api/bot")
+    async def bot_api():
+        b = state["bot"]
+        return bot_status(b, eng()) if b else JSONResponse({"error": "bot_not_started"}, status_code=503)
+
+    @app.get("/api/bot/module/{key}")
+    async def bot_module(key: str):
+        b = state["bot"]
+        d = module_detail(b, key) if b else None
+        return d if d else JSONResponse({"error": "unknown_module"}, status_code=404)
+
+    @app.get("/api/bot/decision/{mint}")
+    async def bot_decision(mint: str):
+        if not MINT_RE.match(mint):
+            return JSONResponse({"error": "bad_mint"}, status_code=400)
+        b = state["bot"]
+        d = b.decisions.get(mint) if b else None
+        return d if d else JSONResponse({"error": "no_decision", "mint": mint}, status_code=404)
+
+    @app.post("/api/bot/kill")
+    async def bot_kill(request: Request):
+        body = await _json(request)
+        if not isinstance(body, dict) or not isinstance(body.get("engaged"), bool):
+            return JSONResponse({"error": "bad_body"}, status_code=400)
+        state["bot"].set_kill(body["engaged"])
+        return {"kill_switch": state["bot"].cfg.kill_switch}
+
+    @app.post("/api/bot/mode")
+    async def bot_mode(request: Request):
+        body = await _json(request)
+        mode = body.get("mode") if isinstance(body, dict) else None
+        try:
+            state["bot"].cfg.set_mode(str(mode))
+        except ModeNotAllowed as e:
+            return JSONResponse({"error": "mode_not_allowed", "detail": str(e)}, status_code=403)
+        return {"mode": state["bot"].cfg.mode}
 
     # ------------------------------------------------------------------ PWA static files
     @app.get("/i18n/vi.json")

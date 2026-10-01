@@ -348,3 +348,29 @@ Lớp riêng, **không** thay đổi Early Signal / D1–D8. Early Signal cần 
 - **Hiển thị:** mục riêng ⚡ PRE-EARLY trên Tổng quan, badge trên card, và bảng tín hiệu trên trang token. Mỗi tín hiệu có ngưỡng, và có lý do khi thiếu dữ liệu.
 - **Ưu tiên:** token PRE-EARLY được ưu tiên cao nhất khi làm mới, và được đưa vào nhóm quét holder Helius.
 - **Test:** `tests/test_pre_early.py` (offline và live).
+
+## 14. SOL Trading Bot — PAPER TRADING (`src/trading/`)
+
+`SCAN → VET → SCORE → SIZE → RISK → EXECUTE (paper) → POSITION → EXIT → P&L`. Bot chạy thành một task riêng, chỉ **đọc** `engine.published`. Scanner, Early Signal, D1–D8 và identity không đổi. Bot lỗi thì scanner vẫn chạy.
+
+| Module | File | Nội dung |
+|---|---|---|
+| 01 SCAN | `decision.scan` | Ứng viên lấy từ ⚡PRE-EARLY, Early TRUE, nhóm 🔥, hoặc lifecycle momentum có Opportunity ≥ 50. X Alpha / smart money: NOT AVAILABLE |
+| 02 VET | `decision.vet` | identity VERIFIED · CA đúng · DQ không INVALID và dữ liệu ≤ 30s · liquidity · holders · top10 · dev · mint/freeze authority (Helius) · Token-2022 · rug · migration · volume/lực mua. **UNKNOWN chặn giao dịch** |
+| SCORE | `decision.score` | Dùng lại subscore của scanner. Opportunity = trung bình có trọng số trên các thành phần có dữ liệu; Confidence = tỷ lệ trọng số có dữ liệu. Quyết định 🟢 TRADE / 🟡 WATCH / 🔴 REJECT, kèm Why và What would invalidate |
+| 03 SIZE | `decision.size` | Risk / khoảng cách stop; nhân hệ số Opportunity × Confidence; giảm khi biến động mạnh. Chặn trần bởi max position, % liquidity của pool, tiền mặt, exposure |
+| 04 RISK | `risk.py` | Fail-closed: lỗi → không mở lệnh. Kill switch, max open, lỗ ngày, drawdown (vượt ngưỡng → tự bật kill switch), exposure, slippage, feed lỗi (DexScreener 429/cooldown) → không mua |
+| 05 FILLS | `execution.py` | Mô phỏng: route (Pump.fun curve / PumpSwap / Raydium qua Jupiter), price impact theo pool x·y=k, slippage, phí route và phí mạng, giao dịch lỗi (vẫn mất phí mạng), latency |
+| 06 BOOK | `book.py` | NET P&L = gross − phí − phí mạng (gồm lệnh lỗi) − slippage. Có win rate, TB thắng/thua, profit factor, max drawdown |
+| EXIT | `exits.py` | identity conflict, holder bất thường, risk tăng, liquidity sụp, cá voi xả, SL, TP1 (bán một phần + dời stop về hoà vốn + bật trailing), TP2, trailing, momentum xấu, volume sụp, giữ quá lâu. Không có giá đã validate thì không bán theo phỏng đoán |
+
+- **Chế độ:** chỉ có `PAPER`. `CONFIRM` / `AUTO` bị từ chối trong code (`ModeNotAllowed`) và trong API (HTTP 403). File cấu hình không thể bật AUTO.
+- **Khoá và ví:** không có private key, ví, hay code ký giao dịch (có test kiểm tra).
+- **Backtest:** `tools/backtest_bot.py` phát lại snapshot SQLite qua đúng `PaperBot.tick`. Các kiểm tra chỉ có lúc chạy live (identity, authority, Token-2022, dev) không được lưu trong snapshot, nên backtest dùng giả định và liệt kê rõ trong kết quả.
+- **API:**
+  - `GET /api/bot`
+  - `GET /api/bot/module/{key}`
+  - `GET /api/bot/decision/{mint}`
+  - `POST /api/bot/kill`
+  - `POST /api/bot/mode` (chỉ chấp nhận PAPER)
+- **PWA:** tab 🤖 Bot.

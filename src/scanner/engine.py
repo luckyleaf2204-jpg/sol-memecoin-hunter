@@ -524,6 +524,8 @@ class ScannerEngine:
             if asset is not None:
                 st.identity.helius_checked = True
                 st.identity.token_program, st.identity.extensions = asset["token_program"], asset["extensions"]
+                st.identity.mint_authority = asset.get("mint_authority", "")
+                st.identity.freeze_authority = asset.get("freeze_authority", "")
                 record_claim(st.identity, "helius", asset["symbol"], asset["name"])
         if apply_identity(st).status == "CONFLICT":
             st.holder_status = st.holder_status or "pending"

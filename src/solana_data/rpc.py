@@ -113,7 +113,9 @@ class SolanaRpc:
         meta = (r.get("content") or {}).get("metadata") or {}
         return {"symbol": (meta.get("symbol") or "").strip(), "name": (meta.get("name") or "").strip(),
                 "token_program": (r.get("token_info") or {}).get("token_program") or "",
-                "extensions": sorted((r.get("mint_extensions") or {}).keys()), "interface": r.get("interface") or ""}
+                "extensions": sorted((r.get("mint_extensions") or {}).keys()), "interface": r.get("interface") or "",
+                "mint_authority": (r.get("token_info") or {}).get("mint_authority") or "",
+                "freeze_authority": (r.get("token_info") or {}).get("freeze_authority") or ""}
 
     async def das_token_accounts(self, mint: str, page: int = 1, limit: int = 1000) -> dict | None:
         if not self.helius_url:

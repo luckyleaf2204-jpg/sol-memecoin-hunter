@@ -374,6 +374,8 @@ class TokenIdentity:
     helius_checked: bool = False
     token_program: str = ""
     extensions: list[str] = field(default_factory=list)
+    mint_authority: str = ""               # "" = revoked (only meaningful when helius_checked)
+    freeze_authority: str = ""
 
 
 @dataclass
