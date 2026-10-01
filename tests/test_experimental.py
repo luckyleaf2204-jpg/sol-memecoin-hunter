@@ -272,20 +272,106 @@ def test_old_engine_never_fills_without_quote():
     assert not b.book.positions
 
 
+class FakeCredits:
+    def __init__(self, ok=True, daily_budget=333_333):
+        self.ok, self.daily_budget = ok, daily_budget
+
+    def allow(self, cost):
+        return self.ok
+
+
+class FakeRpc:
+    has_das = True
+
+    def __init__(self, ok=True, answer=True, budget=333_333):
+        self.calls, self.answer, self.credits = [], answer, FakeCredits(ok, budget)
+
+    async def das_get_asset(self, mint):
+        self.calls.append(mint)
+        if not self.answer:
+            return None
+        return {"token_program": "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA", "extensions": [],
+                "mint_authority": "", "freeze_authority": "", "symbol": "TKN", "name": "Token"}
+
+
+class Tok:
+    def __init__(self, i):
+        self.mint = f"Mint{i:04d}" + "1" * 36
+
+
+def test_fast_lane_never_exceeds_configured_rate():
+    from scanner.fast_lane import FastLane
+    rpc = FakeRpc()
+    lane = FastLane(rpc, per_min=5, cooldown_s=20)
+    toks = [Tok(i) for i in range(100)]
+    t0 = 1_000_000.0
+    times = []
+    for k in range(0, 300, 3):                                   # a round every 3 s for 5 minutes
+        before = len(rpc.calls)
+        asyncio.run(lane.round([x for x in toks if x.mint not in lane.checked], lambda st, a: None, now=t0 + k))
+        times += [t0 + k] * (len(rpc.calls) - before)
+    assert times and all(sum(1 for u in times if t <= u < t + 60) <= 5 for t in times)
+    assert lane.stats(t0 + 300)["rate_limited_skips"] > 0
+
+
+def test_fast_lane_limit_capped_by_helius_budget():
+    from scanner.fast_lane import FastLane
+    lane = FastLane(FakeRpc(budget=100_000), per_min=50)
+    assert lane.per_min() == max(1, int(100_000 / 24 / 60 * 0.10 / 10))       # 10 % of the paced hourly budget
+
+
+def test_fast_lane_per_ca_cooldown_and_cache():
+    from scanner.fast_lane import FastLane
+    rpc = FakeRpc(answer=False)
+    lane = FastLane(rpc, per_min=100, cooldown_s=20, cache_ttl_s=60)
+    t = Tok(1)
+    asyncio.run(lane.round([t], lambda st, a: None, now=100.0))
+    asyncio.run(lane.round([t], lambda st, a: None, now=110.0))            # failed 10 s ago: cooldown
+    assert len(rpc.calls) == 1 and lane.n["cooldown_skips"] == 1
+    asyncio.run(lane.round([t], lambda st, a: None, now=125.0))
+    assert len(rpc.calls) == 2
+    rpc.answer = True
+    asyncio.run(lane.fetch("CacheMe1", now=200.0))
+    asyncio.run(lane.fetch("CacheMe1", now=230.0))                          # within TTL: no second call
+    assert rpc.calls.count("CacheMe1") == 1 and lane.n["cache_hits"] == 1
+    asyncio.run(lane.fetch("CacheMe1", now=300.0))                          # TTL expired
+    assert rpc.calls.count("CacheMe1") == 2
+
+
+def test_quota_unavailable_means_watch_never_buy_never_reject():
+    from scanner.fast_lane import FastLane
+    rpc = FakeRpc(ok=False)
+    lane = FastLane(rpc, per_min=100)
+    st = hot()
+    st.identity.helius_checked = False
+    asyncio.run(lane.round([st], lambda s, a: None, now=100.0))
+    assert rpc.calls == [] and lane.n["quota_errors"] == 1 and lane.stats(100.0)["paused"]
+    xd, _ = ev(st)
+    assert xd.decision == D.WATCH and "gate_unknown:authorities" in xd.blocked_by and not xd.rejected
+
+
+def test_fast_lane_only_for_tokens_genuinely_near_a_buy():
+    near, far, rejected = hot(), hot(price_change_5m=0.0, vol_5m=500.0, buys_5m=50, sells_5m=60), hot()
+    far.info.mint, rejected.info.mint = "Far" + "1" * 41, "Rej" + "1" * 41
+    for x in (near, far, rejected):
+        x.identity.helius_checked = False
+    rejected.risk = RiskResult(70, "HIGH")
+    b = bot([near, far, rejected], ScriptedJupiter([J.OK]))
+    b.cfg.experimental = True
+    b.tick()
+    hint = b._deep_hint(b.last_tick)
+    assert hint == {near.mint}
+
+
 def test_authority_fast_lane_checks_hinted_tokens(tmp_path):
     from core.config import ApiKeys, Settings
     from database.db import Database
     from scanner.engine import ScannerEngine
+    from scanner.fast_lane import FastLane
 
-    class Rpc:
-        has_das, calls = True, []
-
-        async def das_get_asset(self, mint):
-            Rpc.calls.append(mint)
-            return {"token_program": "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA", "extensions": [],
-                    "mint_authority": "", "freeze_authority": "", "symbol": "TKN", "name": "Token"}
     eng = ScannerEngine(Settings(), Database(tmp_path / "e.db"), keys=ApiKeys(), on_log=lambda m: None)
-    eng.rpc = Rpc()
+    rpc = FakeRpc()
+    eng.rpc, eng.fast = rpc, FastLane(rpc, per_min=10)
     eng._evaluate = lambda st: None
     st, other = hot(), hot()
     other.info.mint = "Other" + "1" * 39
@@ -301,6 +387,7 @@ def test_authority_fast_lane_checks_hinted_tokens(tmp_path):
         eng._stop.set()
         await task
     asyncio.run(go())
-    assert Rpc.calls == [st.mint] and st.identity.helius_checked and not other.identity.helius_checked
+    assert rpc.calls == [st.mint] and st.identity.helius_checked and not other.identity.helius_checked
     xd, _ = ev(st)
     assert "gate_unknown:authorities" not in xd.blocked_by
+    assert eng.fast.stats()["fast_getasset_calls"] == 1

@@ -91,6 +91,8 @@ def main():
         print(f"  {k:<22}{s_[k]}")
     print(f"  skips                 {s_['skips']}")
     print(f"  jupiter quote stats   {bot.quote_stats}")
+    print(f"  FAST LANE             {json.dumps(bot.fast_lane_stats())}")
+    print(f"  helius credits        {json.dumps((bot.engine.feeds().get('helius') or {}).get('credits'), default=str)}")
     print("BLOCKED_BY (distinct tokens, any time):")
     for k, v in au["blocked_by"].items():
         print(f"  {k:<22}{v}")

@@ -102,6 +102,8 @@ class ScannerEngine:
         self._deep_times: list[float] = []
         self.deep_extra: set[str] = set()                 # mints the paper bot holds (registered by the bot)
         self.deep_hint: set[str] = set()                  # experimental bot: near an EarlyScore PASS (deep scan only)
+        from scanner.fast_lane import FastLane
+        self.fast = FastLane(self.rpc)                    # rate-limited, cached getAsset for the on-chain hard gates
         self.deep_skipped: list[tuple[str, str]] = []
         self.pipe = {"discovered": deque(maxlen=5000), "pre_early": deque(maxlen=5000), "early_watch": deque(maxlen=5000),
                      "evicted": 0, "pruned_low_mc": 0, "pruned_no_data": 0, "pruned_age": 0}
@@ -272,7 +274,8 @@ class ScannerEngine:
             "dexscreener": src("dexscreener", "api.dexscreener.com"),
             "helius": {"state": self.helius_state.get("state"), "credits": self.rpc.credits.state(),
                        "deep_pool": len(self._deep_pool()), "deep_scale": self.deep_scale(now),
-                       "deep_skipped": [sym for _, sym in self.deep_skipped[:20]]},
+                       "deep_skipped": [sym for _, sym in self.deep_skipped[:20]],
+                       "fast_lane": self.fast.stats(now), "fast_hint": len(self.deep_hint)},
             "tracked": len(self.tracked),
             "with_market": sum(1 for s in self.tracked.values() if s.market),
         }
@@ -636,29 +639,35 @@ class ScannerEngine:
                 pass
 
     async def apply_asset(self, st: TokenState) -> bool:
-        """Helius getAsset (10 credits): token program, extensions, mint / freeze authority, canonical identity."""
-        asset = await self.rpc.das_get_asset(st.info.mint)
+        """Helius getAsset (10 credits, cached by the fast lane): token program, extensions, mint / freeze authority."""
+        asset = await self.fast.fetch(st.info.mint)
         if asset is None:
             return False
+        self._apply_asset(st, asset)
+        return True
+
+    def _apply_asset(self, st: TokenState, asset: dict) -> None:
         st.identity.helius_checked = True
         st.identity.token_program, st.identity.extensions = asset["token_program"], asset["extensions"]
         st.identity.mint_authority = asset.get("mint_authority", "")
         st.identity.freeze_authority = asset.get("freeze_authority", "")
         record_claim(st.identity, "helius", asset["symbol"], asset["name"])
         apply_identity(st)
-        return True
 
     async def _authority_worker(self) -> None:
-        """FAST LANE for the on-chain hard gates: tokens the bot flags as close to a buy (deep_hint) get Helius
-        getAsset within seconds instead of waiting for the holder deep-scan cycle. Max 8 per round, once per CA."""
+        """FAST LANE (scanner/fast_lane.py): hinted tokens whose on-chain gates are still unchecked get Helius
+        getAsset under a global per-minute limit, a per-CA cooldown and a result cache."""
+        def apply(st, asset):
+            self._apply_asset(st, asset)
+            if st.mint in self.tracked:
+                self._evaluate(st)
         while not self._stop.is_set():
             try:
-                if self.rpc.has_das and self.deep_hint:
+                if self.deep_hint:
                     todo = [self.tracked[m] for m in list(self.deep_hint)
-                            if m in self.tracked and not self.tracked[m].identity.helius_checked][:8]
-                    for st in todo:
-                        if await self.apply_asset(st) and st.mint in self.tracked:
-                            self._evaluate(st)
+                            if m in self.tracked and not self.tracked[m].identity.helius_checked]
+                    if todo:
+                        await self.fast.round(todo, apply)
             except Exception as e:                       # never takes the scanner down
                 self.log(f"authority fast lane: {type(e).__name__}: {e}")
             try:

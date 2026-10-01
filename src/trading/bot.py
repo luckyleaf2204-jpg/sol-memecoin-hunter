@@ -30,6 +30,7 @@ EXIT_WHY = {"stop_loss": "price hit the stop loss", "break_even_stop": "fell bac
             "momentum_deterioration": "momentum reversed (DISTRIBUTION / DECLINING)",
             "volume_collapse": "volume collapsed below entry", "max_hold_time": "max holding time"}
 TICK_S = 5.0
+FAST_SCORE_MARGIN, FAST_CONF_MARGIN = 0.05, 0.10   # fast getAsset lane: "genuinely near a NEW BUY"
 QUOTE_RETRY_WINDOW_S = 60.0     # transient Jupiter failures (429 / timeout / 5xx) are retried this long
 NO_ROUTE_BLOCK_S = 120.0        # after a confirmed "no route": no re-quote of that CA for this long
 MAX_ENTRIES_PER_TICK = 2
@@ -67,6 +68,8 @@ class PaperBot:
         from trading.audit import RunAudit
         self.audit = RunAudit(Path(state_path).with_name("bot_audit.json") if state_path else None)
         self.recorder = None                   # research.dataset.DatasetRecorder (read-only research log)
+        self._gate_waiting: set[str] = set()   # experimental: ever WATCH because authority / Token-2022 unchecked
+        self.fast_promoted: set[str] = set()   # ...and later a NEW candidate after the fast lane checked them
         self._last_followup = 0.0
 
     # ---------------------------------------------------------------- helpers
@@ -227,6 +230,9 @@ class PaperBot:
                                            feeds_ok=feeds_ok, feeds_reason=feeds_reason)
                 risk_items.append({"mint": st.mint, "symbol": st.info.symbol, "allowed": rd.allowed, "reasons": rd.reasons})
                 rec["risk_allowed"], rec["risk_reasons"], rec["size_usd"] = rd.allowed, rd.reasons, sz.usd
+                fast = getattr(self.engine, "fast", None)
+                if rec.get("engine") == "experimental" and st.mint in self._gate_waiting and fast is not None                         and st.mint in fast.checked:
+                    self.fast_promoted.add(st.mint)
                 if self.recorder is not None and is_trade_candidate(st, rec, allow_unchecked_risk=True):
                     self._rec("candidate", st, rec, now, sz.usd, rd.allowed,
                               100 * ((est.get("impact") or 0) + (est.get("fee_rate") or 0)))
@@ -351,16 +357,29 @@ class PaperBot:
             self.audit.execution("skip", st, now, ex.reason, reason="simulated_fill_failed")
 
     def _deep_hint(self, now: float) -> set[str]:
-        """EXPERIMENTAL: tokens close to an EarlyScore PASS get the progressive deep scan (holders, dev, Helius
-        getAsset authorities) so their hard gates can actually be evaluated. Top 25 by score, rejected excluded."""
+        """EXPERIMENTAL: tokens GENUINELY near a NEW-engine BUY get Helius priority (fast getAsset lane + holder deep
+        scan) so their hard gates can be evaluated: EarlyScore >= threshold - 0.05 AND Confidence >= threshold - 0.10,
+        no hard failure (not REJECT), identity not CONFLICT. Top 15 by score. The fast lane itself rate-limits."""
         rows = []
         for mint, rec in self.decisions.items():
             es = rec.get("early_score") or {}
-            if now - rec.get("ts", 0) > 30 or rec.get("decision") == "REJECT" or es.get("score") is None:
+            if now - rec.get("ts", 0) > 30 or rec.get("engine") != "experimental" or es.get("score") is None:
                 continue
-            if es["score"] >= es["theta"] - 0.10:
+            if rec.get("decision") == "REJECT" or any(b.startswith("hard:") or b == "identity_conflict"
+                                                      for b in rec.get("blocked_by") or []):
+                continue
+            if es["score"] >= es["theta"] - FAST_SCORE_MARGIN and es["confidence"] >= es["gamma"] - FAST_CONF_MARGIN:
                 rows.append((es["score"], mint))
-        return {m for _, m in sorted(rows, reverse=True)[:25]}
+            if any(b in ("gate_unknown:authorities", "gate_unknown:token_2022") for b in rec.get("blocked_by") or []):
+                self._gate_waiting.add(mint)
+        return {m for _, m in sorted(rows, reverse=True)[:15]}
+
+    def fast_lane_stats(self) -> dict:
+        fast = getattr(self.engine, "fast", None)
+        out = dict(fast.stats()) if fast is not None else {}
+        out["promoted_watch_to_candidate"] = len(self.fast_promoted)
+        out["promoted"] = sorted(self.fast_promoted)[:20]
+        return out
 
     def _rec(self, fn: str, *args) -> None:
         """Research-log call that can never break trading."""

@@ -148,6 +148,7 @@ def bot_status(bot: PaperBot, engine=None, now: float | None = None) -> dict:
         "doing": doing, "scan": scan, "evaluated": evaluated, "exit_rules": exits, "exit_engine": engine_rows,
         "version": "web-8",
         "engine": "experimental" if bot.cfg.experimental else "old",
+        "fast_lane": bot.fast_lane_stats() if hasattr(bot, "fast_lane_stats") else None,
         "jupiter_quotes": dict(getattr(bot, "quote_stats", {}) or {}),
         "audit": _audit_summary(bot, now),
         "live_available": False,
