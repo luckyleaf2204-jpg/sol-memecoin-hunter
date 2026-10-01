@@ -84,6 +84,7 @@ CREATE INDEX IF NOT EXISTS ix_cand_ca ON candidates(ca);
 CREATE TABLE IF NOT EXISTS buy_forensics (ca TEXT NOT NULL, entry_ts REAL NOT NULL, symbol TEXT, data TEXT,
   PRIMARY KEY (ca, entry_ts));
 CREATE TABLE IF NOT EXISTS latency_samples (id INTEGER PRIMARY KEY AUTOINCREMENT, ts REAL, ca TEXT, data TEXT);
+CREATE TABLE IF NOT EXISTS onchain_research (ca TEXT PRIMARY KEY, fetched_ts REAL, data TEXT);
 """
 
 AB_SNAP_COLS = {"engine": "TEXT", "old_decision": "TEXT", "new_decision": "TEXT", "blocked_by_old": "TEXT",
@@ -93,7 +94,10 @@ AB_SNAP_COLS = {"engine": "TEXT", "old_decision": "TEXT", "new_decision": "TEXT"
                 "new_confidence": "REAL", "old_liquidity_decision": "TEXT", "new_liquidity_decision": "TEXT",
                 "liquidity_model_used": "TEXT", "liquidity_equivalent_usd": "REAL", "liquidity_confidence": "TEXT",
                 "curve_real_sol": "REAL", "curve_virtual_sol": "REAL", "antirug": "TEXT",
-                "shadow_antirug_score": "REAL"}
+                "shadow_antirug_score": "REAL", "lifecycle": "TEXT", "lifecycle_confidence": "TEXT",
+                "migration_progress": "REAL", "setup_type": "TEXT", "setup_score": "REAL", "setup_components": "TEXT",
+                "setup_decision": "TEXT", "setup_timestamp": "REAL", "new_score": "REAL", "premigration_score": "REAL",
+                "second_wave_score": "REAL", "post_state": "TEXT", "experimental_decision": "TEXT"}
 AB_CAND_COLS = {"engine": "TEXT", "old_decision": "TEXT", "new_decision": "TEXT", "old_candidate": "INTEGER",
                 "new_candidate": "INTEGER", "blocked_by_old": "TEXT", "blocked_by_new": "TEXT", "early_score": "REAL",
                 "early_confidence": "REAL", "early_theta": "REAL", "early_gamma": "REAL", "age_bucket": "TEXT",
@@ -135,7 +139,15 @@ def ab_fields(rec: dict | None) -> dict:
             "liquidity_model_used": rec.get("liquidity_model"),
             "liquidity_equivalent_usd": rec.get("liquidity_equivalent_usd"),
             "liquidity_confidence": rec.get("liquidity_confidence"), "curve_real_sol": rec.get("curve_real_sol"),
-            "curve_virtual_sol": rec.get("curve_virtual_sol")}
+            "curve_virtual_sol": rec.get("curve_virtual_sol"),
+            "lifecycle": rec.get("lifecycle_name"), "lifecycle_confidence": rec.get("lifecycle_confidence"),
+            "migration_progress": rec.get("migration_progress"), "setup_type": rec.get("setup_type"),
+            "setup_score": rec.get("setup_score"),
+            "setup_components": json.dumps((rec.get("setup") or {}).get("components")) if rec.get("setup") else None,
+            "setup_decision": rec.get("setup_decision"), "setup_timestamp": rec.get("setup_timestamp"),
+            "new_score": rec.get("new_score"), "premigration_score": rec.get("premigration_score"),
+            "second_wave_score": rec.get("second_wave_score"), "post_state": rec.get("post_state"),
+            "experimental_decision": rec.get("experimental_decision")}
 
 
 SNAP_COLS = ("snapshot_id", "ca", "ts", "age_sec", "source", "stage", "reason", "mc_usd", "price_usd", "liq_usd",
@@ -445,6 +457,11 @@ class DatasetRecorder:
         data = {k: v for k, v in fx.items() if k != "done"}
         self.db.execute("INSERT OR REPLACE INTO buy_forensics VALUES (?,?,?,?)",
                         (fx["mint"], fx["entry_ts"], fx.get("symbol"), json.dumps(data, default=str)))
+        self.db.commit()
+
+    def onchain(self, rec: dict) -> None:
+        self.db.execute("INSERT OR REPLACE INTO onchain_research VALUES (?,?,?)",
+                        (rec["ca"], rec.get("fetched_ts"), json.dumps(rec, default=str)))
         self.db.commit()
 
     def latency(self, sample: dict) -> None:

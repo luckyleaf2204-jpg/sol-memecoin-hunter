@@ -14,6 +14,8 @@ from pathlib import Path
 from core.models import TokenState
 from trading import decision as D
 from trading import experimental as X
+from trading import lifecycle as LC
+from trading import lifecycle_decision as LD
 from trading.book import PaperBook
 from trading.config import ModeNotAllowed, PAPER, TradingConfig
 from trading.execution import PaperExecutor
@@ -70,6 +72,9 @@ class PaperBot:
         from trading.audit import RunAudit
         self.audit = RunAudit(Path(state_path).with_name("bot_audit.json") if state_path else None)
         self.recorder = None                   # research.dataset.DatasetRecorder (read-only research log)
+        self.onchain = None                    # research.onchain.OnchainResearch (shadow anti-rug data, budgeted)
+        self.lifecycle_tracker = LC.LifecycleTracker()   # NEW -> PRE -> POST transitions per CA
+        self._last_onchain = 0.0
         self._gate_waiting: set[str] = set()   # experimental: ever WATCH because authority / Token-2022 unchecked
         self.fast_promoted: set[str] = set()   # ...and later a NEW candidate after the fast lane checked them
         self.fill_log: list[dict] = []          # every paper BUY fill attempt: impact / latency slip / total / max
@@ -233,6 +238,10 @@ class PaperBot:
                                 "curve_virtual_sol": lq.get("virtual_sol")})
                 else:
                     rec["early_score"] = X.early_score(st, now, self.cfg).as_dict()   # logged only (A/B)
+                if self.cfg.lifecycle:                      # LIFECYCLE engine decides; OLD + experimental logged
+                    if not self.cfg.experimental:
+                        xd = X.evaluate(st, v, sc, self.cfg, now)
+                    decision = self._lifecycle_decide(st, v, sc, rec, xd, now)
                 rec["risk_allowed"], rec["risk_reasons"], rec["state"] = None, [], decision
                 self.decisions[st.mint] = rec
                 vet_items.append(rec)
@@ -297,7 +306,9 @@ class PaperBot:
                         continue
                     self.intents[st.mint] = {"mint": st.mint, "usd": sz.usd, "ts": now, "opportunity": sc.opportunity,
                                              "why": sc.why, "setup": "+".join(sorted(reasons)),
-                                             "risk_at_candidate": st.risk.score if st.risk else None}
+                                             "risk_at_candidate": st.risk.score if st.risk else None,
+                                             "lifecycle": rec.get("lifecycle_name"), "setup_type": rec.get("setup_type"),
+                                             "setup_score": rec.get("setup_score")}
                     rec["state"] = "QUOTING"
                     self.audit.execution("candidate", st, now, f"${sz.usd:,.2f}")
                     self.log("INFO", f"BUY CANDIDATE ${sz.usd:,.2f} → requesting Jupiter quote", st, now=now)
@@ -375,6 +386,7 @@ class PaperBot:
             setup = (it.get("setup") or "") + "+noquote"
             self.book.open(ex, self.cfg, now, it.get("opportunity"), it.get("why"), st.market.liquidity_usd,
                            st.market.vol_5m, setup=setup)
+            self._tag_position(st.mint, it)
             rec["state"] = "BOUGHT_SIMULATED"
             self.log("BUY", f"BUY → QUOTE FAILED ({qr.status}) → SIMULATED FILL ${usd:,.2f} @ ${ex.fill_price:.8g} · "
                             f"model impact {ex.price_impact_pct:.2f}% · {ex.route}", st, usd=usd, price=ex.fill_price, now=now)
@@ -532,12 +544,107 @@ class PaperBot:
             for m in sorted(self.forensics, key=lambda k: self.forensics[k]["entry_ts"])[:-200]:
                 self.forensics.pop(m, None)
 
+    def _tag_position(self, mint: str, it: dict) -> None:
+        p = self.book.positions.get(mint)
+        if p is not None:
+            p.entry_lifecycle, p.entry_setup, p.entry_setup_score = it.get("lifecycle"), it.get("setup_type"), it.get("setup_score")
+
+    def _history(self, mint: str):
+        store = getattr(self.engine, "history", None)
+        return getattr(store, "_h", {}).get(mint) if store is not None else None
+
+    def _lifecycle_decide(self, st, v, sc, rec: dict, xd, now: float) -> str:
+        li = LC.classify(st, self.cfg, now)
+        tr, migrated = self.lifecycle_tracker.update(st, li, now)
+        if migrated:
+            self.log("INFO", f"LIFECYCLE → POST_MIGRATION: NEW / PRE-MIGRATION setups closed, second-wave state "
+                             f"started on pair {li.pair_address[:8]}", st, now=now)
+        oc = self.onchain.done.get(st.mint) if self.onchain is not None else None
+        ld = LD.evaluate(st, v, sc, self.cfg, now, tr, self._history(st.mint), oc, li)
+        su = ld.setup
+        sd = su.as_dict() if su is not None else None
+        rec.update({
+            "engine": "lifecycle", "decision": ld.decision, "blocked_by": ld.blocked_by, "waiting": ld.waiting,
+            "rejected": ld.rejected, "why": ld.why + ["OLD: " + w for w in sc.why[:2]],
+            "experimental_decision": xd.decision if xd is not None else None,
+            "blocked_by_experimental": xd.blocked_by if xd is not None else None,
+            "would_have_bought_old": bool(rec.get("old_candidate")),
+            "would_have_bought_experimental": xd is not None and xd.decision == TRADE,
+            "would_have_bought_lifecycle": ld.decision == TRADE,
+            "lifecycle": li.as_dict(), "lifecycle_name": li.lifecycle, "lifecycle_confidence": li.confidence,
+            "migration_progress": li.migration_progress,
+            "transitions": {k: getattr(tr, k) for k in ("discovery_ts", "new_start_ts", "premigration_start_ts",
+                                                        "migration_ts", "postmigration_start_ts")},
+            "setup": sd, "setup_type": su.setup_type if su else None,
+            "setup_score": None if su is None or su.score is None else round(su.score, 1),
+            "setup_threshold": ld.threshold, "setup_decision": ld.decision, "setup_timestamp": now,
+            "new_score": sd["score"] if su and su.setup_type == "NEW" else None,
+            "premigration_score": sd["score"] if su and su.setup_type == "PRE_MIGRATION" else None,
+            "second_wave_score": sd["score"] if su and su.setup_type == "SECOND_WAVE" else None,
+            "post_state": (su.extra.get("post_state") or {}).get("state") if su and su.setup_type == "SECOND_WAVE" else None,
+            "early_score": ld.es.as_dict() if ld.es is not None else rec.get("early_score"),
+            "risk_at_lifecycle": st.risk.score if st.risk else None})
+        lq = (ld.es.liquidity if ld.es is not None else None) or {}
+        rec.update({"old_liquidity": lq.get("old"), "new_liquidity": lq.get("decision"),
+                    "liquidity_model": lq.get("model"), "liquidity_equivalent_usd": lq.get("equivalent_usd"),
+                    "liquidity_confidence": lq.get("confidence")})
+        return ld.decision
+
+    def lifecycle_summary(self, now: float | None = None) -> dict:
+        """Per-lifecycle counts for the dashboard: tokens, candidates, open / closed positions, P&L, and what the bot
+        is doing right now."""
+        now = now or time.time()
+        out = {k: {"tokens": 0, "candidates": 0, "buys": 0, "open": 0, "pnl": 0.0} for k in
+               (LC.NEW, LC.PRE_MIGRATION, LC.POST_MIGRATION, LC.UNKNOWN)}
+        unknown_reasons: dict = {}
+        for mint, rec in self.decisions.items():
+            if now - rec.get("ts", 0) > 30 or rec.get("engine") != "lifecycle":
+                continue
+            lc = rec.get("lifecycle_name") or LC.UNKNOWN
+            out.setdefault(lc, {"tokens": 0, "candidates": 0, "buys": 0, "open": 0, "pnl": 0.0})
+            out[lc]["tokens"] += 1
+            out[lc]["candidates"] += rec.get("decision") == TRADE
+            if lc == LC.UNKNOWN:
+                r = ((rec.get("lifecycle") or {}).get("reasons") or ["?"])[0]
+                unknown_reasons[r] = unknown_reasons.get(r, 0) + 1
+        for p in list(self.book.positions.values()) + list(self.book.closed):
+            lc = getattr(p, "entry_lifecycle", None) or LC.UNKNOWN
+            o = out.setdefault(lc, {"tokens": 0, "candidates": 0, "buys": 0, "open": 0, "pnl": 0.0})
+            o["buys"] += 1
+            if p.status == "OPEN":
+                o["open"] += 1
+                o["pnl"] += p.pnl_usd() or 0.0
+            else:
+                o["pnl"] += p.realized_usd - p.cost_usd
+        for o in out.values():
+            o["pnl"] = round(o["pnl"], 2)
+        doing = []
+        held = [p for p in self.book.positions.values()]
+        for p in held[:3]:
+            doing.append(f"Đang giữ token {getattr(p, 'entry_lifecycle', None) or '?'} — "
+                         f"{(p.pnl_pct() or 0):+.1f}%")
+        names = {LC.NEW: "Đang săn NEW", LC.PRE_MIGRATION: "Đang săn PRE-MIGRATION", LC.POST_MIGRATION: "Đang chờ SECOND-WAVE"}
+        for k, label in names.items():
+            if out[k]["tokens"]:
+                doing.append(f"{label} — {out[k]['tokens']} token")
+        if not any(out[k]["candidates"] for k in names) and not held:
+            doing.append("Không BUY — chưa có setup đạt chuẩn")
+        return {"by_lifecycle": out, "unknown_reasons": dict(sorted(unknown_reasons.items(), key=lambda x: -x[1])[:8]),
+                "doing": doing}
+
     def _deep_hint(self, now: float) -> set[str]:
         """EXPERIMENTAL: tokens GENUINELY near a NEW-engine BUY get Helius priority (fast getAsset lane + holder deep
         scan) so their hard gates can be evaluated: EarlyScore >= threshold - 0.05 AND Confidence >= threshold - 0.10,
         no hard failure (not REJECT), identity not CONFLICT. Top 15 by score. The fast lane itself rate-limits."""
         rows = []
         for mint, rec in self.decisions.items():
+            if rec.get("engine") == "lifecycle" and now - rec.get("ts", 0) <= 30 and rec.get("decision") != "REJECT":
+                su = rec.get("setup") or {}
+                thr = rec.get("setup_threshold")
+                if su.get("score") is not None and thr is not None and su["score"] >= thr - 10 \
+                        and (rec.get("lifecycle") or {}).get("active"):
+                    rows.append((su["score"] / 100, mint))
+                continue
             es = rec.get("early_score") or {}
             if now - rec.get("ts", 0) > 30 or rec.get("engine") != "experimental" or es.get("score") is None:
                 continue
@@ -762,6 +869,8 @@ class PaperBot:
                     "requote_ts": (getattr(self, "_last_probe", None) or {}).get("requote_ts") if drift is not None else None,
                     "latency_actual_s": (getattr(self, "_last_probe", None) or {}).get("latency_s") if drift is not None else None,
                     "route": ex.route, "liquidity_usd": st.market.liquidity_usd if st.market else None,
+                    "lifecycle": it.get("lifecycle"), "setup_type": it.get("setup_type"), "setup_score": it.get("setup_score"),
+                    "position_size_usd": usd,
                     "candidate_status": "bought" if ex.status == "FILLED" else
                     ("slippage_blocked" if "slippage" in (ex.reason or "") else "fill_failed"), **risk_ctx}
             self.fill_log.append({"ts": now, "mint": mint, "symbol": st.info.symbol, **fill})
@@ -778,6 +887,7 @@ class PaperBot:
                          st, usd=usd, price=ex.fill_price, now=now)
                 self.audit.execution("buy", st, now, f"${usd:,.2f} @ {ex.fill_price:.8g} · {ex.route}")
                 self._forensic_open(st, now, risk_ctx)
+                self._tag_position(mint, it)
             else:
                 self.book.record(ex)
                 self.log("FAILED", f"BUY → QUOTE → MATCH → PAPER FILL FAILED: {ex.reason} · Jupiter impact "
@@ -815,6 +925,13 @@ class PaperBot:
                 if self.recorder is not None and time.time() - self._last_followup >= 30:
                     self._last_followup = time.time()
                     await self.recorder.run_followups()
+                if self.onchain is not None and time.time() - self._last_onchain >= 10:
+                    self._last_onchain = time.time()
+                    try:
+                        await self.onchain.round({s.mint: s for s in (self.engine.published or [])}, self.decisions,
+                                                 set(self.book.positions))
+                    except Exception as e:                # research never breaks trading
+                        self.log("INFO", f"onchain research error: {type(e).__name__}: {e}")
             except Exception as e:                       # the bot never takes the scanner down
                 self.log("INFO", f"bot tick error: {type(e).__name__}: {e}")
             try:
@@ -988,7 +1105,7 @@ def is_trade_candidate(st: TokenState, rec: dict, allow_unchecked_risk: bool = F
     """🟢 gate: Early Signal TRUE + identity VERIFIED + VET PASS + Decision TRADE (+ Risk, checked by the caller).
     EXPERIMENTAL engine: identity VERIFIED + Decision TRADE (which already requires every hard gate checked and passed,
     EarlyScore PASS for the age, Opportunity >= 65, Confidence >= 60) (+ Risk Engine, checked by the caller)."""
-    if rec.get("engine") == "experimental":
+    if rec.get("engine") in ("experimental", "lifecycle"):
         if st.identity.status != "VERIFIED" or rec.get("decision") != TRADE:
             return False
         return allow_unchecked_risk or bool(rec.get("risk_allowed"))

@@ -44,7 +44,7 @@ AUTH_WINDOW_S, AUTH_MAX_FAILS = 600, 10
 REFRESH_PER_MINT_S, REFRESH_GLOBAL_PER_MIN = 60, 10
 MAX_WATCH = 30
 LIST_KINDS = ("top", "new", "early", "whales", "dev", "social")
-VERSION = "web-8"
+VERSION = "web-9"
 HOME_LIMIT = {"opportunity": 60, "watch": 60, "nodata": 40, "excluded": 40}
 
 
@@ -108,12 +108,16 @@ def create_app(engine: ScannerEngine | None = None, start_scanner: bool = True,
             state["bot"].jupiter = JupiterQuotes(state["engine"].http)      # paper BUYs on real Jupiter quotes
             state["bot"].cfg.experimental = os.environ.get("EXPERIMENTAL_MODE", "1") != "0"   # spec Part 3 (PAPER)
             state["bot"].cfg.latency_probe = os.environ.get("LATENCY_PROBE", "1") != "0"     # measure real drift
+            state["bot"].cfg.lifecycle = os.environ.get("LIFECYCLE_ENGINE", "1") != "0"      # Lifecycle-Aware Hunter V1
             lm = os.environ.get("LATENCY_SLIPPAGE_MODEL", "AUTO").upper()   # AUTO | CURRENT | CONSERVATIVE | EMPIRICAL
             if lm in ("AUTO", "CURRENT", "CONSERVATIVE", "EMPIRICAL"):
                 state["bot"].cfg.latency_slippage_model = state["bot"].exec.latency_model = lm
             if os.environ.get("RESEARCH_LOG", "1") != "0":                # research dataset (read-only log)
                 from research.dataset import DatasetRecorder
                 state["bot"].recorder = DatasetRecorder(DATA_DIR / "research.db", dex=state["engine"].dex)
+                if os.environ.get("RESEARCH_ONCHAIN", "1") != "0":                  # shadow anti-rug data (budgeted)
+                    from research.onchain import OnchainResearch
+                    state["bot"].onchain = OnchainResearch(state["engine"].rpc, state["bot"].recorder)
             state["task"] = asyncio.create_task(state["engine"].run())
             state["bot_stop"] = asyncio.Event()
             state["bot_task"] = asyncio.create_task(state["bot"].run(state["bot_stop"]))

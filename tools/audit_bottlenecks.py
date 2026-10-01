@@ -153,15 +153,19 @@ def decompose(st, rec, settings, sol):
 async def run(minutes, research_db=""):
     eng = ScannerEngine(Settings(), Database(Path(tempfile.mkdtemp()) / "a.db"), keys=ApiKeys.from_env(),
                         on_log=lambda m: print(m, flush=True) if "PIPELINE" in m else None)
-    bot = PaperBot(eng, TradingConfig(experimental=True, latency_probe=True, latency_slippage_model="AUTO"))
+    bot = PaperBot(eng, TradingConfig(experimental=True, latency_probe=True, latency_slippage_model="AUTO",
+                                      lifecycle=True))
     bot.jupiter = JupiterQuotes(eng.http)
     if research_db:
         from research.dataset import DatasetRecorder
         bot.recorder = DatasetRecorder(research_db, dex=eng.dex)
+        from research.onchain import OnchainResearch
+        bot.onchain = OnchainResearch(eng.rpc, bot.recorder)
     stop = asyncio.Event()
     tasks = [asyncio.create_task(eng.run()), asyncio.create_task(bot.run(stop))]
     shocks, es_pass, liq_blocked, best = {}, {}, {}, {}
     promo, cand_first, paths = {}, {}, {}
+    lc = {"seen": {}, "setup_pass": {}, "es_pass": {}, "old_cand": {}, "exp_cand": {}, "lc_cand": {}}
     buffer_only, buffer_any = set(), set()
     end = time.time() + minutes * 60
     while time.time() < end:
@@ -226,7 +230,34 @@ async def run(minutes, research_db=""):
                                  "holder_status": st.holder_status, "dev_verified": bool(st.dev and st.dev.balance_verified),
                                  "early_score": (rec.get("early_score") or {}).get("score"),
                                  "prior_risk": (rec.get("early_score") or {}).get("prior_risk")}
-            if (k in promo or k in cand_first) and px:
+            if rec.get("engine") == "lifecycle":
+                name = rec.get("lifecycle_name")
+                eqv = rec.get("liquidity_equivalent_usd")
+                lc["seen"][k] = {"lifecycle": name, "reason": ((rec.get("lifecycle") or {}).get("reasons") or [""])[0],
+                                 "liq_bucket": None if eqv is None else ("<10K" if eqv < 1e4 else "10-20K" if eqv < 2e4 else
+                                                                       "20-50K" if eqv < 5e4 else "50-100K" if eqv < 1e5 else "100K+")}
+                su = rec.get("setup") or {}
+                thr = rec.get("setup_threshold")
+                ctx = {"ts": now, "price": px, "lifecycle": name, "setup_type": rec.get("setup_type"),
+                       "setup_score": su.get("score"), "liq_bucket": lc["seen"][k]["liq_bucket"]}
+                if su.get("score") is not None and thr is not None and su["score"] >= thr \
+                        and su.get("data_confidence", 0) >= bot.cfg.min_setup_confidence and k not in lc["setup_pass"]:
+                    try:
+                        from research.antirug import features as _arf
+                        ctx["shadow_antirug"] = _arf(st, now).get("shadow_antirug_score")
+                    except Exception:
+                        ctx["shadow_antirug"] = None
+                    lc["setup_pass"][k] = ctx
+                if es.get("score") is not None and es["score"] >= es["theta"] and es["confidence"] >= es["gamma"]:
+                    lc["es_pass"].setdefault(k, ctx)
+                if rec.get("would_have_bought_old"):
+                    lc["old_cand"].setdefault(k, ctx)
+                if rec.get("would_have_bought_experimental"):
+                    lc["exp_cand"].setdefault(k, ctx)
+                if rec.get("decision") == "TRADE":
+                    lc["lc_cand"].setdefault(k, ctx)
+            if (k in promo or k in cand_first or any(k in lc[x] for x in ("setup_pass", "es_pass", "old_cand",
+                                                                         "exp_cand", "lc_cand"))) and px:
                 paths.setdefault(k, []).append((now, px))
             if k not in best or (row["opportunity"] or 0) >= (best[k]["opportunity"] or 0):
                 best[k] = row
@@ -239,6 +270,7 @@ async def run(minutes, research_db=""):
     eng.stop()
     await asyncio.gather(*tasks, return_exceptions=True)
     bot._audit_buffer = {"any": len(buffer_any), "only_blocker": len(buffer_only)}
+    bot._audit_lc = lc
     bot._audit_minutes = minutes
     return bot, eng, shocks, es_pass, liq_blocked, best, promo, cand_first, paths
 
@@ -313,6 +345,92 @@ def classify_spike(fx, max_age=30.0):
     return {"symbol": fx["symbol"], "class": cls, "risk_path": [(x["at"], x["risk"]) for x in snaps],
             "added_factors": added, "price_change_to_spike_pct": None if px is None else round(px, 1),
             "spike_at_s": spike["t"], "entry_ctx": fx["ctx"]}
+
+
+def lifecycle_section(bot, paths):
+    """Per-lifecycle report (never one pooled number). Rug = MAE <= -80 % within the observed path."""
+    lc = getattr(bot, "_audit_lc", None)
+    if not lc:
+        return None
+
+    def outcome(k, c):
+        f = fwd(paths.get(k), c["ts"], c["price"])
+        mae = f.get("mae_pct")
+        rug = True if mae is not None and mae <= -80 else (False if f.get("observed_s", 0) >= 600 else None)
+        return f | {"rug": rug}                       # NON_RUG only after >= 10 min observed, else UNKNOWN
+
+    names = ("NEW", "PRE_MIGRATION", "POST_MIGRATION", "UNKNOWN")
+    out = {"tokens_by_lifecycle": dict(collections.Counter(v["lifecycle"] or "UNKNOWN" for v in lc["seen"].values())),
+           "unknown_reasons": dict(collections.Counter(v["reason"] for v in lc["seen"].values()
+                                                       if (v["lifecycle"] or "UNKNOWN") == "UNKNOWN").most_common(8))}
+    fills = bot.fill_log
+    by = {}
+    for n in names:
+        cands = {k: c for k, c in lc["lc_cand"].items() if c["lifecycle"] == n}
+        outs = [outcome(k, c) for k, c in cands.items()]
+        pos = [p for p in list(bot.book.positions.values()) + list(bot.book.closed) if (p.entry_lifecycle or "UNKNOWN") == n]
+        closed = [p for p in pos if p.status == "CLOSED"]
+        pnls = [p.realized_usd - p.cost_usd for p in closed]
+        run, peak, dd = 0.0, 0.0, 0.0
+        for x in sorted(closed, key=lambda p: p.closed_at or 0):
+            run += x.realized_usd - x.cost_usd
+            peak = max(peak, run)
+            dd = min(dd, run - peak)
+        fl = [f for f in fills if f.get("lifecycle") == n]
+        rugs = [o for o in outs if o["rug"] is not None]
+        by[n] = {"tokens": out["tokens_by_lifecycle"].get(n, 0), "setup_pass": sum(1 for c in lc["setup_pass"].values() if c["lifecycle"] == n),
+                 "candidates": len(cands), "buys": len(pos), "fill_attempts": len(fl),
+                 "fills": sum(1 for f in fl if f["status"] == "FILLED"),
+                 "win": sum(1 for x in pnls if x > 0), "loss": sum(1 for x in pnls if x <= 0),
+                 "rug_candidates": sum(1 for o in rugs if o["rug"]), "rug_labelled": len(rugs),
+                 "mfe_pct": [p.path_log()["mfe_pct"] for p in pos], "mae_pct": [p.path_log()["mae_pct"] for p in pos],
+                 "expectancy_usd": round(statistics.fmean(pnls), 2) if pnls else None,
+                 "net_pnl_usd": round(sum(pnls) + sum((p.pnl_usd() or 0) for p in pos if p.status == "OPEN"), 2),
+                 "max_drawdown_usd": round(dd, 2),
+                 "candidate_mfe_median": statistics.median([o["mfe_pct"] for o in outs if o.get("mfe_pct") is not None])
+                 if any(o.get("mfe_pct") is not None for o in outs) else None,
+                 "sample": "INSUFFICIENT SAMPLE" if len(pos) < 30 else "OK"}
+    out["by_lifecycle"] = by
+
+    def engine_stats(d):
+        outs = {k: outcome(k, c) for k, c in d.items()}
+        lab = [o for o in outs.values() if o["rug"] is not None]
+        return {"candidates": len(d), "rug": sum(1 for o in lab if o["rug"]), "labelled": len(lab),
+                "big_movers_mfe_ge_30": sum(1 for o in outs.values() if (o.get("mfe_pct") or 0) >= 30)}
+    old, exp, lcc = lc["old_cand"], lc["exp_cand"], lc["lc_cand"]
+    out["old_vs_lifecycle"] = {
+        "OLD": engine_stats(old), "EXPERIMENTAL": engine_stats(exp), "LIFECYCLE": engine_stats(lcc),
+        "missed_by_lifecycle_mfe_ge_30": sum(1 for k, c in {**old, **exp}.items() if k not in lcc
+                                             and (outcome(k, c).get("mfe_pct") or 0) >= 30),
+        "missed_by_old_mfe_ge_30": sum(1 for k, c in lcc.items() if k not in old and (outcome(k, c).get("mfe_pct") or 0) >= 30)}
+
+    def gated(d, pred=lambda c: True):
+        sel = {k: c for k, c in d.items() if pred(c)}
+        lab = [outcome(k, c) for k, c in sel.items()]
+        lab = [o for o in lab if o["rug"] is not None]
+        r = sum(1 for o in lab if o["rug"])
+        return {"n": len(sel), "labelled": len(lab), "rug": r, "rug_rate": round(r / len(lab), 3) if lab else None}
+    out["incremental_rug"] = {"EarlyScore_alone": gated(lc["es_pass"]), "Setup_alone": gated(lc["setup_pass"]),
+                              "Setup_plus_AntiRug(shadow<50)": gated(lc["setup_pass"],
+                                                                     lambda c: (c.get("shadow_antirug") or 0) < 50),
+                              "note": "rug = MAE <= -80% within the observed window; descriptive, tiny samples"}
+    liq = {}
+    for k, c in lc["setup_pass"].items():
+        o = outcome(k, c)
+        key = f"{c['lifecycle']}|{c['liq_bucket']}"
+        e = liq.setdefault(key, {"n": 0, "rug": 0, "labelled": 0, "mfe": [], "mae": []})
+        e["n"] += 1
+        if o["rug"] is not None:
+            e["labelled"] += 1
+            e["rug"] += o["rug"]
+        if o.get("mfe_pct") is not None:
+            e["mfe"].append(o["mfe_pct"])
+            e["mae"].append(o["mae_pct"])
+    out["liquidity_by_lifecycle"] = {k: {"n": v["n"], "rug": v["rug"], "labelled": v["labelled"],
+                                         "mfe_median": statistics.median(v["mfe"]) if v["mfe"] else None,
+                                         "mae_median": statistics.median(v["mae"]) if v["mae"] else None}
+                                     for k, v in sorted(liq.items())}
+    return out
 
 
 def report(bot, eng, shocks, es_pass, liq_blocked, best, promo=None, cand_first=None, paths=None):
@@ -405,6 +523,7 @@ def report(bot, eng, shocks, es_pass, liq_blocked, best, promo=None, cand_first=
         sims.append({"symbol": c["symbol"], "liquidity_promoted": c["liquidity_promoted"], "model": c["liquidity_model"],
                      "bought": k in bought, "sim_pnl_pct": pnl, "exit": how, **fwd(paths.get(k), c["ts"], c["price"])})
     out["candidates_simulated"] = sims
+    out["lifecycle"] = lifecycle_section(bot, paths)
     rugs = []
     for k, c in cand_first.items():
         f = fwd(paths.get(k), c["ts"], c["price"])

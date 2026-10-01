@@ -56,6 +56,24 @@ class TradingConfig:
     empirical_min_samples: int = 50          # EMPIRICAL stays off (falls back to CURRENT) below this
     # ENTRY risk buffer (experimental NEW BUYs only; Risk Engine, exits and the hard limit 60 unchanged)
     entry_max_risk: int = 55
+    # LIFECYCLE engine (Lifecycle-Aware Hunter V1). Conservative initial thresholds, chosen for A/B and later
+    # calibration — not to produce BUYs. The server turns the engine on (LIFECYCLE_ENGINE=1).
+    lifecycle: bool = False
+    premigration_progress_min: float = 70.0  # Pump.fun curve progress (%) that makes a curve PRE_MIGRATION
+    new_setup_threshold: float = 70.0
+    premigration_setup_threshold: float = 70.0
+    second_wave_setup_threshold: float = 70.0
+    min_setup_confidence: float = 0.50
+    # second-wave state machine (post-migration pair only)
+    second_wave_min_history_s: float = 120.0
+    first_pump_min_pct: float = 30.0
+    pullback_min_pct: float = 15.0
+    pullback_max_pct: float = 60.0
+    support_min_s: float = 60.0
+    bounce_min_pct: float = 5.0
+    reentry_buy_share: float = 0.55
+    liquidity_retention_min: float = 0.5
+    volume_retention_min: float = 0.15
 
     def __post_init__(self):
         if self.mode not in ALLOWED_MODES:

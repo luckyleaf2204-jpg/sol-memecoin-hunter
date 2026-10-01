@@ -358,12 +358,11 @@ def hard_gates(st: TokenState, v: Vet, es: EarlyScore) -> list[str]:
     return out
 
 
-def evaluate(st: TokenState, v: Vet, sc: Score, cfg: TradingConfig, now: float | None = None) -> ExpDecision:
-    now = now or time.time()
-    es = early_score(st, now, cfg)
+def safety_pre(st: TokenState, v: Vet, cfg: TradingConfig, es: EarlyScore) -> tuple[list, list, list]:
+    """Existing safety gates shared by every NEW-architecture engine (experimental, lifecycle):
+    hard gates (REJECT), identity pending, and gates that were never evaluated (authorities, Token-2022, rug/Risk,
+    liquidity model, fresh market data, CA). Returns (hard, blocked, waiting). Needs es.liquidity set."""
     checks = {c.key: c for c in v.checks}
-    old_liq = checks["liquidity"].result if "liquidity" in checks else None
-    es.liquidity = liquidity_model(st, cfg, old_liq)
     hard = hard_gates(st, v, es)
     blocked, waiting = [], []
     ident = st.identity.status
@@ -382,6 +381,33 @@ def evaluate(st: TokenState, v: Vet, sc: Score, cfg: TradingConfig, now: float |
             blocked.append("gate_unknown:" + k)
             waiting.append({"authorities": "vet_onchain", "token_2022": "vet_onchain", "rug": "risk",
                             "liquidity": "market_data", "data_quality": "market_data", "ca": "identity"}[k])
+    return hard, blocked, waiting
+
+
+def safety_post(st: TokenState, cfg: TradingConfig, es: EarlyScore, hard: list) -> tuple[list, list]:
+    """final risk (observed vs prior) and the entry risk buffer for NEW BUYs. Returns (blocked, waiting)."""
+    blocked, waiting = [], []
+    if es.final_risk is not None and es.final_risk > 60:
+        blocked.append("final_risk")
+    rk = st.risk
+    if rk is not None and cfg.entry_max_risk < rk.score <= 60 and "risk_gt_60" not in hard:
+        blocked.append(f"entry_risk_buffer:{rk.score}>{cfg.entry_max_risk}")   # too close to the hard limit to BUY
+        waiting.append("risk")
+    return blocked, waiting
+
+
+def prepare(st: TokenState, v: Vet, cfg: TradingConfig, now: float) -> EarlyScore:
+    es = early_score(st, now, cfg)
+    checks = {c.key: c for c in v.checks}
+    es.liquidity = liquidity_model(st, cfg, checks["liquidity"].result if "liquidity" in checks else None)
+    return es
+
+
+def evaluate(st: TokenState, v: Vet, sc: Score, cfg: TradingConfig, now: float | None = None) -> ExpDecision:
+    now = now or time.time()
+    es = prepare(st, v, cfg, now)
+    hard, blocked, waiting = safety_pre(st, v, cfg, es)
+    ident = st.identity.status
     if es.score is None:
         blocked.append("early_score_unknown")
         waiting.append("early_signal")
@@ -399,12 +425,9 @@ def evaluate(st: TokenState, v: Vet, sc: Score, cfg: TradingConfig, now: float |
         blocked.append("opportunity")
     if conf < cfg.trade_min_confidence:
         blocked.append("confidence")
-    if es.final_risk is not None and es.final_risk > 60:
-        blocked.append("final_risk")
-    rk = st.risk
-    if rk is not None and cfg.entry_max_risk < rk.score <= 60 and "risk_gt_60" not in hard:
-        blocked.append(f"entry_risk_buffer:{rk.score}>{cfg.entry_max_risk}")   # too close to the hard limit to BUY
-        waiting.append("risk")
+    b2, w2 = safety_post(st, cfg, es, hard)
+    blocked += b2
+    waiting += w2
     why = [f"EarlyScore {'—' if es.score is None else f'{es.score:.2f}'} (≥{es.theta}) · conf {es.confidence:.2f} "
            f"(≥{es.gamma}) · age {es.age_s:.0f}s [{es.bucket}] · risk obs {es.observed_risk} prior {es.prior_risk}"]
     waiting = list(dict.fromkeys(waiting))

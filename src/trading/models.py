@@ -115,6 +115,9 @@ class Position:
     tp2_hit_ts: float | None = None
     sl_hit_ts: float | None = None         # first time the observed price reached the initial stop level
     initial_stop: float | None = None
+    entry_lifecycle: str | None = None     # NEW | PRE_MIGRATION | POST_MIGRATION (lifecycle engine)
+    entry_setup: str | None = None         # NEW | PRE_MIGRATION | SECOND_WAVE
+    entry_setup_score: float | None = None
 
     @property
     def mfe_pct(self) -> float | None:

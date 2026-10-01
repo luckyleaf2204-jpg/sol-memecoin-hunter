@@ -114,7 +114,12 @@ def bot_status(bot: PaperBot, engine=None, now: float | None = None) -> dict:
             "holders": st.holders.holder_count if st.holders and st.holder_status == "ok" else None,
             "dev": st.dev.status if st.dev and st.dev.balance_verified else None,
             "engine": rec.get("engine", "old"), "old_decision": rec.get("old_decision"),
-            "old_candidate": bool(rec.get("old_candidate")), "early_score": rec.get("early_score")})
+            "old_candidate": bool(rec.get("old_candidate")), "early_score": rec.get("early_score"),
+            "lifecycle": rec.get("lifecycle_name"), "lifecycle_confidence": rec.get("lifecycle_confidence"),
+            "migration_progress": rec.get("migration_progress"), "setup_type": rec.get("setup_type"),
+            "setup_score": rec.get("setup_score"), "setup_threshold": rec.get("setup_threshold"),
+            "setup_confidence": (rec.get("setup") or {}).get("data_confidence"), "post_state": rec.get("post_state"),
+            "experimental_decision": rec.get("experimental_decision")})
     evaluated.sort(key=lambda x: (x["action"] != "BUY", -((x["opportunity"] or 0) + (x["confidence"] or 0) - (x["risk"] or 100))))
     if bot.cfg.kill_switch:
         doing = {"kind": "kill"}
@@ -146,8 +151,9 @@ def bot_status(bot: PaperBot, engine=None, now: float | None = None) -> dict:
     return {
         "pipeline": bot.pipeline(now),
         "doing": doing, "scan": scan, "evaluated": evaluated, "exit_rules": exits, "exit_engine": engine_rows,
-        "version": "web-8",
-        "engine": "experimental" if bot.cfg.experimental else "old",
+        "version": "web-9",
+        "engine": "lifecycle" if bot.cfg.lifecycle else ("experimental" if bot.cfg.experimental else "old"),
+        "lifecycle_summary": bot.lifecycle_summary(now) if hasattr(bot, "lifecycle_summary") else None,
         "fast_lane": bot.fast_lane_stats() if hasattr(bot, "fast_lane_stats") else None,
         "jupiter_quotes": dict(getattr(bot, "quote_stats", {}) or {}),
         "audit": _audit_summary(bot, now),

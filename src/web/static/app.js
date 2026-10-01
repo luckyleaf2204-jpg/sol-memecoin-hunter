@@ -768,6 +768,25 @@ function stageOf(a) {
 }
 function decisionCls(a) { return a === "BUY" ? "d-buy" : a === "WATCH" || a === "PENDING" ? "d-watch" : "d-reject"; }
 function nn(v) { return v === null || v === undefined ? "—" : esc(v); }
+const LC_BADGE = { NEW: "🟡 NEW", PRE_MIGRATION: "🟠 PRE-MIGRATION", POST_MIGRATION: "🟢 POST-MIGRATION", UNKNOWN: "⚪ UNKNOWN" };
+
+function lcLine(x) {
+  if (!x.lifecycle) return "";
+  const s = x.setup_score === null || x.setup_score === undefined ? "—" : Math.round(x.setup_score);
+  const p = x.migration_progress === null || x.migration_progress === undefined ? "" : ` · curve ${Number(x.migration_progress).toFixed(0)}%`;
+  const ps = x.post_state ? ` · ${x.post_state}` : "";
+  const conf = x.setup_confidence === null || x.setup_confidence === undefined ? "—" : Number(x.setup_confidence).toFixed(2);
+  return `<div class="c-muted"><b>${esc(LC_BADGE[x.lifecycle] || x.lifecycle)}</b> (${esc(x.lifecycle_confidence || "—")})${esc(p)}${esc(ps)} · ${esc(x.setup_type || "—")} setup ${esc(s)}/${esc(x.setup_threshold ?? "—")} · data ${esc(conf)} · Opp ${esc(x.opportunity ?? "—")} (log)</div>`;
+}
+
+function lcSummary(d) {
+  const L = d.lifecycle_summary;
+  if (!L) return "";
+  const row = (k) => { const o = L.by_lifecycle[k] || {}; return `<div class="kv"><span class="k">${esc(LC_BADGE[k])}</span><span class="v">${esc(o.tokens ?? 0)} tokens · ${esc(o.candidates ?? 0)} candidates · ${esc(o.buys ?? 0)} BUY · ${esc(money(o.pnl ?? 0, true))}</span></div>`; };
+  const unk = Object.entries(L.unknown_reasons || {}).slice(0, 3).map(([k, v]) => k + " " + v).join(" · ");
+  return `<div class="panel"><h3><span>LIFECYCLE</span><span class="meta">${esc(d.engine || "")}</span></h3>${row("NEW")}${row("PRE_MIGRATION")}${row("POST_MIGRATION")}${row("UNKNOWN")}${unk ? `<div class="meta">UNKNOWN: ${esc(unk)}</div>` : ""}</div>`;
+}
+
 function esLine(x) {
   const e = x.early_score;
   if (!e) return "";
@@ -803,7 +822,7 @@ function candRow(x) {
     <div class="c-n ${x.identity === "VERIFIED" ? "c-green" : x.identity === "CONFLICT" ? "c-red" : "c-muted"}" data-l="ID">${x.identity === "VERIFIED" ? "✓ VERIFIED" : esc(x.identity)}</div>
     <div class="c-n ${x.vet === "PASS" ? "c-green" : "c-orange"}" data-l="VET">${esc(x.vet)}</div>
     <div class="c-dec"><span class="dec ${decisionCls(x.action)}">${esc(x.action === "WATCH" ? t("web.wait.badge") : x.action)}</span></div>
-    <div class="c-why">${waitLine(x)}${x.action !== "BUY" && (x.blocked_by || []).length ? `<div class="c-muted">BLOCKED_BY: ${esc(x.blocked_by.slice(0, 5).join(", "))}</div>` : ""}${esLine(x)}<div>${esc(why)}</div></div></div>`;
+    <div class="c-why">${waitLine(x)}${x.action !== "BUY" && (x.blocked_by || []).length ? `<div class="c-muted">BLOCKED_BY: ${esc(x.blocked_by.slice(0, 5).join(", "))}</div>` : ""}${lcLine(x)}${esLine(x)}<div>${esc(why)}</div></div></div>`;
 }
 async function renderBot(silent) {
   let d;
@@ -852,6 +871,7 @@ async function renderBot(silent) {
   <section class="b-doing doing ${esc(d.doing.kind)}" id="bot-doing">
     <div class="k">🤖 ${esc(t("web.bot.doing"))} <span class="tag">${esc(d.mode)}</span> <span class="live${d.live ? "" : " off"}"><i></i>${d.live ? "RUNNING" : "STOPPED"}</span></div>
     <div class="v">${esc(doingText(d))}</div><div class="meta">${esc(doingSub(d))} · ${updSpan(d.last_tick)} · ${esc(d.version || "")}</div>
+    ${d.lifecycle_summary ? `<div class="meta">${esc(d.lifecycle_summary.doing.join(" · "))}</div>` : ""}
   </section>
 
   <section class="b-status panel" id="bot-status"><h3><span>🤖 BOT STATUS</span><span class="modes">${modeBtn("PAPER")}${modeBtn("CONFIRM")}${modeBtn("AUTO")}</span></h3>
@@ -908,6 +928,7 @@ async function renderBot(silent) {
   </section>
 
   <section class="b-more">
+    ${lcSummary(d)}
     ${auditPanel(d)}
     <details class="sec" data-k="bot_more"${S.open.bot_more ? " open" : ""}><summary>${esc(t("web.bot.details"))}</summary><div class="sec-body">
       <div class="panel"><h3><span>${esc(t("web.bot.balance_history"))}</span><span class="${pnlCls(s.net_pnl)}">${esc(money(s.equity))}</span></h3>${areaChart(d.equity_history)}</div>
