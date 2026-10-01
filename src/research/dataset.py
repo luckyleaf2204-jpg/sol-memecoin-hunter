@@ -81,6 +81,9 @@ CREATE TABLE IF NOT EXISTS candidates (
   would_have_bought_if_quote_ok INTEGER, bought INTEGER DEFAULT 0, est_cost_pct REAL,
   simulated_pnl_if_forced REAL, sim_exit TEXT, sim_done INTEGER DEFAULT 0);
 CREATE INDEX IF NOT EXISTS ix_cand_ca ON candidates(ca);
+CREATE TABLE IF NOT EXISTS buy_forensics (ca TEXT NOT NULL, entry_ts REAL NOT NULL, symbol TEXT, data TEXT,
+  PRIMARY KEY (ca, entry_ts));
+CREATE TABLE IF NOT EXISTS latency_samples (id INTEGER PRIMARY KEY AUTOINCREMENT, ts REAL, ca TEXT, data TEXT);
 """
 
 AB_SNAP_COLS = {"engine": "TEXT", "old_decision": "TEXT", "new_decision": "TEXT", "blocked_by_old": "TEXT",
@@ -89,7 +92,8 @@ AB_SNAP_COLS = {"engine": "TEXT", "old_decision": "TEXT", "new_decision": "TEXT"
                 "new_early": "TEXT", "old_opportunity": "REAL", "new_opportunity": "REAL", "old_confidence": "REAL",
                 "new_confidence": "REAL", "old_liquidity_decision": "TEXT", "new_liquidity_decision": "TEXT",
                 "liquidity_model_used": "TEXT", "liquidity_equivalent_usd": "REAL", "liquidity_confidence": "TEXT",
-                "curve_real_sol": "REAL", "curve_virtual_sol": "REAL"}
+                "curve_real_sol": "REAL", "curve_virtual_sol": "REAL", "antirug": "TEXT",
+                "shadow_antirug_score": "REAL"}
 AB_CAND_COLS = {"engine": "TEXT", "old_decision": "TEXT", "new_decision": "TEXT", "old_candidate": "INTEGER",
                 "new_candidate": "INTEGER", "blocked_by_old": "TEXT", "blocked_by_new": "TEXT", "early_score": "REAL",
                 "early_confidence": "REAL", "early_theta": "REAL", "early_gamma": "REAL", "age_bucket": "TEXT",
@@ -368,6 +372,13 @@ class DatasetRecorder:
             "jupiter_quote_ok": q.get("ok"), "jupiter_status": q.get("status"),
             "jupiter_slippage_bps": q.get("slippage_bps"), "jupiter_route_hops": q.get("hops"),
             "expected_price_impact_pct": q.get("impact_pct"), "notes": q.get("detail"), **ab_fields(rec)}
+        try:
+            from research.antirug import features
+            fx = features(st, now)
+            row["antirug"] = json.dumps(fx, default=str)
+            row["shadow_antirug_score"] = fx["shadow_antirug_score"]
+        except Exception:                                  # research only: never breaks the log
+            row["antirug"], row["shadow_antirug_score"] = None, None
         return tuple(row[c] for c in SNAP_COLS)
 
     # ------------------------------------------------------------------ candidates / execution
@@ -427,6 +438,18 @@ class DatasetRecorder:
                         "would_have_bought_if_quote_ok=MAX(COALESCE(would_have_bought_if_quote_ok, 0), ?) WHERE id=?",
                         (*[f[c] for c in have], f.get("status"), f.get("fail_reason") or None,
                          int(f.get("status") in ("FAILED", "BLOCKED")), cid))
+        self.db.commit()
+
+    def forensic(self, fx: dict) -> None:
+        """Risk path of one BUY (ENTRY / +5..+60 s / EXIT, RISK_NEW vs RISK_DATA_REFRESH) — upsert."""
+        data = {k: v for k, v in fx.items() if k != "done"}
+        self.db.execute("INSERT OR REPLACE INTO buy_forensics VALUES (?,?,?,?)",
+                        (fx["mint"], fx["entry_ts"], fx.get("symbol"), json.dumps(data, default=str)))
+        self.db.commit()
+
+    def latency(self, sample: dict) -> None:
+        self.db.execute("INSERT INTO latency_samples (ts, ca, data) VALUES (?,?,?)",
+                        (sample.get("quote_ts"), sample.get("mint"), json.dumps(sample, default=str)))
         self.db.commit()
 
     def candidate_ended(self, ca: str) -> None:

@@ -150,11 +150,14 @@ def decompose(st, rec, settings, sol):
             "counterfactual_opportunity": cf, "classification": reasons}
 
 
-async def run(minutes):
+async def run(minutes, research_db=""):
     eng = ScannerEngine(Settings(), Database(Path(tempfile.mkdtemp()) / "a.db"), keys=ApiKeys.from_env(),
                         on_log=lambda m: print(m, flush=True) if "PIPELINE" in m else None)
     bot = PaperBot(eng, TradingConfig(experimental=True, latency_probe=True, latency_slippage_model="AUTO"))
     bot.jupiter = JupiterQuotes(eng.http)
+    if research_db:
+        from research.dataset import DatasetRecorder
+        bot.recorder = DatasetRecorder(research_db, dex=eng.dex)
     stop = asyncio.Event()
     tasks = [asyncio.create_task(eng.run()), asyncio.create_task(bot.run(stop))]
     shocks, es_pass, liq_blocked, best = {}, {}, {}, {}
@@ -484,8 +487,9 @@ def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--minutes", type=float, default=15)
     ap.add_argument("--out", default="")
+    ap.add_argument("--research-db", default="")
     a = ap.parse_args()
-    res = report(*asyncio.run(run(a.minutes)))
+    res = report(*asyncio.run(run(a.minutes, a.research_db)))
     print(json.dumps({k: v for k, v in res.items() if k not in ("es_pass_table",)}, indent=1, default=str)[:20000])
     if a.out:
         Path(a.out).write_text(json.dumps(res, indent=1, default=str), encoding="utf-8")

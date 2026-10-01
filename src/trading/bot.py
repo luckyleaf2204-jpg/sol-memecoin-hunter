@@ -411,10 +411,20 @@ class PaperBot:
             return None
         self.latency_samples.append((self._chg_bucket(st), drift))
         rq_ts = time.time()
+        m = st.market
+        try:
+            imp = float(q.get("priceImpactPct"))
+        except (TypeError, ValueError):
+            imp = None
+        created = st.info.created_at or (m.pair_created_at if m else None)
         self.latency_log.append({"mint": mint, "quote_ts": q_ts, "requote_ts": rq_ts, "latency_s": round(rq_ts - q_ts, 3),
                                  "drift_bps": round(10_000 * drift, 1), "route": route_label(q),
-                                 "liquidity_usd": st.market.liquidity_usd if st.market else None,
-                                 "bucket": self._chg_bucket(st)})
+                                 "liquidity_usd": m.liquidity_usd if m else None, "bucket": self._chg_bucket(st),
+                                 "is_curve": bool(m and m.is_curve), "age_s": round(q_ts - created) if created else None,
+                                 "impact_pct": None if imp is None else round(100 * imp, 3),
+                                 "quote_size_usd": round(lamports / 1e9 * (self._sol() or 0), 2),
+                                 "hour_utc": time.gmtime(q_ts).tm_hour})
+        self._rec("latency", self.latency_log[-1])
         self._last_probe = self.latency_log[-1]
         return round(10_000 * drift)
 
@@ -515,6 +525,8 @@ class PaperBot:
                 if off not in fx["done"] and age >= off:
                     fx["done"].add(off)
                     fx["snaps"].append(self._risk_snap(st, f"+{off}s", age, fx["snaps"][0], fx["entry_ts"]))
+                    if off == max(self.FORENSIC_OFFSETS) and self.recorder is not None:
+                        self._rec("forensic", fx)
                     break
         if len(self.forensics) > 200:
             for m in sorted(self.forensics, key=lambda k: self.forensics[k]["entry_ts"])[:-200]:
@@ -578,6 +590,8 @@ class PaperBot:
         if fx is not None and st is not None and fx["exit"] is None:
             fx["exit"] = {"reason": reason, **self._risk_snap(st, "EXIT", now - fx["entry_ts"], fx["snaps"][0],
                                                                fx["entry_ts"])}
+            if self.recorder is not None:
+                self._rec("forensic", fx)
         if ex.status == "FILLED":
             if reason == "take_profit_1":
                 p.tp1_done = True
