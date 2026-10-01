@@ -14,6 +14,14 @@ TRADE_MIN_OPP = 65
 
 # blocked_by entry -> owner-facing category
 def category(b: str) -> str:
+    if b.startswith(("hard:", "gate_unknown:")):
+        k = b.split(":", 1)[1]
+        return {"identity_conflict": "identity", "risk_gt_60": "risk", "rug": "risk", "liquidity_shock": "risk",
+                "liquidity": "liquidity", "rug_unknown": "risk"}.get(k, "risk" if k == "rug" else "vet")
+    if b.startswith(("early_score", "early_conf")):
+        return "early_signal"
+    if b == "final_risk":
+        return "risk"
     k = b.split(":", 1)[1].strip() if ":" in b and b.startswith(("vet", "risk_engine")) else ""
     head = b.split(":", 1)[0]
     if head in ("identity_conflict", "identity_pending"):
@@ -49,7 +57,8 @@ class RunAudit:
         self.window_s = window_s
         self.started = time.time()
         self.tokens: dict[str, dict] = {}
-        self.funnel = {"buy_candidate": 0, "quote_ok": 0, "buy_executed": 0, "buy_skipped": 0}
+        self.funnel = {"buy_candidate": 0, "quote_ok": 0, "buy_executed": 0, "buy_simulated_noquote": 0,
+                       "buy_skipped": 0}
         self.skips: dict[str, int] = {}          # "jupiter:NO_ROUTE", "risk_at_execution", ...
         self.events: list[dict] = []             # last execution events (Candidate -> Quote -> BUY / SKIP)
         self._saved = 0.0
@@ -88,6 +97,14 @@ class RunAudit:
         if d not in t["ever"]:
             t["ever"].append(d)
         t["cand"] = t["cand"] or candidate
+        t["old_cand"] = t.get("old_cand", False) or bool(rec.get("old_candidate"))
+        es = rec.get("early_score") or {}
+        if es.get("score") is not None and es["score"] >= es["theta"] and es["confidence"] >= es["gamma"]:
+            t["es_pass"] = True
+            b = es.get("bucket")
+            t.setdefault("es_buckets", [])
+            if b not in t["es_buckets"]:
+                t["es_buckets"].append(b)
         cats = sorted({category(b) for b in rec.get("blocked_by") or []})
         for c in cats:
             if c not in t["blocks"]:
@@ -109,6 +126,9 @@ class RunAudit:
                 "early": ("TRUE" if es and es.is_early is True else "UNKNOWN" if es is None or es.strength is None
                           else f"FALSE {es.groups_computable}/7"),
                 "identity": st.identity.status,
+                "early_score": (rec.get("early_score") or {}).get("score"),
+                "early_conf": (rec.get("early_score") or {}).get("confidence"),
+                "old_decision": rec.get("old_decision"),
                 "vet": "PASS" if rec.get("vet_passed") else (f"FAIL {','.join(vet_fail[:3])}" if vet_fail
                                                             else f"UNKNOWN {','.join(vet_unk[:3])}"),
                 "risk": st.risk.score if st.risk else None,
@@ -124,6 +144,8 @@ class RunAudit:
             self.funnel["quote_ok"] += 1
         elif kind == "buy":
             self.funnel["buy_executed"] += 1
+            if reason == "simulated_noquote":
+                self.funnel["buy_simulated_noquote"] = self.funnel.get("buy_simulated_noquote", 0) + 1
         elif kind == "skip":
             self.funnel["buy_skipped"] += 1
             self.skips[reason] = self.skips.get(reason, 0) + 1
@@ -147,6 +169,9 @@ class RunAudit:
             "early_false": n(lambda t: t["early"] == "FALSE"), "early_false_partial": n(lambda t: t["early"] == "FALSE_PARTIAL"),
             "watch": n(lambda t: t["decision"] == "WATCH"), "pending": n(lambda t: t["decision"] == "PENDING_IDENTITY"),
             "reject": n(lambda t: t["decision"] == "REJECT"), "trade_candidate": n(lambda t: t["cand"]),
+            "early_score_pass": n(lambda t: t.get("es_pass")),
+            "early_score_pass_by_age": {b: n(lambda t, b=b: b in t.get("es_buckets", [])) for b in ("<90s", "90s-5m", ">5m")},
+            "old_candidates": n(lambda t: t.get("old_cand")), "new_candidates": n(lambda t: t["cand"]),
             **self.funnel, "skips": dict(sorted(self.skips.items(), key=lambda x: -x[1])),
         }
         blocked = {c: n(lambda t, c=c: c in t["blocks"]) for c in CATEGORIES}

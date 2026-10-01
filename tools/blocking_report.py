@@ -25,10 +25,10 @@ from trading.jupiter import JupiterQuotes  # noqa: E402
 from trading.serialize import bot_status  # noqa: E402
 
 
-async def run(minutes: float, research_db: str = ""):
+async def run(minutes: float, research_db: str = "", experimental: bool = True):
     eng = ScannerEngine(Settings(), Database(Path(tempfile.mkdtemp()) / "b.db"), keys=ApiKeys.from_env(),
                         on_log=lambda m: print(m, flush=True) if ("PIPELINE" in m or "FEEDS" in m) else None)
-    bot = PaperBot(eng, TradingConfig())
+    bot = PaperBot(eng, TradingConfig(experimental=experimental))
     bot.jupiter = JupiterQuotes(eng.http)
     if research_db:
         from research.dataset import DatasetRecorder
@@ -52,9 +52,10 @@ def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--minutes", type=float, default=10)
     ap.add_argument("--out", default="")
+    ap.add_argument("--old-engine", action="store_true", help="run the OLD decision engine (experimental is default)")
     ap.add_argument("--research-db", default="", help="also record the research dataset (spec Part 1) here")
     a = ap.parse_args()
-    d, seen, cand_ever, bot = asyncio.run(run(a.minutes, a.research_db))
+    d, seen, cand_ever, bot = asyncio.run(run(a.minutes, a.research_db, not a.old_engine))
     ev = sorted(d["evaluated"], key=lambda x: (x["action"] != "BUY", -(x["opportunity"] or -1)))
     print(f"\n{'TOKEN':<12}{'OPP':>5}{'MOM':>5}{'CONF':>6} {'EARLY':<11}{'IDENTITY':<11}{'VET':<7}{'RISK':>5}{'LIQ':>9}"
           f"{'HOLD':>6} {'DEV':<11}ACTION   BLOCKED_BY")
@@ -84,7 +85,9 @@ def main():
     s_ = au["stats"]
     print(f"\n==== RUN AUDIT ({s_['window_h']} h) ====")
     for k in ("discovery", "pre_early", "early_watch", "early_true", "early_unknown", "early_false", "early_false_partial",
-              "watch", "pending", "reject", "trade_candidate", "buy_candidate", "quote_ok", "buy_executed", "buy_skipped"):
+              "watch", "pending", "reject", "early_score_pass", "early_score_pass_by_age", "old_candidates",
+              "new_candidates", "trade_candidate", "buy_candidate", "quote_ok", "buy_executed", "buy_simulated_noquote",
+              "buy_skipped"):
         print(f"  {k:<22}{s_[k]}")
     print(f"  skips                 {s_['skips']}")
     print(f"  jupiter quote stats   {bot.quote_stats}")

@@ -101,6 +101,7 @@ class ScannerEngine:
         self._feeds_logged = False
         self._deep_times: list[float] = []
         self.deep_extra: set[str] = set()                 # mints the paper bot holds (registered by the bot)
+        self.deep_hint: set[str] = set()                  # experimental bot: near an EarlyScore PASS (deep scan only)
         self.deep_skipped: list[tuple[str, str]] = []
         self.pipe = {"discovered": deque(maxlen=5000), "pre_early": deque(maxlen=5000), "early_watch": deque(maxlen=5000),
                      "evicted": 0, "pruned_low_mc": 0, "pruned_no_data": 0, "pruned_age": 0}
@@ -548,6 +549,8 @@ class ScannerEngine:
             out.append("starred")
         if st.mint in self.deep_extra:
             out.append("position")
+        if st.mint in self.deep_hint:
+            out.append("early_score")
         if st.early is not None and st.early.is_early is True:
             out.append("early_signal")
         pe = st.pre_early

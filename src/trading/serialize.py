@@ -112,7 +112,9 @@ def bot_status(bot: PaperBot, engine=None, now: float | None = None) -> dict:
                       "UNKNOWN" if st.early is None or st.early.strength is None else f"FALSE {st.early.groups_computable}/7"),
             "liquidity": st.market.liquidity_usd if st.market else None,
             "holders": st.holders.holder_count if st.holders and st.holder_status == "ok" else None,
-            "dev": st.dev.status if st.dev and st.dev.balance_verified else None})
+            "dev": st.dev.status if st.dev and st.dev.balance_verified else None,
+            "engine": rec.get("engine", "old"), "old_decision": rec.get("old_decision"),
+            "old_candidate": bool(rec.get("old_candidate")), "early_score": rec.get("early_score")})
     evaluated.sort(key=lambda x: (x["action"] != "BUY", -((x["opportunity"] or 0) + (x["confidence"] or 0) - (x["risk"] or 100))))
     if bot.cfg.kill_switch:
         doing = {"kind": "kill"}
@@ -144,7 +146,8 @@ def bot_status(bot: PaperBot, engine=None, now: float | None = None) -> dict:
     return {
         "pipeline": bot.pipeline(now),
         "doing": doing, "scan": scan, "evaluated": evaluated, "exit_rules": exits, "exit_engine": engine_rows,
-        "version": "web-7",
+        "version": "web-8",
+        "engine": "experimental" if bot.cfg.experimental else "old",
         "jupiter_quotes": dict(getattr(bot, "quote_stats", {}) or {}),
         "audit": _audit_summary(bot, now),
         "live_available": False,

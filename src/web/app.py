@@ -44,7 +44,7 @@ AUTH_WINDOW_S, AUTH_MAX_FAILS = 600, 10
 REFRESH_PER_MINT_S, REFRESH_GLOBAL_PER_MIN = 60, 10
 MAX_WATCH = 30
 LIST_KINDS = ("top", "new", "early", "whales", "dev", "social")
-VERSION = "web-7"
+VERSION = "web-8"
 HOME_LIMIT = {"opportunity": 60, "watch": 60, "nodata": 40, "excluded": 40}
 
 
@@ -106,6 +106,7 @@ def create_app(engine: ScannerEngine | None = None, start_scanner: bool = True,
         if start_scanner:
             from trading.jupiter import JupiterQuotes
             state["bot"].jupiter = JupiterQuotes(state["engine"].http)      # paper BUYs on real Jupiter quotes
+            state["bot"].cfg.experimental = os.environ.get("EXPERIMENTAL_MODE", "1") != "0"   # spec Part 3 (PAPER)
             if os.environ.get("RESEARCH_LOG", "1") != "0":                # research dataset (read-only log)
                 from research.dataset import DatasetRecorder
                 state["bot"].recorder = DatasetRecorder(DATA_DIR / "research.db", dex=state["engine"].dex)

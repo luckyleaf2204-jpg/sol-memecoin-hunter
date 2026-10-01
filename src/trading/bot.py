@@ -13,11 +13,12 @@ from pathlib import Path
 
 from core.models import TokenState
 from trading import decision as D
+from trading import experimental as X
 from trading.book import PaperBook
 from trading.config import ModeNotAllowed, PAPER, TradingConfig
 from trading.execution import PaperExecutor
 from trading.exits import HARD, exit_signal
-from trading.models import BLOCKED, ERROR, READY, RUN, TRADE, WATCH, Activity, ModuleState
+from trading.models import BLOCKED, ERROR, PENDING_IDENTITY, READY, RUN, TRADE, WATCH, Activity, ModuleState
 from trading.risk import RiskEngine
 
 MODULES = ("scan", "vet", "size", "risk", "fills", "book")
@@ -121,6 +122,8 @@ class PaperBot:
                       set(self.book.positions), {m for m, t in self.book.last_exit.items() if now - t < 30})
         if hasattr(self.engine, "deep_extra"):
             self.engine.deep_extra = set(self.book.positions)
+        if self.cfg.experimental and hasattr(self.engine, "deep_hint"):
+            self.engine.deep_hint = self._deep_hint(now)
         eq = self.book.mark(now)
         self._set("book", RUN if self.book.positions else READY,
                   f"equity ${eq:,.2f} · {len(self.book.positions)} open · net {self.book.stats(now)['net_pnl']:+,.2f}", now=now)
@@ -189,13 +192,27 @@ class PaperBot:
                 prev = self.decisions.get(st.mint, {}).get("state")
                 rec["vet_passed"] = D.vet_passed(v)
                 rec["blocked_by"] = D.trade_blockers(st, v, sc, self.cfg)
-                rec["risk_allowed"], rec["risk_reasons"], rec["state"] = None, [], sc.decision
+                decision = sc.decision
+                rec["old_decision"], rec["blocked_by_old"] = sc.decision, rec["blocked_by"]
+                rec["old_candidate"] = X.old_candidate(st, rec)
+                if self.cfg.experimental:                   # NEW engine decides; OLD kept for A/B
+                    xd = X.evaluate(st, v, sc, self.cfg, now)
+                    decision = xd.decision
+                    rec.update({"engine": "experimental", "decision": decision, "blocked_by": xd.blocked_by,
+                                "waiting": xd.waiting, "rejected": xd.rejected, "why": xd.why + sc.why,
+                                "early_score": xd.es.as_dict()})
+                else:
+                    rec["early_score"] = X.early_score(st, now, self.cfg).as_dict()   # logged only (A/B)
+                rec["risk_allowed"], rec["risk_reasons"], rec["state"] = None, [], decision
                 self.decisions[st.mint] = rec
                 vet_items.append(rec)
-                if sc.decision != TRADE:
-                    if prev != sc.decision:
-                        self.log("WATCH" if sc.decision == WATCH else "REJECT",
-                                 f"{sc.decision} opp {sc.opportunity} conf {sc.confidence} · {'; '.join(sc.why[:2])}", st, now=now)
+                if decision != TRADE:
+                    if rec["old_candidate"] and self.recorder is not None:
+                        self._rec("candidate", st, rec, now, None, False, 0.0)       # OLD-only candidate, for A/B
+                    if prev != decision:
+                        self.log("WATCH" if decision in (WATCH, PENDING_IDENTITY) else "REJECT",
+                                 f"{decision} opp {sc.opportunity} conf {sc.confidence} · {'; '.join(rec['why'][:2])}",
+                                 st, now=now)
                     continue
                 eq = self.book.equity()
                 sz = D.size(st, sc, self.cfg, eq, self.book.cash, self.book.exposure())
@@ -294,6 +311,56 @@ class PaperBot:
             self.audit.save(now)
         except Exception as e:                           # diagnostics never break trading
             self.log("INFO", f"audit error: {type(e).__name__}: {e}", now=now)
+
+    def _simulated_fill(self, st, rec: dict, it: dict, usd: float, sol: float, qr, now: float) -> None:
+        """EXPERIMENTAL PAPER (spec 3.6): the candidate stays; no Jupiter route -> fill on the liquidity model so the
+        signal's quality is still measured. Same Risk Engine re-check (model price impact). Tagged 'noquote' so
+        P&L of executable and simulated-only trades are always reported apart."""
+        est = self.exec.estimate(st, usd)
+        feeds_ok, why = self._feeds_ok()
+        last = self.book.last_exit.get(st.mint)
+        rd = self.risk.check_entry(mint=st.mint, usd=usd, equity=self.book.equity(), peak=self.book.peak,
+                                   day_start=self.book.day_start, open_positions=len(self.book.positions),
+                                   holding=False, in_cooldown=bool(last and now - last < self.cfg.cooldown_min * 60),
+                                   exposure=self.book.exposure(), est_impact=est["impact"], feeds_ok=feeds_ok,
+                                   feeds_reason=why)
+        if not rd.allowed:
+            rec["state"] = "QUOTE_FAILED"
+            self.log("BLOCK", f"BUY → QUOTE FAILED ({qr.label()}) → simulated fill refused by risk: "
+                              + "; ".join(rd.reasons), st, now=now)
+            self.audit.execution("skip", st, now, "; ".join(rd.reasons), reason="risk_at_simulated_fill")
+            self._rec("quote", st, rec, now, qr.status, qr.label() + " · simulated fill refused by risk", None, False,
+                      int(self.cfg.max_slippage_pct * 100))
+            return
+        ex = self.exec.buy(st, usd, sol, now)
+        ex.route = f"{ex.route} · SIMULATED (no Jupiter quote: {qr.status})"
+        self._rec("quote", st, rec, now, qr.status, qr.label() + " · simulated fill" +
+                  ("" if ex.status == "FILLED" else f" failed: {ex.reason}"), None, ex.status == "FILLED",
+                  int(self.cfg.max_slippage_pct * 100))
+        if ex.status == "FILLED":
+            setup = (it.get("setup") or "") + "+noquote"
+            self.book.open(ex, self.cfg, now, it.get("opportunity"), it.get("why"), st.market.liquidity_usd,
+                           st.market.vol_5m, setup=setup)
+            rec["state"] = "BOUGHT_SIMULATED"
+            self.log("BUY", f"BUY → QUOTE FAILED ({qr.status}) → SIMULATED FILL ${usd:,.2f} @ ${ex.fill_price:.8g} · "
+                            f"model impact {ex.price_impact_pct:.2f}% · {ex.route}", st, usd=usd, price=ex.fill_price, now=now)
+            self.audit.execution("buy", st, now, f"SIMULATED (no quote {qr.status}) ${usd:,.2f}", reason="simulated_noquote")
+        else:
+            self.book.record(ex)
+            self.log("FAILED", f"BUY → QUOTE FAILED ({qr.status}) → simulated fill failed: {ex.reason}", st, now=now)
+            self.audit.execution("skip", st, now, ex.reason, reason="simulated_fill_failed")
+
+    def _deep_hint(self, now: float) -> set[str]:
+        """EXPERIMENTAL: tokens close to an EarlyScore PASS get the progressive deep scan (holders, dev, Helius
+        getAsset authorities) so their hard gates can actually be evaluated. Top 25 by score, rejected excluded."""
+        rows = []
+        for mint, rec in self.decisions.items():
+            es = rec.get("early_score") or {}
+            if now - rec.get("ts", 0) > 30 or rec.get("decision") == "REJECT" or es.get("score") is None:
+                continue
+            if es["score"] >= es["theta"] - 0.10:
+                rows.append((es["score"], mint))
+        return {m for _, m in sorted(rows, reverse=True)[:25]}
 
     def _rec(self, fn: str, *args) -> None:
         """Research-log call that can never break trading."""
@@ -414,6 +481,9 @@ class PaperBot:
                     continue
                 if qr.status == NO_ROUTE:
                     self.quote_block[mint] = now + NO_ROUTE_BLOCK_S
+                if self.cfg.experimental and self.cfg.paper_fill_without_quote:
+                    self._simulated_fill(st, rec, it, usd, sol, qr, now)
+                    continue
                 rec["state"] = "QUOTE_FAILED"
                 self._rec("quote", st, rec, now, qr.status, qr.label(), None, False, int(self.cfg.max_slippage_pct * 100))
                 self.log("FAILED", f"BUY → QUOTE FAILED ({qr.label()}) → SKIP · BUY SKIPPED — JUPITER", st, now=now)
@@ -600,7 +670,13 @@ def REJECT_CATEGORY(reason: str, st: TokenState) -> list[str]:
 
 
 def is_trade_candidate(st: TokenState, rec: dict, allow_unchecked_risk: bool = False) -> bool:
-    """🟢 gate: Early Signal TRUE + identity VERIFIED + VET PASS + Decision TRADE (+ Risk, checked by the caller)."""
+    """🟢 gate: Early Signal TRUE + identity VERIFIED + VET PASS + Decision TRADE (+ Risk, checked by the caller).
+    EXPERIMENTAL engine: identity VERIFIED + Decision TRADE (which already requires every hard gate checked and passed,
+    EarlyScore PASS for the age, Opportunity >= 65, Confidence >= 60) (+ Risk Engine, checked by the caller)."""
+    if rec.get("engine") == "experimental":
+        if st.identity.status != "VERIFIED" or rec.get("decision") != TRADE:
+            return False
+        return allow_unchecked_risk or bool(rec.get("risk_allowed"))
     if st.early is None or st.early.is_early is not True:
         return False
     if st.identity.status != "VERIFIED":

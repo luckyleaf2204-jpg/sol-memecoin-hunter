@@ -83,6 +83,36 @@ CREATE TABLE IF NOT EXISTS candidates (
 CREATE INDEX IF NOT EXISTS ix_cand_ca ON candidates(ca);
 """
 
+AB_SNAP_COLS = {"engine": "TEXT", "old_decision": "TEXT", "new_decision": "TEXT", "blocked_by_old": "TEXT",
+                "early_score": "REAL", "early_confidence": "REAL", "early_theta": "REAL", "early_gamma": "REAL",
+                "age_bucket": "TEXT", "prior_risk": "REAL", "final_risk": "REAL"}
+AB_CAND_COLS = {"engine": "TEXT", "old_decision": "TEXT", "new_decision": "TEXT", "old_candidate": "INTEGER",
+                "new_candidate": "INTEGER", "blocked_by_old": "TEXT", "blocked_by_new": "TEXT", "early_score": "REAL",
+                "early_confidence": "REAL", "early_theta": "REAL", "early_gamma": "REAL", "age_bucket": "TEXT",
+                "age_sec": "REAL", "prior_risk": "REAL", "final_risk": "REAL", "simulated_fill": "INTEGER"}
+
+
+def migrate(db: sqlite3.Connection) -> None:
+    """Add A/B columns to databases created before experimental mode (ALTER TABLE ADD COLUMN, idempotent)."""
+    for table, cols in (("token_snapshots", AB_SNAP_COLS), ("candidates", AB_CAND_COLS)):
+        have = {r[1] for r in db.execute(f"PRAGMA table_info({table})")}
+        for c, typ in cols.items():
+            if c not in have:
+                db.execute(f"ALTER TABLE {table} ADD COLUMN {c} {typ}")
+    db.commit()
+
+
+def ab_fields(rec: dict | None) -> dict:
+    rec = rec or {}
+    es = rec.get("early_score") or {}
+    return {"engine": rec.get("engine", "old"), "old_decision": rec.get("old_decision"),
+            "new_decision": rec.get("decision") if rec.get("engine") == "experimental" else None,
+            "blocked_by_old": json.dumps(rec.get("blocked_by_old") or []) if rec else None,
+            "early_score": es.get("score"), "early_confidence": es.get("confidence"), "early_theta": es.get("theta"),
+            "early_gamma": es.get("gamma"), "age_bucket": es.get("bucket"), "prior_risk": es.get("prior_risk"),
+            "final_risk": es.get("final_risk")}
+
+
 SNAP_COLS = ("snapshot_id", "ca", "ts", "age_sec", "source", "stage", "reason", "mc_usd", "price_usd", "liq_usd",
              "vol_5m", "vol_1h", "tx_5m", "buys_5m", "sells_5m", "buy_pressure_pct", "holders", "holders_growth_1m",
              "holders_growth_5m_pct", "top10_pct", "creator_pct", "authority_mint", "authority_freeze",
@@ -91,8 +121,8 @@ SNAP_COLS = ("snapshot_id", "ca", "ts", "age_sec", "source", "stage", "reason", 
              *("s_" + s for s in SIGNALS), "early_signal", "early_strength", "early_groups", "early_fired",
              "early_history_min", "early_suppressed", "pre_early", "early_watch_rank", "opportunity", "momentum",
              "confidence", "decision", "blocked_by", "jupiter_quote_ok", "jupiter_status", "jupiter_slippage_bps",
-             "jupiter_route_hops", "expected_price_impact_pct", "notes")
-T22 = "TokenzQdBNbLqP5VEhdkAS6EPFLC1tzyBNtGg9vZcFiYF"
+             "jupiter_route_hops", "expected_price_impact_pct", "notes", *AB_SNAP_COLS)
+from trading.decision import T22  # noqa: E402  (canonical Token-2022 program id)
 
 
 def _tri(v) -> int:
@@ -148,6 +178,7 @@ class DatasetRecorder:
         self.path.parent.mkdir(parents=True, exist_ok=True)
         self.db = sqlite3.connect(str(self.path), check_same_thread=False)
         self.db.executescript(SCHEMA)
+        migrate(self.db)
         self.db.execute("PRAGMA journal_mode=WAL")
         self.dex = dex                                  # DexScreenerClient for off-scanner follow-ups
         self.t: dict[str, dict] = {}                    # in-memory per-CA tracking state
@@ -314,7 +345,7 @@ class DatasetRecorder:
             "blocked_by": json.dumps((rec or {}).get("blocked_by") or []) if rec else None,
             "jupiter_quote_ok": q.get("ok"), "jupiter_status": q.get("status"),
             "jupiter_slippage_bps": q.get("slippage_bps"), "jupiter_route_hops": q.get("hops"),
-            "expected_price_impact_pct": q.get("impact_pct"), "notes": q.get("detail")}
+            "expected_price_impact_pct": q.get("impact_pct"), "notes": q.get("detail"), **ab_fields(rec)}
         return tuple(row[c] for c in SNAP_COLS)
 
     # ------------------------------------------------------------------ candidates / execution
@@ -335,6 +366,18 @@ class DatasetRecorder:
              st.market.liquidity_usd if st.market else None, usd, int(bool(risk_allowed)),
              json.dumps(blocked) if blocked else None, est_cost_pct))
         cid = cur.lastrowid
+        ab = ab_fields(rec)
+        es = rec.get("early_score") or {}
+        exp = rec.get("engine") == "experimental"
+        self.db.execute(
+            "UPDATE candidates SET engine=?, old_decision=?, new_decision=?, old_candidate=?, new_candidate=?, "
+            "blocked_by_old=?, blocked_by_new=?, early_score=?, early_confidence=?, early_theta=?, early_gamma=?, "
+            "age_bucket=?, age_sec=?, prior_risk=?, final_risk=? WHERE id=?",
+            (ab["engine"], ab["old_decision"], ab["new_decision"], int(bool(rec.get("old_candidate"))),
+             int(exp and rec.get("decision") == "TRADE"), ab["blocked_by_old"],
+             json.dumps(rec.get("blocked_by") or []) if exp else None, ab["early_score"], ab["early_confidence"],
+             ab["early_theta"], ab["early_gamma"], ab["age_bucket"], es.get("age_s"), ab["prior_risk"],
+             ab["final_risk"], cid))
         self.cand_open[ca] = cid
         if p is not None and "candidate" not in t["anchors"]:
             t["anchors"]["candidate"] = (now, p)
@@ -360,9 +403,11 @@ class DatasetRecorder:
             self.db.execute(
                 "UPDATE candidates SET quote_ts=COALESCE(quote_ts, ?), time_from_candidate_to_quote_sec="
                 "COALESCE(time_from_candidate_to_quote_sec, ?), quote_status=?, quote_detail=?, quote_impact_pct=?, "
-                "quote_route_hops=?, would_have_bought_if_quote_ok=?, bought=MAX(bought, ?) WHERE id=?",
+                "quote_route_hops=?, would_have_bought_if_quote_ok=?, bought=MAX(bought, ?), "
+                "simulated_fill=MAX(COALESCE(simulated_fill, 0), ?) WHERE id=?",
                 (now, round(now - row[0], 2) if row else None, status, detail[:300], imp, hops,
-                 int(not ok and bool(rec and rec.get("risk_allowed"))), int(bought), cid))
+                 int(not ok and bool(rec and rec.get("risk_allowed"))), int(bought),
+                 int(bought and not ok), cid))
         self._snap(st, rec, "bought" if bought else "candidate", "quote", now,
                    {"ok": int(status == "OK"), "status": status, "slippage_bps": slippage_bps, "hops": hops,
                     "impact_pct": imp, "detail": detail[:300]})

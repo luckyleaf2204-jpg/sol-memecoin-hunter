@@ -768,6 +768,14 @@ function stageOf(a) {
 }
 function decisionCls(a) { return a === "BUY" ? "d-buy" : a === "WATCH" || a === "PENDING" ? "d-watch" : "d-reject"; }
 function nn(v) { return v === null || v === undefined ? "—" : esc(v); }
+function esLine(x) {
+  const e = x.early_score;
+  if (!e) return "";
+  const f = (v) => (v === null || v === undefined ? "—" : Number(v).toFixed(2));
+  const ok = e.score !== null && e.score >= e.theta && e.confidence >= e.gamma;
+  return `<div class="c-muted">${ok ? "✅" : "⏳"} EarlyScore ${esc(f(e.score))}/${esc(e.theta)} · conf ${esc(f(e.confidence))}/${esc(e.gamma)} · ${esc(e.bucket)} · risk ${esc(e.observed_risk ?? "—")} (prior ${esc(e.prior_risk)})${x.engine === "experimental" ? ` · OLD: ${esc(x.old_decision || "—")}${x.old_candidate ? " (candidate)" : ""}` : ""}</div>`;
+}
+
 function waitLine(x) {
   if (x.action === "PENDING") {
     const w = (x.waiting || []).map((k) => t("web.wait." + k));
@@ -795,7 +803,7 @@ function candRow(x) {
     <div class="c-n ${x.identity === "VERIFIED" ? "c-green" : x.identity === "CONFLICT" ? "c-red" : "c-muted"}" data-l="ID">${x.identity === "VERIFIED" ? "✓ VERIFIED" : esc(x.identity)}</div>
     <div class="c-n ${x.vet === "PASS" ? "c-green" : "c-orange"}" data-l="VET">${esc(x.vet)}</div>
     <div class="c-dec"><span class="dec ${decisionCls(x.action)}">${esc(x.action === "WATCH" ? t("web.wait.badge") : x.action)}</span></div>
-    <div class="c-why">${waitLine(x)}${x.action !== "BUY" && (x.blocked_by || []).length ? `<div class="c-muted">BLOCKED_BY: ${esc(x.blocked_by.slice(0, 5).join(", "))}</div>` : ""}<div>${esc(why)}</div></div></div>`;
+    <div class="c-why">${waitLine(x)}${x.action !== "BUY" && (x.blocked_by || []).length ? `<div class="c-muted">BLOCKED_BY: ${esc(x.blocked_by.slice(0, 5).join(", "))}</div>` : ""}${esLine(x)}<div>${esc(why)}</div></div></div>`;
 }
 async function renderBot(silent) {
   let d;
@@ -943,9 +951,10 @@ function auditPanel(d) {
   const row = (k, v) => `<div class="kv"><span class="k">${esc(k)}</span><span class="v">${esc(v)}</span></div>`;
   const stats = [["Discovery", s.discovery], ["Pre-Early", s.pre_early], ["Early Watch", s.early_watch],
     ["Early Signal TRUE", s.early_true], ["Early Signal UNKNOWN", s.early_unknown], ["Early Signal FALSE (7/7)", s.early_false],
-    ["Early FALSE (<7/7 → WATCH)", s.early_false_partial], ["WATCH", s.watch], ["PENDING", s.pending], ["REJECT", s.reject],
+    ["Early FALSE (<7/7 → WATCH)", s.early_false_partial], ["EarlyScore PASS", s.early_score_pass],
+    ["OLD candidates", s.old_candidates], ["NEW candidates", s.new_candidates], ["WATCH", s.watch], ["PENDING", s.pending], ["REJECT", s.reject],
     ["Trade Candidate", s.trade_candidate], ["BUY Candidate", s.buy_candidate], ["Jupiter quote OK", s.quote_ok],
-    ["BUY executed", s.buy_executed], ["BUY skipped", s.buy_skipped]].map(([k, v]) => row(k, v)).join("");
+    ["BUY executed", s.buy_executed], ["…of which SIMULATED (no quote)", s.buy_simulated_noquote ?? 0], ["BUY skipped", s.buy_skipped]].map(([k, v]) => row(k, v)).join("");
   const blocks = Object.entries(A.blocked_by || {}).filter(([, v]) => v).map(([k, v]) => row(k, v)).join("");
   const skips = Object.entries(s.skips || {}).map(([k, v]) => k + " " + v).join(", ");
   const jq = Object.entries(d.jupiter_quotes || {}).map(([k, v]) => k + " " + v).join(", ");

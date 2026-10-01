@@ -46,6 +46,10 @@ class TradingConfig:
     cooldown_min: float = 30.0               # no re-entry on the same CA after an exit
     # EXECUTION model
     seed: int = 7
+    # EXPERIMENTAL engine (Implementation Spec Part 3): soft EarlyScore + age thresholds + prior risk decide TRADE;
+    # the OLD engine still runs on every token for A/B. Off by default (tests / library); the server turns it on.
+    experimental: bool = False
+    paper_fill_without_quote: bool = True    # experimental PAPER: a candidate whose quote fails is filled on the model
 
     def __post_init__(self):
         if self.mode not in ALLOWED_MODES:

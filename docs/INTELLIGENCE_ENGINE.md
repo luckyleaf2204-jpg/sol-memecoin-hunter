@@ -449,3 +449,25 @@ Theo *Implementation Spec — Logging / Predictive Power / Early Signal Redesign
 trong 2 phút) · INVALID · RATE_LIMITED / TIMEOUT / API_ERROR / COOLDOWN (tạm thời → retry backoff trong lần gọi, rồi
 xếp lại intent tối đa 60 s). Log: `BUY CANDIDATE → BUY → QUOTE → MATCH → BUY` hoặc
 `BUY → QUOTE FAILED (…) → SKIP · BUY SKIPPED — JUPITER`.
+
+## EXPERIMENTAL MODE (Spec Phần 3, PAPER) — bật mặc định trên server (`EXPERIMENTAL_MODE=0` để tắt)
+
+`src/trading/experimental.py`. Engine cũ (`decision.vet/score`, Early Signal D1–D8) **không đổi** và vẫn chạy trên mọi
+token; mỗi quyết định mang cả OLD lẫn NEW để so sánh A/B (`old_decision`, `blocked_by_old`, `early_score`; bảng
+`candidates` có `old_candidate` / `new_candidate`).
+
+- **EarlyScore** gồm S_price, S_vol, S_buy, S_holder, S_whale, S_liq, S_lifecycle, có trọng số theo tuổi token.
+  Ngưỡng: <90s ≥0,55 / conf ≥0,40 · 90s–5m ≥0,65 / 0,55 · >5m ≥0,75 / 0,70. Thiếu dữ liệu chỉ làm giảm Confidence,
+  không làm FAIL. Không cần đủ 7/7.
+- **Holder:** NULL → 0 và conf −0,25 · <15 → 0,1 · 15–40 → tăng trưởng × top10 · ≥40 → chấm điểm bình thường.
+  Không REJECT vì holder <50.
+- **Prior risk** theo tuổi, thanh khoản và nguồn: `final_risk = max(observed, prior)`.
+- **Hard gates → REJECT:** identity CONFLICT · Risk >60 · rug / liquidity SHOCK · mint/freeze authority ·
+  Token-2022 nguy hiểm · dev dump · top10 >92% khi tuổi >3 phút · thanh khoản dưới mức bảo vệ · CA sai ·
+  dữ liệu sai.
+- **TRADE** khi: VERIFIED · không vướng hard gate · các gate đã thực sự được kiểm tra (authority / Token-2022 /
+  rug / liquidity / dữ liệu tươi) · EarlyScore PASS · Opp ≥65 · Conf ≥60 · final risk ≤60.
+- Token gần đạt ngưỡng được ưu tiên deep scan Helius (`deep_hint`, top 25) để các gate có dữ liệu.
+- Candidate được tạo trước khi quote. Nếu quote fail (NO_ROUTE / 429 / timeout / 5xx sau khi retry), paper khớp
+  lệnh bằng mô hình thanh khoản, vẫn qua Risk Engine, gắn tag `+noquote` / `SIMULATED`, và được thống kê tách riêng.
+- Exit Engine (TP +30/+80, SL −15), sizing và Risk Engine không đổi.
