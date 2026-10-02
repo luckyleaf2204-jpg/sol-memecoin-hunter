@@ -355,7 +355,7 @@ def test_backtest_replays_snapshots_through_the_same_bot():
     t0 = time.time() - 3600
     prices = [0.0002, 0.000205, 0.00021, 0.00028, 0.00030, 0.00031, 0.00025, 0.00024]
     rows = [_row(t0 + 20 * i, p) for i, p in enumerate(prices)]
-    res = backtest(rows, TradingConfig(seed=1))
+    res = backtest(rows, TradingConfig(seed=1), allow_legacy=True)          # old-engine mechanics (explicit)
     assert res["frames"] == len(prices) and res["assumptions"] == ASSUMPTIONS
     assert res["executions"] >= 2 and res["trades"], res
     assert res["stats"]["closed"] == len(res["trades"])
@@ -364,7 +364,7 @@ def test_backtest_replays_snapshots_through_the_same_bot():
 def test_backtest_liquidity_shock_exits():
     t0 = time.time() - 3600
     rows = [_row(t0, 0.0002), _row(t0 + 20, 0.00021), _row(t0 + 40, 0.00019, liq=8_000)]
-    res = backtest(rows, TradingConfig(seed=1))
+    res = backtest(rows, TradingConfig(seed=1), allow_legacy=True)          # old-engine mechanics (explicit)
     assert [t["exit"] for t in res["trades"]] == ["liquidity_collapse"] and res["trades"][0]["net"] < 0
 
 

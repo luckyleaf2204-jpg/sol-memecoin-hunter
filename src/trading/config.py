@@ -13,6 +13,14 @@ class ModeNotAllowed(ValueError):
     pass
 
 
+def production_config(**over) -> "TradingConfig":
+    """The configuration the server trades with (web/app.py env defaults): lifecycle engine with the no-chasing gate,
+    experimental shadow, latency probe, AUTO latency model. Fingerprint 02e5bdcc03 with no overrides."""
+    base = dict(experimental=True, latency_probe=True, lifecycle=True, latency_slippage_model="AUTO")
+    base.update(over)
+    return TradingConfig(**base)
+
+
 @dataclass
 class TradingConfig:
     mode: str = PAPER

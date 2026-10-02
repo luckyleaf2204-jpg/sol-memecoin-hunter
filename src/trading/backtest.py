@@ -65,9 +65,31 @@ def state_from_row(r: dict) -> TokenState:
     return st
 
 
-def backtest(rows: list[dict], cfg: TradingConfig | None = None) -> dict:
-    cfg = cfg or TradingConfig()
+class _History:
+    """Price history built from the replayed rows as time advances (no look-ahead): the lifecycle engine and the
+    entry-location gate read it like the scanner's history store."""
+    def __init__(self):
+        self._h: dict = {}
+
+    def add(self, r: dict) -> None:
+        from history.store import Point, TokenHistory
+        h = self._h.setdefault(r["mint"], TokenHistory())
+        h.points.append(Point(r["ts"], r.get("price"), r.get("mc"), r.get("liquidity"), r.get("liquidity_source") or "",
+                              r.get("vol_5m"), r.get("vol_1h"), r.get("buys_5m"), r.get("sells_5m"), None, None, "BT"))
+
+    def get(self, mint):
+        return self._h.get(mint)
+
+
+def backtest(rows: list[dict], cfg: TradingConfig | None = None, allow_legacy: bool = False) -> dict:
+    """Default and required: the PRODUCTION config (gated lifecycle engine). Another config is refused unless
+    allow_legacy=True (unit tests of the old engine) — so a backtest never measures a strategy the bot does not run."""
+    from trading.config import production_config
+    cfg = cfg or production_config(latency_probe=False)
+    if not allow_legacy and not (cfg.lifecycle and cfg.entry_location_gate):
+        raise ValueError("backtest must use the gated lifecycle config (trading.config.production_config)")
     eng = _Engine()
+    eng.history = _History()
     bot = PaperBot(eng, cfg)
     by_ts: dict[float, list[dict]] = defaultdict(list)
     for r in rows:
@@ -78,17 +100,20 @@ def backtest(rows: list[dict], cfg: TradingConfig | None = None) -> dict:
     for ts in sorted(by_ts):
         for r in by_ts[ts]:
             latest[r["mint"]] = state_from_row(r)
+            eng.history.add(r)                    # only rows at or before this frame
         eng.published = list(latest.values())
         bot.tick(now=ts)
     s = bot.book.stats(max(by_ts) if by_ts else None)
-    return {"stats": s, "assumptions": ASSUMPTIONS, "frames": len(by_ts),
+    return {"stats": s, "assumptions": ASSUMPTIONS, "frames": len(by_ts), "config": {
+                "sample_id": cfg.sample_id(), "lifecycle": cfg.lifecycle, "entry_location_gate": cfg.entry_location_gate,
+                "legacy": not (cfg.lifecycle and cfg.entry_location_gate)},
             "trades": [{"symbol": p.symbol, "mint": p.mint, "opened": p.opened_at, "closed": p.closed_at,
                         "net": round(p.realized_usd - p.cost_usd, 2), "exit": p.exit_reason} for p in bot.book.closed],
             "open": [{"symbol": p.symbol, "mint": p.mint, "pnl": p.pnl_usd()} for p in bot.book.positions.values()],
             "executions": len(bot.book.executions)}
 
 
-def backtest_db(db, since: float = 0, cfg: TradingConfig | None = None) -> dict:
+def backtest_db(db, since: float = 0, cfg: TradingConfig | None = None, allow_legacy: bool = False) -> dict:
     rows = [dict(r) for r in db._query("SELECT s.*, t.symbol, t.created_at FROM snapshots s "
                                         "LEFT JOIN tokens t ON t.mint = s.mint WHERE s.ts >= ? ORDER BY s.ts", (since,))]
-    return backtest(rows, cfg)
+    return backtest(rows, cfg, allow_legacy)

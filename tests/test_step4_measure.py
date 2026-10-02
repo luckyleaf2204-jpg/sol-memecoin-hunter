@@ -89,22 +89,7 @@ def test_only_the_frozen_engine_opens_positions(monkeypatch):
 
 
 # ---------------------------------------------------------------- replay
-def _db(path, cand_hits, base_hits, t0=1_000.0):
-    db = sqlite3.connect(path)
-    db.executescript(SCHEMA)
-    ins = "INSERT INTO forward_returns VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)"
-    for i, h in enumerate(cand_hits):
-        ca = f"C{i}"
-        db.execute(ins, (ca, "candidate", t0 + i * 10, 1.0, "1h", 3600, 1.1, t0, 10.0, 35.0, -5.0, int(h == "tp30"),
-                         int(h == "sl15"), h, 10, "tracked"))
-        db.execute(ins, (ca, "discovery", t0 + i * 10 - 100, 1.0, "1h", 3600, 1.1, t0, 10.0, 35.0, -5.0, 0, 0, None,
-                         10, "tracked"))
-        db.execute("INSERT INTO candidates (ca, symbol, ts, bought) VALUES (?,?,?,?)", (ca, ca, t0 + i * 10, i % 2))
-    for i, h in enumerate(base_hits):
-        db.execute(ins, (f"B{i}", "discovery", t0 + i * 5, 1.0, "1h", 3600, 0.9, t0, -10.0, 5.0, -20.0,
-                         int(h == "tp30"), int(h == "sl15"), h, 10, "tracked"))
-    db.commit()
-    db.close()
+from replay_fixtures import HZ, make_db as _db  # noqa: E402
 
 
 def test_rates():
@@ -115,27 +100,27 @@ def test_rates():
 def _locked(tmp_path, db, min_n=10, **kw):
     """Lock the holdout on the in-sample part (frozen parameters), then open it with the same parameters."""
     lock = str(tmp_path / "lock.json")
-    assert lock_holdout(str(db), lock, min_n=min_n, **kw)["status"] == "LOCKED"
-    return replay(str(db), holdout_lock=lock, min_n=min_n, **kw)
+    assert lock_holdout(str(db), lock, HZ, min_n=min_n, **kw)["status"] == "LOCKED"
+    return replay(str(db), HZ, holdout_lock=lock, min_n=min_n, **kw)
 
 
 def test_replay_small_sample_keeps_the_holdout_closed(tmp_path):
     _db(tmp_path / "r.db", ["tp30", "sl15", None], ["sl15"] * 20)
-    res = replay(str(tmp_path / "r.db"))
+    res = replay(str(tmp_path / "r.db"), HZ)
     assert res["walk_forward"]["out_of_sample"]["status"] == "REFUSED" and res["all"] is None
-    assert res["n_in_sample"] == 1 and res["n_holdout"] == 2
+    assert (res["n_in_sample"], res["n_embargoed"], res["n_holdout"]) == (1, 0, 2)   # last in-sample + 60 s < next
     ins = res["walk_forward"]["in_sample"]
-    # baseline = non-candidate tokens in the in-sample time window (t 1000 -> B0..B0), never the candidates
-    assert ins["candidates"]["n"] == 1 and ins["baseline_window"] == "same time window"
-    assert lock_holdout(str(tmp_path / "r.db"), str(tmp_path / "l.json"))["status"] == "REFUSED"   # n < 30
+    assert ins["candidates"]["n"] == 1 and "age / liquidity" in ins["baseline"]
+    assert ins["baseline_random"]["n_pool"] >= 1                      # matched tokens, never the candidates
+    assert lock_holdout(str(tmp_path / "r.db"), str(tmp_path / "l.json"), HZ)["status"] == "REFUSED"   # n < 30
 
 
 def test_replay_edge_vs_random_and_walk_forward(tmp_path):
-    _db(tmp_path / "r.db", ["tp30"] * 30 + ["sl15"] * 10, ["tp30"] * 20 + ["sl15"] * 80)
+    _db(tmp_path / "r.db", ["tp30"] * 30 + ["sl15"] * 10, (["tp30"] + ["sl15"] * 19) * 10)   # random share ~5 %
     res = _locked(tmp_path, tmp_path / "r.db")
     a = res["all"]
     assert a["candidates"]["tp_first_rate"] == 0.75 and a["candidates"]["tp_share"] == 0.75
-    assert a["baseline_random"]["mean_tp_share"] < 0.3 and a["baseline_random"]["p_random_at_least_as_good"] == 0.0
+    assert a["baseline_random"]["mean_tp_share"] < 0.2 and a["baseline_random"]["p_random_at_least_as_good"] == 0.0
     oos = res["walk_forward"]["out_of_sample"]["candidates"]
     assert oos["n"] == 16 and oos["tp_first_rate"] == pytest.approx(6 / 16)      # time order: the last 16
     assert oos["tp_share"] == pytest.approx(6 / 16) and res["break_even_tp_share"] == pytest.approx(1 / 3, abs=1e-4)
@@ -148,7 +133,7 @@ def test_replay_edge_vs_random_and_walk_forward(tmp_path):
 
 def test_volatility_alone_is_not_an_edge(tmp_path):
     """Candidates hit TP first 4x more often than random tokens, but SL even more: TP share below break-even."""
-    _db(tmp_path / "r.db", ["tp30"] * 12 + ["sl15"] * 28, ["tp30"] * 5 + ["sl15"] * 15 + [None] * 80)
+    _db(tmp_path / "r.db", ["tp30"] * 12 + ["sl15"] * 28, (["tp30"] + ["sl15"] * 3 + [None] * 16) * 5)
     res = _locked(tmp_path, tmp_path / "r.db")
     a = res["all"]
     assert a["candidates"]["tp_first_rate"] > 4 * a["baseline_random"]["mean_tp_first_rate"]

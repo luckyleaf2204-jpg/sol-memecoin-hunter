@@ -146,6 +146,11 @@ includes 0. Gate and replay reports mark groups below 30 as INSUFFICIENT.
   ends at that part's last decision; forward outcomes are the only thing taken after the decision.
 * Walk-forward: candidates in time order, first 60 % = in-sample, last 40 % = holdout (a time window on all
   candidates, before filters). All test parameters (horizon, levels, filters, split, seed) are hashed.
+* Production strategy only: replay keeps candidates of the gated `lifecycle` engine (others counted and excluded);
+  the bot backtest (`trading/backtest.py`) runs `production_config()` and refuses any other config unless
+  `allow_legacy=True`. Baseline = random other tokens of the same age / liquidity bucket, chosen from snapshots at
+  or before each decision (as in the gate report). Embargo = the horizon: the holdout starts only after the last
+  in-sample outcome window has closed. The lock hash includes `sample_id`, the code commit and `min_n`.
 * **Holdout lock**: `--lock-holdout --holdout-lock lock.json` writes the parameter hash, the lock time, the time
   cut and the in-sample n (refused below 30 or when a lock already exists). The holdout then opens only with
   `--holdout-lock lock.json`, the SAME parameter hash and >= 30 holdout candidates; otherwise it stays closed

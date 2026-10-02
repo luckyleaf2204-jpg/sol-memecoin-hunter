@@ -21,6 +21,7 @@ ap.add_argument("--db", default=str(DB_PATH))
 a = ap.parse_args()
 res = backtest_db(Database(a.db), since=time.time() - a.hours * 3600)
 print(json.dumps(res["stats"], indent=2))
+print(f"config {res['config']} (gated lifecycle = production)")
 print(f"frames {res['frames']} · executions {res['executions']} · closed {len(res['trades'])} · open {len(res['open'])}")
 for t in res["trades"]:
     print(f"  {t['symbol']:<12} net {t['net']:+9.2f}  exit {t['exit']}")

@@ -22,15 +22,18 @@ def main():
     ap.add_argument("--holdout-lock", default="", help="JSON lock file: parameter hash + lock time + time cut")
     ap.add_argument("--lock-holdout", action="store_true", help="freeze the parameters on the in-sample part")
     ap.add_argument("--min-n", type=int, default=30)
+    ap.add_argument("--engine", default="lifecycle", help="candidates of this engine only ('any' = all)")
     ap.add_argument("--out", default="")
     a = ap.parse_args()
     if a.lock_holdout:
         if not a.holdout_lock:
             sys.exit("--lock-holdout needs --holdout-lock PATH")
-        res = lock_holdout(a.db, a.holdout_lock, a.horizon, a.split, a.bought_only, a.seed, min_n=a.min_n)
+        res = lock_holdout(a.db, a.holdout_lock, a.horizon, a.split, a.bought_only, a.seed, min_n=a.min_n,
+                           engine=None if a.engine == "any" else a.engine)
         print(f"HOLDOUT {res['status']}" + (f": {res['reason']}" if res.get("reason") else ""))
     else:
-        res = replay(a.db, a.horizon, a.split, a.bought_only, a.seed, a.holdout_lock or None, a.min_n)
+        res = replay(a.db, a.horizon, a.split, a.bought_only, a.seed, a.holdout_lock or None, a.min_n,
+                     None if a.engine == "any" else a.engine)
         print(f"REPLAY n_in_sample={res['n_in_sample']} n_holdout={res['n_holdout']} · {res['verdict']}")
     text = json.dumps(res, indent=1)
     print(text)
