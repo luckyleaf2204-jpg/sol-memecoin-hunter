@@ -211,11 +211,11 @@ class PaperExecutor(ExecutionInterface):
         except (KeyError, TypeError, ValueError):
             usd_out = 0.0
         if not ref or imp is None or usd_out <= 0 or tokens <= 0:
-            return Execution(**base, status="REJECTED", reason=f"{reason}: Jupiter quote unusable")
+            return Execution(**{**base, "reason": f"{reason}: Jupiter quote unusable"}, status="REJECTED")
         slip = min(0.99, self._slip(st) + self.dump_tail(st))
-        if self._fail(st, imp):
-            return Execution(**base, status="FAILED", network_fee_usd=net_fee, price_impact_pct=100 * imp,
-                             slippage_pct=100 * slip, reason=f"{reason}: transaction failed (simulated)")
+        if self._fail(st, imp):                      # base already carries `reason`: override, do not repeat it
+            return Execution(**{**base, "reason": f"{reason}: transaction failed (simulated)"}, status="FAILED",
+                             network_fee_usd=net_fee, price_impact_pct=100 * imp, slippage_pct=100 * slip)
         proceeds = usd_out * (1 - slip)
         return Execution(**base, status="FILLED", usd_in=proceeds, tokens=tokens, fill_price=proceeds / tokens,
                          price_impact_pct=100 * imp, slippage_pct=100 * slip, fee_usd=0.0, network_fee_usd=net_fee,
@@ -250,10 +250,11 @@ class PaperExecutor(ExecutionInterface):
         base = dict(ts=now, mint=st.mint, symbol=st.info.symbol, side="SELL", route=route, ref_price=price,
                     latency_ms=latency, reason=reason, price_impact_pct=100 * imp, slippage_pct=100 * slip)
         if not force and imp + slip > self.max_slippage:
-            return Execution(**base, status="FAILED", network_fee_usd=net_fee,
-                             reason=f"{reason}: slippage tolerance exceeded ({100 * (imp + slip):.2f}%)")
+            return Execution(**{**base, "reason": f"{reason}: slippage tolerance exceeded ({100 * (imp + slip):.2f}%)"},
+                             status="FAILED", network_fee_usd=net_fee)
         if self._fail(st, imp):
-            return Execution(**base, status="FAILED", network_fee_usd=net_fee, reason=f"{reason}: transaction failed (simulated)")
+            return Execution(**{**base, "reason": f"{reason}: transaction failed (simulated)"}, status="FAILED",
+                             network_fee_usd=net_fee)
         fill = price * (1 - imp) * (1 - slip)
         gross = tokens * fill
         fee = gross * fee_rate

@@ -1480,6 +1480,8 @@ class PaperBot:
         now = now or time.time()
         r = report(self.book.journal, self.sample_epoch, self.cfg.cost_stress_pct, self.cfg.starting_balance,
                    gaps=self.gap_tracker.all_gaps(now), now=now)
+        r["costs"]["failed_attempts_all_time"] = {"count": self.book.failed, "fees_usd": round(self.book.failed_fees, 4),
+                                                  "fee_per_tx_usd_now": round(self.exec.network_fee(self._sol()), 4)}
         from core.snapshot import NOT_DURABLE
         snap = self.snapshot_status or {}
         durable = bool(snap.get("durable"))

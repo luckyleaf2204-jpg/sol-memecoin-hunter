@@ -71,7 +71,9 @@ def journal_row(p) -> dict:
             "gross_move_pct": None if g is None else round(g, 3),
             "real_cost_pct": None if g is None or net_pct is None else round(g - net_pct, 3),
             "fees_usd": round(p.fees_usd, 4), "cost_usd": round(p.cost_usd, 4), "noquote": p.noquote,
-            "haircut": p.haircut_exits > 0, "haircut_exits": p.haircut_exits}
+            "haircut": p.haircut_exits > 0, "haircut_exits": p.haircut_exits,
+            "n_tx": p.tx_count, "size_usd": round(p.cost_usd, 4), "fixed_fee_usd": round(p.fixed_fees_usd, 4),
+            "fixed_fee_pct": round(100 * p.fixed_fees_usd / p.cost_usd, 3) if p.cost_usd else None}
 
 
 def samples(journal: list[dict]) -> dict:
@@ -175,12 +177,15 @@ class PaperBook:
                      entry_score=entry_score, entry_why=why or [], entry_liq=entry_liq, entry_vol=entry_vol,
                      setup=setup)
         p.entry_mid = mid_price(ex)
+        p.tx_count, p.fixed_fees_usd = 1, ex.network_fee_usd
         self.next_id += 1
         self.positions[p.mint] = p
         return p
 
     def reduce(self, p: Position, ex: Execution, now: float, reason: str) -> None:
         self.record(ex)
+        p.tx_count += 1                                # every sell attempt is a transaction, filled or not
+        p.fixed_fees_usd += ex.network_fee_usd
         p.fees_usd += ex.network_fee_usd
         p.realized_usd -= ex.network_fee_usd          # every sell attempt's network fee belongs to this position
         if ex.status != "FILLED":

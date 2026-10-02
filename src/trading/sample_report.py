@@ -92,6 +92,37 @@ def warnings(n: int, by_cost: dict) -> tuple[str, list[str]]:
     return status, w
 
 
+FIXED_FEE_TARGET_PCT = 2.0
+
+
+def _med(v):
+    v = sorted(x for x in v if x is not None)
+    return None if not v else round((v[len(v) // 2] + v[(len(v) - 1) // 2]) / 2, 3)
+
+
+def costs(counted: list[dict]) -> dict:
+    """Fix 6: real transactions per trade, trade size, fixed fees (network + priority) as % of each trade, and the
+    smallest trade size that keeps the fixed fees under FIXED_FEE_TARGET_PCT at the observed fee per trade."""
+    rows = [r for r in counted if r.get("fixed_fee_usd") is not None and r.get("size_usd")]
+    fee = _med([r["fixed_fee_usd"] for r in rows])
+    min_size = round(fee / (FIXED_FEE_TARGET_PCT / 100), 2) if fee else None
+    sizes = [r["size_usd"] for r in rows]
+    return {"n": len(rows), "n_tx_median": _med([r["n_tx"] for r in rows]),
+            "n_tx_mean": round(sum(r["n_tx"] for r in rows) / len(rows), 2) if rows else None,
+            "size_usd_median": _med(sizes), "size_usd_min": min(sizes) if sizes else None,
+            "fixed_fee_usd_median": fee, "fixed_fee_pct_median": _med([r["fixed_fee_pct"] for r in rows]),
+            "fixed_fee_pct_max": max((r["fixed_fee_pct"] for r in rows), default=None),
+            "share_over_target_pct": round(100 * sum(1 for r in rows if r["fixed_fee_pct"] > FIXED_FEE_TARGET_PCT)
+                                           / len(rows), 1) if rows else None,
+            "recommended_min_size_usd": min_size,
+            "recommendation": None if min_size is None else
+            f"with ~{fee:.2f} $ of fixed fees per trade, a trade must be >= {min_size:.0f} $ to keep them under "
+            f"{FIXED_FEE_TARGET_PCT:.0f} % (median trade now {(_med(sizes) or 0):.0f} $)",
+            "per_trade": [{"trade_id": r.get("trade_id"), "symbol": r.get("symbol"), "size_usd": r["size_usd"],
+                           "n_tx": r["n_tx"], "fixed_fee_usd": r["fixed_fee_usd"], "fixed_fee_pct": r["fixed_fee_pct"]}
+                          for r in rows[-50:]]}
+
+
 def report(journal: list[dict], epoch, levels=(5.0, 7.0, 10.0), starting: float = 1000.0,
            gaps: list[dict] | None = None, now: float | None = None) -> dict:
     import time
@@ -124,6 +155,7 @@ def report(journal: list[dict], epoch, levels=(5.0, 7.0, 10.0), starting: float 
                             "stop_exits": sl, "hard_exits": sum(1 for r in counted if r.get("exit_reason") in GAP_REASONS),
                             "by_cost": cost_table(counted, levels, starting, sl_gap=True)},
         "haircut": haircut_split(counted, levels, starting),
+        "costs": costs(counted),
         "reference_only": {"tp_share": round(tp / (tp + sl), 4) if tp + sl else None, "tp_exits": tp, "sl_exits": sl,
                            "note": "TP/(TP+SL) mostly reflects volatility; NOT a decision metric"},
     }
