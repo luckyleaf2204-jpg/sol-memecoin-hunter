@@ -76,6 +76,8 @@ class TradingConfig:
     # LIFECYCLE engine (Lifecycle-Aware Hunter V1). Conservative initial thresholds, chosen for A/B and later
     # calibration — not to produce BUYs. The server turns the engine on (LIFECYCLE_ENGINE=1).
     lifecycle: bool = False
+    entry_engine: str = "lifecycle"          # step 4: with the lifecycle engine on, ONLY it may open positions;
+                                             # OLD / experimental decisions are shadow-logged
     pre_migration_shadow: bool = True        # V1.1: PRE-MIGRATION setups are SHADOW only (would_buy logged, no BUY)
     premigration_progress_min: float = 70.0  # Pump.fun curve progress (%) that makes a curve PRE_MIGRATION
     new_setup_threshold: float = 70.0
@@ -110,6 +112,14 @@ class TradingConfig:
     def save(self, path: Path) -> None:
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text(json.dumps(asdict(self), indent=2), encoding="utf-8")
+
+    def sample_id(self) -> str:
+        """Fingerprint of every strategy parameter (entries, exits, sizing, risk, costs). Trades are counted per
+        sample: a parameter change starts a new sample, so samples are never mixed (step 4)."""
+        import hashlib
+        skip = {"mode", "enabled", "kill_switch", "seed", "latency_probe", "cost_stress_pct", "starting_balance"}
+        d = {k: v for k, v in sorted(asdict(self).items()) if k not in skip}
+        return hashlib.sha256(json.dumps(d, sort_keys=True, default=str).encode()).hexdigest()[:10]
 
     def set_mode(self, mode: str) -> None:
         if mode not in ALLOWED_MODES:

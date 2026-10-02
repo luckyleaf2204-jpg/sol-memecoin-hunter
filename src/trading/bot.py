@@ -339,6 +339,9 @@ class PaperBot:
                 if not is_trade_candidate(st, rec):         # defence in depth: never buy outside 🟢
                     rec["state"] = "BLOCKED"
                     continue
+                if self.cfg.lifecycle and (rec.get("engine") or "old") != self.cfg.entry_engine:
+                    rec["state"] = "SHADOW_ONLY"            # step 4: one frozen entry engine; the others are logged
+                    continue
                 if st.mint in self.intents or st.mint in self.book.positions or \
                         any(o["mint"] == st.mint for o in self.pending.values()):
                     rec["state"] = "DUPLICATE"              # in flight / awaiting approval / held: never twice,
@@ -618,6 +621,8 @@ class PaperBot:
     def _tag_position(self, mint: str, it: dict) -> None:
         p = self.book.positions.get(mint)
         if p is not None:
+            p.entry_engine = (self.decisions.get(mint) or {}).get("engine") or "old"
+            p.sample_id = self.cfg.sample_id()
             p.entry_lifecycle, p.entry_setup, p.entry_setup_score = it.get("lifecycle"), it.get("setup_type"), it.get("setup_score")
 
     def _history(self, mint: str):
@@ -1182,6 +1187,8 @@ class PaperBot:
                                       pv["exit"]["exit_fill_source"], pv["exit"]["exit_market"])
                 self._truth_trade_rec(cs, now)
             self._rec("price_provenance", p.mint, pv)
+        if ex.status == "FILLED" and p.status == "CLOSED" and self.book.journal:
+            self._rec("trade_journal", self.book.journal[-1])
         if ex.status == "FILLED":
             on_filled_sell(p, reason, self.cfg)
             if reason == "take_profit_1":

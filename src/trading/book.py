@@ -53,6 +53,50 @@ def cost_stress(closed: list, levels) -> dict:
     return out
 
 
+def journal_row(p) -> dict:
+    """One closed trade (step 4): entry price, MFE / MAE, exit reason, real cost, signalling engine, sample."""
+    net_pct = 100 * (p.realized_usd - p.cost_usd) / p.cost_usd if p.cost_usd else None
+    g = p.gross_move_pct
+    path = p.path_log()
+    return {"trade_id": f"{p.id}:{p.mint}", "mint": p.mint, "symbol": p.symbol, "engine": p.entry_engine or "old",
+            "sample_id": p.sample_id, "setup": p.setup, "lifecycle": p.entry_lifecycle, "setup_type": p.entry_setup,
+            "entry_ts": p.opened_at, "exit_ts": p.closed_at,
+            "holding_s": round(p.closed_at - p.opened_at, 1) if p.closed_at else None,
+            "entry_price": p.entry_price, "entry_mid": p.entry_mid, "exit_reason": p.exit_reason,
+            "mfe_pct": path["mfe_pct"], "mae_pct": path["mae_pct"],
+            "net_pnl_usd": round(p.realized_usd - p.cost_usd, 4), "net_pnl_pct": None if net_pct is None else round(net_pct, 3),
+            "gross_move_pct": None if g is None else round(g, 3),
+            "real_cost_pct": None if g is None or net_pct is None else round(g - net_pct, 3),
+            "fees_usd": round(p.fees_usd, 4), "cost_usd": round(p.cost_usd, 4), "noquote": p.noquote}
+
+
+def samples(journal: list[dict]) -> dict:
+    """Per sample (parameter fingerprint): never mix trades taken under different parameters."""
+    out: dict[str, dict] = {}
+    for r in journal:
+        if r.get("noquote"):
+            continue
+        s = out.setdefault(r.get("sample_id") or "unknown", {"n": 0, "net_usd": 0.0, "wins": 0, "gross": [], "cost": [],
+                                                            "engines": {}})
+        s["n"] += 1
+        s["net_usd"] += r["net_pnl_usd"]
+        s["wins"] += r["net_pnl_usd"] > 0
+        if r.get("gross_move_pct") is not None:
+            s["gross"].append(r["gross_move_pct"])
+        if r.get("real_cost_pct") is not None:
+            s["cost"].append(r["real_cost_pct"])
+        s["engines"][r["engine"]] = s["engines"].get(r["engine"], 0) + 1
+    for s in out.values():
+        s["net_usd"] = round(s["net_usd"], 2)
+        s["win_rate"] = round(100 * s["wins"] / s["n"], 1) if s["n"] else None
+        s["expectancy_usd"] = round(s["net_usd"] / s["n"], 3) if s["n"] else None
+        s["gross_move_mean_pct"] = round(sum(s["gross"]) / len(s["gross"]), 2) if s["gross"] else None
+        s["real_cost_mean_pct"] = round(sum(s["cost"]) / len(s["cost"]), 2) if s["cost"] else None
+        s["sample"] = "INSUFFICIENT (<30)" if s["n"] < 30 else "OK"
+        del s["gross"], s["cost"]
+    return out
+
+
 class PaperBook:
     def __init__(self, starting_balance: float):
         self.starting = starting_balance
@@ -67,6 +111,7 @@ class PaperBook:
         self.day_start = starting_balance
         self.next_id = 1
         self.last_exit: dict[str, float] = {}
+        self.journal: list[dict] = []          # step 4: one row per closed trade (journal_row)
         self.fees = self.network_fees = self.slippage = self.failed_fees = 0.0
         self.failed = 0
 
@@ -143,6 +188,8 @@ class PaperBook:
             p.tokens, p.status, p.exit_reason, p.closed_at = 0.0, "CLOSED", reason, now
             self.closed.append(self.positions.pop(p.mint))
             self.last_exit[p.mint] = now
+            self.journal.append(journal_row(p))
+            del self.journal[:-5000]
 
     # ---------------------------------------------------------------- stats
     def stats(self, now: float | None = None) -> dict:
@@ -166,6 +213,7 @@ class PaperBook:
             "noquote": {"closed": len(nq_closed), "open": len(nq_open), "net": round(nq_net, 2),
                         "note": "SIMULATED fills (no Jupiter route): excluded from the main P&L"},
             "cost_stress": cost_stress(main, self.cost_levels),
+            "samples": samples(self.journal),
             "today_pnl": round(eq - self.day_start, 2),
             "gross_pnl": round(gross, 2), "fees": round(self.fees, 2), "network_fees": round(self.network_fees, 2),
             "slippage_cost": round(self.slippage, 2), "failed_trades": self.failed,
@@ -210,6 +258,7 @@ class PaperBook:
         data["executions"] = [asdict(e) for e in self.executions[-500:]]
         data["equity_history"] = self.equity_history[-2000:]
         data["last_exit"] = self.last_exit
+        data["journal"] = self.journal[-5000:]
         path.parent.mkdir(parents=True, exist_ok=True)
         tmp = path.with_suffix(".tmp")
         tmp.write_text(json.dumps(data), encoding="utf-8")
@@ -231,4 +280,5 @@ class PaperBook:
         b.executions = [Execution(**e) for e in data.get("executions", [])]
         b.equity_history = [tuple(x) for x in data.get("equity_history", [])]
         b.last_exit = data.get("last_exit", {})
+        b.journal = data.get("journal", [])
         return b

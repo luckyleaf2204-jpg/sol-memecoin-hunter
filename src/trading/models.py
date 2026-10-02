@@ -122,6 +122,8 @@ class Position:
     entry_mid: float | None = None
     high_ts: float | None = None           # last time the observed price made a new high (step 3 time stop)
     runner_active: bool = False            # step 3: TP2 runner armed
+    entry_engine: str = ""                 # step 4: engine that gave the BUY signal (lifecycle / experimental / old)
+    sample_id: str = ""                    # step 4: TradingConfig.sample_id() when opened
     exit_mid_value: float = 0.0            # sum(tokens sold x mid at that sell)
 
     @property

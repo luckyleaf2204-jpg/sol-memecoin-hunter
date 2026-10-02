@@ -111,6 +111,10 @@ CREATE TABLE IF NOT EXISTS trade_price_truth (trade_id TEXT PRIMARY KEY, token_c
   latency_model_pct REAL, total_simulated_entry_cost_pct REAL, pnl_ds REAL, pnl_truth REAL, pnl_common_source REAL,
   old_pnl REAL, mfe_truth REAL, mae_truth REAL, time_to_mfe_s REAL, time_to_mae_s REAL, mfe_ds REAL, mae_ds REAL,
   truth_coverage_pct REAL, label TEXT, data TEXT);
+CREATE TABLE IF NOT EXISTS trade_journal (trade_id TEXT PRIMARY KEY, ca TEXT, symbol TEXT, engine TEXT,
+  sample_id TEXT, setup TEXT, lifecycle TEXT, setup_type TEXT, entry_ts REAL, exit_ts REAL, holding_s REAL,
+  entry_price REAL, entry_mid REAL, exit_reason TEXT, mfe_pct REAL, mae_pct REAL, net_pnl_usd REAL, net_pnl_pct REAL,
+  gross_move_pct REAL, real_cost_pct REAL, fees_usd REAL, cost_usd REAL, noquote INTEGER);
 CREATE TABLE IF NOT EXISTS truth_exit_shadow (trade_id TEXT PRIMARY KEY, token_ca TEXT, timestamp REAL,
   exit_reason_old TEXT, exit_reason_truth TEXT, exit_reason_old_raw TEXT, exit_reason_truth_raw TEXT, old_price REAL,
   truth_price REAL, old_pnl REAL, truth_pnl REAL, pnl_common_source REAL, old_fast_sl_class TEXT);
@@ -562,6 +566,16 @@ class DatasetRecorder:
         cols = self.TRUTH_TRADE_COLS + ("data",)
         self.db.execute(f"INSERT OR REPLACE INTO trade_price_truth ({', '.join(cols)}) VALUES ({','.join('?' * len(cols))})",
                         (*[r.get(c) for c in self.TRUTH_TRADE_COLS], json.dumps(r.get("data"), default=str)))
+        self.db.commit()
+
+    JOURNAL_COLS = ("trade_id", "mint", "symbol", "engine", "sample_id", "setup", "lifecycle", "setup_type", "entry_ts",
+                    "exit_ts", "holding_s", "entry_price", "entry_mid", "exit_reason", "mfe_pct", "mae_pct",
+                    "net_pnl_usd", "net_pnl_pct", "gross_move_pct", "real_cost_pct", "fees_usd", "cost_usd", "noquote")
+
+    def trade_journal(self, r: dict) -> None:
+        """Step 4: one row per closed paper trade (entry, MFE / MAE, exit reason, real cost, engine, sample)."""
+        self.db.execute(f"INSERT OR REPLACE INTO trade_journal VALUES ({','.join('?' * len(self.JOURNAL_COLS))})",
+                        tuple(int(r[c]) if c == "noquote" else r.get(c) for c in self.JOURNAL_COLS))
         self.db.commit()
 
     def truth_exit(self, r: dict) -> None:
