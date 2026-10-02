@@ -75,8 +75,11 @@ def load(db: sqlite3.Connection, horizon: str = "1h", engine: str | None = ENGIN
     """Entered trades (the strategy) + gate-blocked tokens (reported apart), with age / liquidity at the decision."""
     entered, ex_e = _group(db, "entered", "entered", horizon, engine)
     blocked, ex_b = _group(db, "gate_blocked", "blocked", horizon, engine)
+    later = {r["ca"]: r["ts"] for r in entered}
     return entered, {"engine": engine, "entered": len(entered), "excluded_entered": ex_e,
-                     "gate_blocked": blocked, "excluded_blocked": ex_b}
+                     "gate_blocked": blocked, "excluded_blocked": ex_b,
+                     # blocked first, entered later: kept in BOTH groups (dropping them would use later information)
+                     "blocked_then_entered": sum(1 for r in blocked if r["ca"] in later and later[r["ca"]] > r["ts"])}
 
 
 def _share(rows) -> float | None:
