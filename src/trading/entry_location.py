@@ -10,7 +10,7 @@ from __future__ import annotations
 
 LOOKBACK_S = 600.0
 MIN_HISTORY_S = 300.0          # gate: less price history than this in the lookback -> no entry (location unreliable)
-PULLBACK_STABLE_S = 180.0      # gate: a PULLBACK enters only if it made no new low for this long
+PULLBACK_STABLE_S = 180.0      # gate: a PULLBACK / SECOND_WAVE enters only if it made no new low for this long
 EARLY, MID, EXTENDED, PULLBACK, SECOND_WAVE, UNKNOWN = ("EARLY_ENTRY", "MID_MOVE", "EXTENDED", "PULLBACK",
                                                        "SECOND_WAVE", "UNKNOWN")
 
@@ -46,7 +46,8 @@ def entry_location(points: list, now: float, post_state: str | None = None, buye
     after = pts[i_high:]
     out["pullback_depth_pct"] = round(100 * (1 - min(p[1] for p in after) / high), 2)
     low_after = min(after, key=lambda p: (p[1], -p[0]))           # latest point at the lowest price after the high
-    out["last_low_age_s"] = round(now - low_after[0], 1)
+    if low_after[1] < high:                                       # None: nothing below the high since the high
+        out["last_low_age_s"] = round(now - low_after[0], 1)
     vols = [p[2] for p in pts if p[2] is not None]
     if vols and cur[2] is not None and max(vols):
         out["volume_retention"] = round(cur[2] / max(vols), 3)

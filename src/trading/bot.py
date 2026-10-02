@@ -699,8 +699,8 @@ class PaperBot:
 
     def _entry_location_gate(self, st, rec: dict, decision: str, now: float) -> str:
         """Step 2: a lifecycle TRADE is not bought while the price is extended. Blocked when the 5-min extension is
-        above entry_max_extension_5m_pct or the location is EXTENDED / MID_MOVE (UNKNOWN / EARLY / PULLBACK /
-        SECOND_WAVE pass). Blocked -> WATCH with the reason in blocked_by; re-evaluated every tick."""
+        above entry_max_extension_5m_pct or the location is EXTENDED / MID_MOVE / UNKNOWN, there is < 300 s of
+        history, or a PULLBACK / SECOND_WAVE made a new low within the last 180 s. Blocked -> WATCH with the reason in blocked_by; re-evaluated every tick."""
         c = self.cfg
         if decision != TRADE or not c.entry_location_gate:
             return decision
@@ -713,10 +713,15 @@ class PaperBot:
             why.append("entry_location: UNKNOWN")
         if hist is None or hist < MIN_HISTORY_S:
             why.append(f"entry_location: history {hist or 0:.0f}s < {MIN_HISTORY_S:.0f}s")
-        stable = loc != "PULLBACK" or (low_age is not None and low_age >= PULLBACK_STABLE_S)
-        rec["entry_pullback_stable"] = stable if loc == "PULLBACK" else None
+        if loc == "PULLBACK":                       # a pullback always has a low after the high: unknown = falling
+            stable = low_age is not None and low_age >= PULLBACK_STABLE_S
+        elif loc == "SECOND_WAVE":                  # G7: no new low within 180 s (None = no low below the high)
+            stable = low_age is None or low_age >= PULLBACK_STABLE_S
+        else:
+            stable = True
+        rec["entry_pullback_stable"] = stable if loc in ("PULLBACK", "SECOND_WAVE") else None
         if not stable:
-            why.append(f"entry_location: PULLBACK still falling (new low {low_age if low_age is not None else '?'}s "
+            why.append(f"entry_location: {loc} still falling (new low {low_age if low_age is not None else '?'}s "
                        f"ago < {PULLBACK_STABLE_S:.0f}s)")
         if ext is not None and ext > c.entry_max_extension_5m_pct:
             why.append(f"entry_location: extension_5m {ext:.0f}% > {c.entry_max_extension_5m_pct:.0f}%")
