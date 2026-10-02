@@ -15,8 +15,58 @@ run_windows.bat --backtest early             # backtest Early Signal
 
 Phần mềm **research / scanner** tìm memecoin Solana mới (ưu tiên Pump.fun) trên Windows.
 
-> **KHÔNG phải bot giao dịch.** Không private key, không seed phrase, không ký transaction,
-> không auto buy/sell. Score chỉ là **công cụ xếp hạng để bạn tự nghiên cứu**, không phải dự đoán giá.
+> **Không giao dịch thật.** Có một bot **PAPER** (giấy): mua/bán giả lập trên báo giá Jupiter thật, không private
+> key, không seed phrase, không ký transaction, không gửi lệnh nào lên chain. Chế độ AUTO (lệnh thật) bị khoá cứng.
+> Score chỉ là **công cụ xếp hạng để bạn tự nghiên cứu**, không phải dự đoán giá.
+
+---
+
+## 0. Bot PAPER trên server (Render) — chạy, cấu hình, đọc báo cáo
+
+**Bot này là PAPER bot.** Mọi lệnh khớp trên giấy: BUY/SELL dùng báo giá Jupiter thật (chỉ quote), phí mạng + phí
+ưu tiên được trừ như thật, thiếu báo giá bán thì xử lý theo luật (retry, haircut 30 % chỉ khi không có đường đi
+hoặc lệnh HARD khẩn cấp sau 60 s). Không có ví, không có giao dịch thật.
+
+Chạy server cục bộ (giao diện PWA + scanner + bot paper trong cùng một tiến trình):
+```
+python src/main.py --web --host 127.0.0.1 --port 8765
+```
+Trên Render: `render.yaml` (gói free, `autoDeploy` từ `main`). Mỗi lần deploy làm theo
+[docs/deploy_checklist.md](docs/deploy_checklist.md). Commit nào không được deploy mang `[skip render]`.
+
+### Biến môi trường
+
+| Biến | Bắt buộc | Ý nghĩa |
+|---|---|---|
+| `APP_ACCESS_CODE` | có | mã truy cập `/api/*` (nhập một lần trên điện thoại) |
+| `HELIUS_API_KEY` | khuyên dùng | holder / whale / RPC (chỉ ở server, không bao giờ xuống frontend) |
+| `SNAPSHOT_URL` + `SNAPSHOT_TOKEN` | để mẫu BỀN | kho snapshot HTTP (GET/PUT, token Bearer); hoặc `SNAPSHOT_DIR` trên đĩa cố định. Thiếu -> "MẪU KHÔNG BỀN - sẽ mất khi restart" |
+| `SNAPSHOT_EVERY_S` | không | chu kỳ snapshot (mặc định 3600) |
+| `RENDER_EXTERNAL_URL` | tự có trên Render | keep-alive: tự ping 10 phút/lần để gói free không ngủ |
+| `LIFECYCLE_ENGINE` | không (`1`) | engine vào lệnh Lifecycle (production) |
+| `EXPERIMENTAL_MODE`, `LATENCY_PROBE`, `LATENCY_SLIPPAGE_MODEL` | không | chế độ thử nghiệm / đo trễ (paper) |
+| `RESEARCH_LOG`, `MONEYFLOW`, `RESEARCH_ONCHAIN` | không (`1`) | ghi dữ liệu nghiên cứu `research.db` (chỉ đọc, có ngân sách) |
+| `TELEGRAM_BOT_TOKEN`, `TELEGRAM_CHAT_ID` | không | cảnh báo Telegram |
+
+Không bao giờ đưa key / token vào repo, log, `render.yaml` hay ảnh chụp màn hình.
+
+### Đọc báo cáo mẫu
+
+* `GET /healthz` (công khai): `ok`, `role` (ACTIVE / STANDBY / HALTED / LEASE LOST), commit, `params`
+  (fingerprint tham số), `constants` (hash hằng chiến lược), `sample_epoch`, trạng thái snapshot + cảnh báo bền.
+* Báo cáo mẫu (`/api/bot` -> `sample_report`, hoặc `python tools/sample_report.py --book .. --epoch ..`):
+  dòng đầu `SAMPLE <INSUFFICIENT|PRELIMINARY|OK> n=.. · <kết luận> · net expectancy @5% / @7% / @10% [CI 95 %]`.
+  * **Thước đo chính:** net expectancy mỗi lệnh sau chi phí 5 / 7 / 10 %, CI 95 % bootstrap và CI theo token
+    (các lệnh cùng token tương quan). INSUFFICIENT < 30, PRELIMINARY 30-199, OK >= 200.
+  * **Kết luận:** "Chưa đủ dữ liệu để kết luận có lãi" cho tới khi n >= 200 VÀ mọi CI (thường + theo token, mọi
+    mức chi phí) nằm hẳn một phía của 0.
+  * Kèm: win rate, R:R, max drawdown, kịch bản SL gap -20 %, nhóm haircut (và kết quả khi bỏ nhóm này), phí cố định
+    % mỗi lệnh, tỉ lệ token bị cổng chặn theo lý do, forward return nhóm bị chặn vs nhóm được vào vs baseline cùng
+    tuổi / thanh khoản, GAP (bot không chạy > 5 phút: lệnh trùng GAP bị loại khỏi mẫu).
+  * Chỉ lệnh của epoch hiện tại được tính (`STRATEGY_VERSION` + fingerprint); TP/(TP+SL) chỉ để tham khảo.
+* Bản tóm tắt cho người review (không cần vào server): `tools/export_review_bundle.py` ->
+  [docs/review_bundle.md](docs/review_bundle.md). Kế hoạch mẫu: [docs/sample_plan.md](docs/sample_plan.md).
+* Replay walk-forward + holdout: `python tools/replay_tp_sl.py --db data/research.db --horizon 30m ...`.
 
 ---
 
@@ -196,8 +246,8 @@ Chưa đo được (ghi rõ): wallet clustering, bundle/sniper, social spam.
 
 ## 8. Test
 ```
-.venv\Scripts\python -m pytest            # 67 test offline (validation, scoring, risk, parser, holder, dev, DB, backtest)
-.venv\Scripts\python -m pytest --live     # + 3 test gọi API thật
+.venv\Scripts\python -m pytest -m "not live"      # ~780 test offline (không gọi mạng)
+.venv\Scripts\python -m pytest --live -m live      # 5 test gọi API thật (cần HELIUS_API_KEY trong môi trường)
 ```
 
 ## 9. Mẫu dữ liệu thật (docs/samples/)
