@@ -170,6 +170,8 @@ def summary_line(r: dict) -> str:
                      f"{f' [{ci[0]}, {ci[1]}]' if ci else ' [CI n/a]'}")
     ep = r.get("epoch") or {}
     g = r.get("gaps") or {}
-    return (f"SAMPLE {r.get('sample_status')} n={r.get('n')} (thresholds 30 preliminary / 200 A/B) · "
+    gb = r.get("gate_block_rates")
+    gate = f"gate blocked {gb['blocked_any']}/{gb['tokens_at_gate']} tokens · " if gb else ""
+    return (gate + f"SAMPLE {r.get('sample_status')} n={r.get('n')} (thresholds 30 preliminary / 200 A/B) · "
             f"net expectancy {' · '.join(parts)} · gaps {g.get('count', 0)} ({g.get('excluded_trades', 0)} trades "
             f"excluded) · epoch since {ep.get('started_at_utc')} params {ep.get('fingerprint')}")

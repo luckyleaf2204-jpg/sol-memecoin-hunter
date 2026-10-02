@@ -727,6 +727,8 @@ class PaperBot:
             why.append(f"entry_location: extension_5m {ext:.0f}% > {c.entry_max_extension_5m_pct:.0f}%")
         if loc in c.entry_block_locations:
             why.append(f"entry_location: {loc}")
+        from trading.gate_stats import record
+        record(self.book.gate_seen, st.mint, why, now)  # G8: block rate by reason (unique tokens)
         if not why:
             return decision
         rec.update({"decision": WATCH, "entry_gate_blocked": True,
@@ -1516,6 +1518,8 @@ class PaperBot:
         now = now or time.time()
         r = report(self.book.journal, self.sample_epoch, self.cfg.cost_stress_pct, self.cfg.starting_balance,
                    gaps=self.gap_tracker.all_gaps(now), now=now)
+        from trading.gate_stats import block_rates
+        r["gate_block_rates"] = block_rates(self.book.gate_seen, self.sample_epoch.started_at)
         r["costs"]["failed_attempts_all_time"] = {"count": self.book.failed, "fees_usd": round(self.book.failed_fees, 4),
                                                   "fee_per_tx_usd_now": round(self.exec.network_fee(self._sol()), 4)}
         from core.snapshot import NOT_DURABLE

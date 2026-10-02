@@ -24,7 +24,8 @@ import time
 from pathlib import Path
 
 FILES = ("paper_bot.json", "sample_epoch.json", "truth_ledger.json", "trading.json", "holdout_lock.json",
-         "research.db")
+         "research.db", "price_history.json")
+OPTIONAL = ("price_history.json",)    # restored with the rest, but never part of the "partial local data" check
 GENERATIONS = 3                       # rotating slots: the live generation is never overwritten
 MANIFEST = "manifest.json"
 PROBE = "probe.json"
@@ -240,7 +241,7 @@ def restore(data_dir: Path, store) -> dict:
         return {"restored": [], "skipped": [], "snapshot_ts": None, "gen": None, "status": "NO SNAPSHOT", "at": time.time()}
     man = _parse(raw, MANIFEST)
     data_dir = Path(data_dir)
-    names = list(man["files"])
+    names = [n for n in man["files"] if n not in OPTIONAL]
     present = [n for n in names if (data_dir / n).exists()]
     if present and len(present) == len(names):
         return {"restored": [], "skipped": names, "snapshot_ts": man.get("ts"), "gen": man.get("gen"),

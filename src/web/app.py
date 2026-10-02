@@ -102,6 +102,16 @@ def create_app(engine: ScannerEngine | None = None, start_scanner: bool = True,
                                 "last_ts": None, "last": None, "last_error": None, "restore": None},
                    "aux": []}
 
+    def _save_price_history() -> None:
+        """G8: the scanner's recent price points -> data/price_history.json (loaded back on a quick restart)."""
+        from history import persist
+        if state["engine"] is None or state.get("halted"):
+            return
+        try:
+            persist.dump(state["engine"].history, DATA_DIR / persist.FILE)
+        except Exception as e:                     # never block a snapshot / shutdown on this
+            print(f"[history] save failed: {type(e).__name__}", flush=True)
+
     async def _snapshot_now(reason: str) -> None:
         from core.snapshot import snapshot
         from core.version import git_commit
@@ -111,6 +121,7 @@ def create_app(engine: ScannerEngine | None = None, start_scanner: bool = True,
         try:
             if state["bot"] is not None:
                 state["bot"].persist()
+            _save_price_history()
             man = await asyncio.to_thread(snapshot, DATA_DIR, store, git_commit())
             state["snapshot"].update(last_ts=man["ts"], last_error=None, last={
                 "reason": reason,
@@ -194,6 +205,10 @@ def create_app(engine: ScannerEngine | None = None, start_scanner: bool = True,
             ep = state["bot"].begin_sample()
             print(f"[startup] commit {ep['commit']} · params {ep['fingerprint']} · strategy {ep['strategy_version']} "
                   f"· sample epoch since {ep['started_at_utc']}", flush=True)
+            from history import persist as hist_persist
+            ph = hist_persist.load(state["engine"].history, DATA_DIR / hist_persist.FILE)
+            state["snapshot"]["price_history"] = ph
+            print(f"[history] price history {ph['status']}: {ph['tokens']} tokens, {ph['points']} points", flush=True)
             state["task"] = asyncio.create_task(state["engine"].run())
             state["bot_stop"] = asyncio.Event()
             state["bot"].snapshot_status = state["snapshot"]
@@ -213,6 +228,8 @@ def create_app(engine: ScannerEngine | None = None, start_scanner: bool = True,
             state["bot_stop"].set()
             with contextlib.suppress(Exception):
                 await asyncio.wait_for(state["bot_task"], 10)
+            if state.get("snapshot_store") is None:
+                _save_price_history()                      # local restart without a store still keeps it
             await _snapshot_now("shutdown")                # SIGTERM before a deploy / restart
         eng = state["engine"]
         if state["task"]:
@@ -273,7 +290,7 @@ def create_app(engine: ScannerEngine | None = None, start_scanner: bool = True,
         sizes, last error, last restore."""
         sn = state["snapshot"]
         rs = sn.get("restore") or {}
-        return {"halted": state.get("halted"),
+        return {"halted": state.get("halted"), "price_history_at_start": sn.get("price_history"),
                 "durable": sn["durable"], "warning": None if sn["durable"] else (sn.get("warning") or NOT_DURABLE),
                 "store": sn["store"], "target": sn["target"], "check": sn["reason"],
                 "last_snapshot": {**sn["last"], "at_utc": _utc(sn["last_ts"])} if sn.get("last") else None,

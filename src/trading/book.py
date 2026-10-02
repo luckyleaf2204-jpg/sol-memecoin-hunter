@@ -121,6 +121,7 @@ class PaperBook:
         self.gaps: list[dict] = []             # trading.gaps: periods the bot could not watch its positions
         self.heartbeat: float | None = None    # last bot tick (persisted -> restart gaps)
         self.last_buy_attempt: dict[str, float] = {}   # mint -> time of the last FAILED buy fill (cooldown)
+        self.gate_seen: dict[str, dict] = {}            # mint -> entry gate outcome (trading.gate_stats)
         self.fees = self.network_fees = self.slippage = self.failed_fees = 0.0
         self.failed = 0
 
@@ -277,6 +278,8 @@ class PaperBook:
         data["heartbeat"] = self.heartbeat
         cut = time.time() - 86_400                     # cooldowns are minutes long: keep one day at most
         data["last_buy_attempt"] = {m: t for m, t in self.last_buy_attempt.items() if t >= cut}
+        from trading.gate_stats import prune
+        data["gate_seen"] = prune(self.gate_seen)
         path.parent.mkdir(parents=True, exist_ok=True)
         tmp = path.with_suffix(".tmp")
         tmp.write_text(json.dumps(data), encoding="utf-8")
@@ -302,4 +305,5 @@ class PaperBook:
         b.gaps = data.get("gaps", [])
         b.heartbeat = data.get("heartbeat")
         b.last_buy_attempt = dict(data.get("last_buy_attempt", {}))
+        b.gate_seen = dict(data.get("gate_seen", {}))
         return b
