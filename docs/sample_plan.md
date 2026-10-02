@@ -6,8 +6,12 @@ Paper trading only. Nothing here sends a transaction.
 
 * The server prints `commit · params · strategy · sample epoch since` at start-up and exposes the same on
   `GET /healthz` (`commit`, `params`, `sample_epoch`).
-* Current epoch: commit `77d6d56` (descendant of `148af2c`), parameter fingerprint `02e5bdcc03`,
-  strategy `s4-148af2c`, **started 2026-10-02T05:31:15Z**. Only trades opened at or after this moment count.
+* Epoch history (parameter fingerprint `02e5bdcc03`, strategy `s4-148af2c`, all descendants of `148af2c`):
+  2026-10-02T05:31:15Z (commit `77d6d56`) -> 05:39:52Z (`7ce1845`) -> **2026-10-02T05:43:59Z (`cfde5ef`, current)**.
+  Only trades opened at or after the current start count.
+* **The Render data directory is NOT persistent**: every deploy wipes `sample_epoch.json`, `paper_bot.json`
+  (book + trade journal) and `research.db`, so every deploy restarts the sample from zero. While counting:
+  do not deploy (commits that must not deploy carry `[skip render]`), or attach a persistent disk to the service.
 * Trades opened earlier, in another epoch or without an epoch tag are **LEGACY** and excluded from every report.
 * A new epoch starts automatically when the parameter fingerprint (`TradingConfig.sample_id()`) or
   `trading/sample_epoch.STRATEGY_VERSION` changes. Deploys that change neither (reports, docs) keep the epoch
