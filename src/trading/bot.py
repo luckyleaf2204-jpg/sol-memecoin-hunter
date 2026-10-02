@@ -37,6 +37,7 @@ TICK_S = 5.0
 LAT_P90_MIN, LAT_P75_MIN = 50, 100        # AUTO latency model: samples needed for EMPIRICAL P90 / P75
 FAST_SCORE_MARGIN, FAST_CONF_MARGIN = 0.05, 0.10   # fast getAsset lane: "genuinely near a NEW BUY"
 QUOTE_RETRY_WINDOW_S = 60.0     # transient Jupiter failures (429 / timeout / 5xx) are retried this long
+SELL_QUOTE_ATTEMPTS, SELL_QUOTE_BUDGET_S = 2, 4.0   # one SELL quote call is short: the bot-level retry does the rest
 NO_ROUTE_BLOCK_S = 120.0        # after a confirmed "no route": no re-quote of that CA for this long
 MAX_ENTRIES_PER_TICK = 2
 FAILED_BUY_COOLDOWN_S = 300.0   # after a FAILED BUY fill, no new BUY attempt on that mint for this long
@@ -67,6 +68,9 @@ class PaperBot:
         self.jupiter = None                    # trading.jupiter.JupiterQuotes -> BUYs are filled on real quotes
         self.intents: dict[str, dict] = {}     # mint -> pending BUY intent (one per CA: duplicate-order guard)
         self.sell_intents: dict[str, dict] = {}  # mint -> SELL waiting for its Jupiter quote (non-protective exits)
+        self.quote_budget = None                 # trading.quote_budget.QuoteBudget (server); None = unlimited
+        self._exec_task: asyncio.Task | None = None   # sells + buys run beside the tick, never block it
+        self._selling = False
         self.pending: dict[str, dict] = {}     # CONFIRM mode: BUYs waiting for the owner's approval (id -> order)
         self.mode = PAPER                      # operating mode: PAPER | CONFIRM (AUTO needs a live executor)
         self._next_order = 1
@@ -227,6 +231,8 @@ class PaperBot:
                     if cur is not None:
                         cur["mark"] = mark                  # keep its retry state, refresh the reference
                     if hard and (cur is None or not cur.get("hard")):
+                        if cur is not None and "first" in cur:
+                            it["first"] = cur["first"]      # the quote problem started then: no fresh 60 s
                         self.sell_intents[p.mint] = it      # protective exit replaces a pending TP / momentum intent
                     elif cur is None:
                         self.sell_intents[p.mint] = it
@@ -490,6 +496,8 @@ class PaperBot:
         Positive = adverse (fewer tokens). Quotes only. Returns bps or None."""
         if not self.cfg.latency_probe or not hasattr(self.jupiter, "quote_result") or self.sell_intents:
             return None                                 # research probe never competes with a pending SELL
+        if not self._quota("probe"):
+            return None
         q_ts = time.time()
         await asyncio.sleep(self._probe_rng.uniform(0.4, 1.5))
         from trading.jupiter import WSOL, route_label
@@ -829,7 +837,7 @@ class PaperBot:
                 continue
             while self.truth_quotes and now - self.truth_quotes[0] > 60:
                 self.truth_quotes.popleft()
-            if len(self.truth_quotes) >= TRUTH_QUOTES_PER_MIN:
+            if len(self.truth_quotes) >= TRUTH_QUOTES_PER_MIN or not self._quota("truth"):
                 self.truth_skipped_budget += 1
                 break
             st = states.get(mint)
@@ -904,6 +912,8 @@ class PaperBot:
             st = states.get(mint)
             dec = (st.info.decimals if st else None) or 6
             for ev in tr.exit_events:
+                if (ev["status"] == "PENDING" or ev["requote_status"] == "PENDING") and not self._quota("truth"):
+                    return n                            # bot budget used up: stays PENDING for the next round
                 if ev["status"] == "PENDING":
                     snap = await self._sell_quote_snap(mint, ev["tokens"], dec, now)
                     apply_exit_quote(ev, snap, self._sol())
@@ -1263,19 +1273,40 @@ class PaperBot:
                                      window is over a HARD exit takes the haircut (emergency); a non-HARD exit is
                                      dropped and comes back with the next exit signal (never sold blind).
         The intent is removed only once there is an outcome. SELL quotes have priority over truth / probe quotes."""
+        if self._selling:                               # one SELL round at a time: never two fills per position
+            return
+        self._selling = True
+        try:
+            await self._execute_sells(now)
+        finally:
+            self._selling = False
+
+    async def _execute_sells(self, now: float | None) -> None:
         from trading.jupiter import INVALID, NO_ROUTE, price_impact
         now = now or time.time()
         states = {s.mint: s for s in (self.engine.published or [])}
+        due = []
         for mint, it in list(self.sell_intents.items()):
-            expired = it.get("hard") and "first" in it and now - it["first"] >= QUOTE_RETRY_WINDOW_S
+            expired = "first" in it and now - it["first"] >= QUOTE_RETRY_WINDOW_S
             if now < it.get("next", 0.0) and not expired:
                 continue                                # backing off after a transient quote error
             p, st = self.book.positions.get(mint), states.get(mint)
             if p is None or st is None:
                 self.sell_intents.pop(mint, None)
                 continue
-            tokens, reason, sol = p.tokens * it["frac"], it["reason"], self._sol()
-            qr = await self._sell_quote(mint, int(tokens * 10 ** (st.info.decimals or 6)), sol)
+            due.append((mint, it, p, st, p.tokens))
+        sol = self._sol()
+
+        async def quote(entry):
+            m, it, p, st, tk = entry
+            return entry, await self._sell_quote(m, int(tk * it["frac"] * 10 ** (st.info.decimals or 6)), sol)
+        for fut in asyncio.as_completed([quote(e) for e in due]):     # concurrently, filled as each quote lands:
+            (mint, it, p, st, tokens_then), qr = await fut             # one slow quote never delays the others
+            if self.book.positions.get(mint) is not p or p.tokens != tokens_then or self.sell_intents.get(mint) is not it:
+                continue                                # position / intent changed while quoting: next round
+            tokens, reason = p.tokens * it["frac"], it["reason"]
+            if p.last_price:
+                it["mark"] = p.last_price               # latest validated mark (refreshed every tick)
             self.sell_quote_stats[qr.status] = self.sell_quote_stats.get(qr.status, 0) + 1
             haircut = self.cfg.hard_exit_no_quote_haircut_pct / 100
             if qr.ok:
@@ -1300,6 +1331,12 @@ class PaperBot:
                     self.log("INFO", f"SELL {reason} → QUOTE {qr.label()} → RETRY in {wait:.0f}s "
                                      f"(attempt {it['retries'] + 1})", st, now=now)
                     continue
+                if not it.get("hard") and it["mark"] <= p.stop_price:
+                    it["hard"], it["frac"] = True, 1.0  # the price fell through the stop while we waited: protect
+                    reason = it["reason"] = f"{reason}->stop_loss"
+                    tokens = p.tokens                   # a stop sells everything (TP1 would have sold a part)
+                    self.log("RISK", f"SELL escalated to HARD: mark {it['mark']:.10g} <= stop {p.stop_price:.10g} "
+                                     f"after {QUOTE_RETRY_WINDOW_S:.0f}s without a quote", st, now=now)
                 if not it.get("hard"):
                     self.sell_intents.pop(mint, None)
                     self.log("INFO", f"SELL {reason} postponed: no quote for {QUOTE_RETRY_WINDOW_S:.0f}s "
@@ -1329,21 +1366,33 @@ class PaperBot:
             if now > o["expires"]:
                 self.pending.pop(oid, None)
 
+    def _quota(self, kind: str) -> bool:
+        """Bot-wide Jupiter budget (trading.quote_budget): SELL first, then buy / truth / probe."""
+        return self.quote_budget is None or self.quote_budget.take(kind, sells_pending=bool(self.sell_intents))
+
     async def _sell_quote(self, mint: str, amount_raw: int, sol: float | None = None):
         """Classified Jupiter SELL quote (token -> SOL) as a trading.jupiter.QuoteResult. A quote-only client is
         wrapped like _buy_quote (None -> API_ERROR, transient). No SOL price -> API_ERROR (cannot value the fill)."""
-        from trading.jupiter import API_ERROR, OK, WSOL, QuoteResult
+        from trading.jupiter import API_ERROR, OK, RATE_LIMITED, WSOL, QuoteResult
         if not sol:
             return QuoteResult(API_ERROR, detail="no SOL price", attempts=0)
+        if not self._quota("sell"):
+            return QuoteResult(RATE_LIMITED, detail="bot quote budget (50/min) used up", attempts=0)
         slip = int(self.cfg.max_slippage_pct * 100)
         if hasattr(self.jupiter, "quote_result"):
-            return await self.jupiter.quote_result(mint, WSOL, amount_raw, slip)
+            try:
+                return await self.jupiter.quote_result(mint, WSOL, amount_raw, slip, attempts=SELL_QUOTE_ATTEMPTS,
+                                                       budget_s=SELL_QUOTE_BUDGET_S)
+            except TypeError:                           # a client without the time budget arguments
+                return await self.jupiter.quote_result(mint, WSOL, amount_raw, slip)
         q = await self.jupiter.quote(mint, WSOL, amount_raw, slip)
         return QuoteResult(OK, quote=q, http=200, attempts=1) if q else QuoteResult(API_ERROR, detail="no quote", attempts=1)
 
     async def _buy_quote(self, mint: str, lamports: int):
         """Classified Jupiter quote (trading.jupiter.QuoteResult); a quote-only client is wrapped."""
-        from trading.jupiter import API_ERROR, OK, WSOL, QuoteResult
+        from trading.jupiter import API_ERROR, OK, RATE_LIMITED, WSOL, QuoteResult
+        if not self._quota("buy"):
+            return QuoteResult(RATE_LIMITED, detail="bot quote budget: SELL quotes first", attempts=0)
         slip = int(self.cfg.max_slippage_pct * 100)
         if hasattr(self.jupiter, "quote_result"):
             return await self.jupiter.quote_result(WSOL, mint, lamports, slip)
@@ -1520,6 +1569,8 @@ class PaperBot:
                    gaps=self.gap_tracker.all_gaps(now), now=now)
         from trading.gate_stats import block_rates
         r["gate_block_rates"] = block_rates(self.book.gate_seen, self.sample_epoch.started_at)
+        if self.quote_budget is not None:
+            r["quote_budget"] = self.quote_budget.as_dict()
         r["costs"]["failed_attempts_all_time"] = {"count": self.book.failed, "fees_usd": round(self.book.failed_fees, 4),
                                                   "fee_per_tx_usd_now": round(self.exec.network_fee(self._sol()), 4)}
         from core.snapshot import NOT_DURABLE
@@ -1561,10 +1612,8 @@ class PaperBot:
             try:
                 self.tick()
                 self._expire_pending(time.time())
-                if self.sell_intents:
-                    await self.execute_sells()
-                if self.intents:
-                    await self.execute_intents()
+                if (self.sell_intents or self.intents) and (self._exec_task is None or self._exec_task.done()):
+                    self._exec_task = asyncio.create_task(self._execution_round())   # never blocks the next tick
                 if self.recorder is not None and time.time() - self._last_followup >= 30:
                     self._last_followup = time.time()
                     await self.recorder.run_followups()
@@ -1593,6 +1642,22 @@ class PaperBot:
                 await asyncio.wait_for(self._stop.wait(), timeout=TICK_S)
             except asyncio.TimeoutError:
                 pass
+        if self._exec_task is not None and not self._exec_task.done():
+            try:                                         # let a running SELL / BUY round finish (bounded)
+                await asyncio.wait_for(self._exec_task, 10)
+            except Exception:
+                pass
+
+    async def _execution_round(self) -> None:
+        """SELLs first, then BUYs. Runs as its own task so a slow / retrying quote never delays the tick (stop
+        losses of other positions are still detected every TICK_S); only one round runs at a time."""
+        try:
+            if self.sell_intents:
+                await self.execute_sells()
+            if self.intents:
+                await self.execute_intents()
+        except Exception as e:                           # never kill the loop
+            self.log("INFO", f"execution round error: {type(e).__name__}: {e}")
 
     def pipeline(self, now: float | None = None) -> dict:
         """Decision-state counts over every fresh decision + real REJECT reasons by category."""

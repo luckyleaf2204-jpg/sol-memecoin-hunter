@@ -184,6 +184,8 @@ def create_app(engine: ScannerEngine | None = None, start_scanner: bool = True,
         elif start_scanner:
             from trading.jupiter import JupiterQuotes
             state["bot"].jupiter = JupiterQuotes(state["engine"].http)      # paper BUYs on real Jupiter quotes
+            from trading.quote_budget import QuoteBudget
+            state["bot"].quote_budget = QuoteBudget()                      # 50/min, SELL quotes first
             state["bot"].cfg.experimental = os.environ.get("EXPERIMENTAL_MODE", "1") != "0"   # spec Part 3 (PAPER)
             state["bot"].cfg.latency_probe = os.environ.get("LATENCY_PROBE", "1") != "0"     # measure real drift
             state["bot"].cfg.lifecycle = os.environ.get("LIFECYCLE_ENGINE", "1") != "0"      # Lifecycle-Aware Hunter V1
