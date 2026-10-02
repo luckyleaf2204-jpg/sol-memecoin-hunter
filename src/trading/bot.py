@@ -1430,6 +1430,9 @@ class PaperBot:
         o = self.pending.pop(order_id, None)
         if o is None or now > o["expires"]:
             return False
+        if self.entry_block:                            # not durable right now: no new position, even approved
+            self.log("BLOCK", f"BUY approval refused — {self.entry_block}", None, now=now)
+            return False
         self.intents.setdefault(o["mint"], o)
         self.log("INFO", f"BUY approved by owner (order {order_id})", None, now=now)
         return True
@@ -1505,6 +1508,10 @@ class PaperBot:
                 if it.get("next", 0) > now:
                     continue                                   # quote retry scheduled later
                 self.intents.pop(mint, None)
+                if self.entry_block:                           # became non-durable after the intent was made
+                    self.entry_block_seen.add(mint)
+                    self.log("BLOCK", f"BUY cancelled at execution — {self.entry_block}", None, now=now)
+                    continue
                 st = states.get(mint)
                 rec = self.decisions.get(mint, {})
                 sol = self._sol()

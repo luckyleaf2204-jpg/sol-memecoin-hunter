@@ -31,6 +31,8 @@ GENERATIONS = 3                       # rotating slots: the live generation is n
 MANIFEST = "manifest.json"
 PROBE = "probe.json"
 NOT_DURABLE = "MẪU KHÔNG BỀN - sẽ mất khi restart"
+SNAPSHOT_FAIL_BLOCK_N = 3            # this many failed snapshots in a row -> no new entries until one succeeds
+DURABILITY_RETRY_S = 60.0            # start-up probe failed on a store error: retry this often
 SHUTDOWN_SLOW_TIMEOUT_S = 60.0       # at SIGTERM: research.db gets this long, else the previous copy is kept
 # (render.yaml maxShutdownDelaySeconds 120: bot stop <= 10 s + book files + this + lease release fit inside it)
 SNAPSHOT_EVERY_S = float(os.environ.get("SNAPSHOT_EVERY_S", "3600") or 3600)
@@ -107,27 +109,52 @@ def target_of(store) -> str:
     return f"{u.scheme}://{u.hostname or ''}{f':{u.port}' if u.port else ''}{u.path}"
 
 
+def _dev(path) -> int | None:
+    p = Path(path).resolve()
+    while not p.exists() and p != p.parent:
+        p = p.parent
+    try:
+        return os.stat(p).st_dev
+    except OSError:
+        return None
+
+
+def same_disk_as(root, data_dir) -> list[str]:
+    """Which of the system disk, the temp dir and DATA_DIR share the snapshot directory's device (st_dev)."""
+    dev = _dev(root)
+    refs = (("the system disk", Path(Path(root).resolve().anchor)), ("the temp dir", Path(tempfile.gettempdir())),
+            ("DATA_DIR", Path(data_dir)))
+    return [name for name, ref in refs if dev is not None and _dev(ref) == dev]
+
+
 def durability_check(store, data_dir: Path) -> dict:
     """Start-up check: is there a durable store and can it be written AND read back?"""
     import secrets
     if store is None:
         return {"durable": False, "store": "NOT CONFIGURED", "target": "-", "warning": NOT_DURABLE,
                 "reason": "SNAPSHOT_DIR / SNAPSHOT_URL not set"}
-    out = {"durable": False, "store": store.kind, "target": target_of(store)}
+    out = {"durable": False, "store": store.kind, "target": target_of(store), "transient": False}
     if store.kind == "dir":
         try:
             Path(store.root).resolve().relative_to(Path(data_dir).resolve())
             return {**out, "warning": NOT_DURABLE, "reason": "SNAPSHOT_DIR is inside DATA_DIR (same ephemeral disk)"}
         except ValueError:
             pass
+        if os.environ.get("ALLOW_LOCAL_DIR", "0") != "1":
+            same = same_disk_as(store.root, data_dir)
+            if same:
+                return {**out, "warning": NOT_DURABLE,
+                        "reason": f"SNAPSHOT_DIR is on the same disk as {', '.join(same)} (st_dev): not a separate "
+                                  "mount (ALLOW_LOCAL_DIR=1 to accept a local directory)"}
     nonce = secrets.token_hex(8).encode()
     try:
         store.put(PROBE, nonce)
         ok = store.get(PROBE) == nonce
     except Exception as e:                                  # the message may carry a URL: report the type only
-        return {**out, "warning": NOT_DURABLE, "reason": f"write test failed ({type(e).__name__})"}
+        return {**out, "warning": NOT_DURABLE, "reason": f"write test failed ({type(e).__name__})",
+                "transient": True}
     if not ok:
-        return {**out, "warning": NOT_DURABLE, "reason": "write test failed (read-back differs)"}
+        return {**out, "warning": NOT_DURABLE, "reason": "write test failed (read-back differs)", "transient": True}
     return {**out, "durable": True, "reason": "write + read-back OK"}
 
 

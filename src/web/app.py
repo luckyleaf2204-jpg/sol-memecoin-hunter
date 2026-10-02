@@ -128,6 +128,8 @@ def create_app(engine: ScannerEngine | None = None, start_scanner: bool = True,
                 state["bot"].persist()
             _save_price_history()
             man = await asyncio.to_thread(snapshot, DATA_DIR, store, git_commit(), None, slow_timeout_s)
+            state["snapshot"]["fails_in_a_row"] = 0
+            _update_entry_block()
             state["snapshot"].update(last_ts=man["ts"], last_error=None, last={
                 "reason": reason,
                 "files": {k: {"size": v["size"], "size_gz": v["size_gz"]} for k, v in man["files"].items()},
@@ -139,6 +141,8 @@ def create_app(engine: ScannerEngine | None = None, start_scanner: bool = True,
                   + ", ".join(f"{k} {v}s" for k, v in (man.get("steps") or {}).items()), flush=True)
         except Exception as e:                             # never break trading for a backup (type only: no URL)
             state["snapshot"]["last_error"] = {"ts": time.time(), "reason": reason, "error": type(e).__name__}
+            state["snapshot"]["fails_in_a_row"] = state["snapshot"].get("fails_in_a_row", 0) + 1
+            _update_entry_block()
             print(f"[snapshot] {reason} FAILED: {type(e).__name__}", flush=True)
 
     async def _snapshot_loop() -> None:
@@ -247,16 +251,45 @@ def create_app(engine: ScannerEngine | None = None, start_scanner: bool = True,
             state["role"] = "HALTED"
             return
         state["role"] = "ACTIVE"
-        _block_entries_if_not_durable()
+        _update_entry_block()
+        if state["snapshot"].get("probe_retrying"):
+            state["aux"].append(asyncio.create_task(_durability_retry_loop()))
         _start()
 
-    def _block_entries_if_not_durable() -> None:
-        """A3: without a durable store (or with a failing one) the book dies with the container — so the bot opens no
-        NEW position (exits of open ones still run; candidates are counted). ALLOW_NOT_DURABLE=1: local dev only."""
-        if not state["snapshot"].get("durable") and os.environ.get("ALLOW_NOT_DURABLE", "0") != "1":
-            state["bot"].entry_block = f"{NOT_DURABLE} ({state['snapshot'].get('reason')})"
-            print(f"[durability] NO NEW ENTRIES until a durable snapshot store is configured: "
-                  f"{state['snapshot'].get('reason')}", flush=True)
+    def _update_entry_block() -> None:
+        """A3 / C2: no NEW position while the sample is not durable — no store, a store that failed the start-up
+        probe, or SNAPSHOT_FAIL_BLOCK_N snapshots failing in a row. Lifted as soon as it is durable again. Exits of
+        open positions always run. ALLOW_NOT_DURABLE=1: local development only."""
+        from core.snapshot import SNAPSHOT_FAIL_BLOCK_N
+        bot, sn = state.get("bot"), state["snapshot"]
+        if bot is None:
+            return
+        why = None
+        if not sn.get("durable"):
+            why = f"{NOT_DURABLE} ({sn.get('reason')})"
+        elif sn.get("fails_in_a_row", 0) >= SNAPSHOT_FAIL_BLOCK_N:
+            why = f"snapshot store failing: {sn['fails_in_a_row']} snapshots in a row"
+        if os.environ.get("ALLOW_NOT_DURABLE", "0") == "1":
+            why = None
+        if why != bot.entry_block:
+            print(f"[durability] {'NO NEW ENTRIES: ' + why if why else 'new entries allowed again (durable)'}",
+                  flush=True)
+        bot.entry_block = why
+
+    async def _durability_retry_loop() -> None:
+        """The start-up probe failed on a store error: /healthz ok=false, retry until it works."""
+        from core import snapshot as snap
+        while state["snapshot"].get("probe_retrying"):
+            await asyncio.sleep(snap.DURABILITY_RETRY_S)
+            try:
+                chk = await asyncio.to_thread(snap.durability_check, state.get("snapshot_store"), DATA_DIR)
+            except Exception as e:
+                print(f"[durability] retry error: {type(e).__name__}", flush=True)
+                continue
+            state["snapshot"].update(durable=chk["durable"], reason=chk["reason"], warning=chk.get("warning"),
+                                     probe_retrying=bool(chk.get("transient")))
+            print(f"[durability] retry: {'DURABLE' if chk['durable'] else chk['reason']}", flush=True)
+            _update_entry_block()
 
     async def _standby_loop(lease) -> None:
         from core.lease import LEASE_POLL_S
@@ -315,7 +348,8 @@ def create_app(engine: ScannerEngine | None = None, start_scanner: bool = True,
             state["snapshot_store"] = store
             chk = await asyncio.to_thread(durability_check, store, DATA_DIR)
             state["snapshot"].update(store=chk["store"], durable=chk["durable"], target=chk["target"],
-                                     reason=chk["reason"], warning=chk.get("warning"))
+                                     reason=chk["reason"], warning=chk.get("warning"),
+                                     probe_retrying=bool(chk.get("transient")))
             if chk["durable"]:
                 print(f"[durability] DURABLE: {chk['store']} {chk['target']} ({chk['reason']})", flush=True)
             else:
@@ -407,6 +441,9 @@ def create_app(engine: ScannerEngine | None = None, start_scanner: bool = True,
         out = {"ok": True, "commit": git_commit(), "role": state.get("role") or "ACTIVE"}
         if state.get("lease") is not None:
             out["lease"] = state["lease"].as_dict()
+        if state["snapshot"].get("probe_retrying"):
+            out["ok"] = False                              # store unreachable at start-up: retrying
+            out["durability"] = "probe failed on a store error — retrying"
         if state.get("halted"):
             out["ok"] = False                              # a halted server is not healthy
             out["halted"] = state["halted"]

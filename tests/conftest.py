@@ -36,6 +36,14 @@ def _fast_lease(monkeypatch):
 
 
 @pytest.fixture(autouse=True)
+def _local_snapshot_dir_ok(monkeypatch):
+    """Tests use tmp directories as SNAPSHOT_DIR (same disk as the temp dir): accepted here; the st_dev rule itself
+    is tested in test_r4_durability.py with the variable removed."""
+    monkeypatch.setenv("ALLOW_LOCAL_DIR", "1")
+    yield
+
+
+@pytest.fixture(autouse=True)
 def _reset_language():
     """create_app() switches the global UI language to Vietnamese; never let that leak into the next test."""
     set_language("en")
