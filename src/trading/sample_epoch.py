@@ -13,7 +13,9 @@ import json
 import time
 from pathlib import Path
 
-STRATEGY_VERSION = "s4-148af2c"          # steps 1-4 (cost model, no-chasing gate, exit options off, journal)
+STRATEGY_VERSION = "s5-gate300-cooldown-haircut"   # fixes 1-8: gate blocks UNKNOWN / < 300 s history / falling
+# PULLBACK, 5-min cooldown after a FAILED buy, haircut for every exit without a quote, haircut in gross, failed sells
+# recorded, trading.json cannot override defaults (previous: s4-148af2c)
 MIN_SAMPLE_COMMIT = "148af2c"            # the server must run this commit or a descendant
 LEGACY = "LEGACY"
 
