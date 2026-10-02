@@ -459,15 +459,16 @@ def _log_research_db(data_dir) -> None:
 
 
 def blocks_entries(exc: BaseException) -> bool:
-    """A snapshot failure counts toward the no-new-orders rule only when a CRITICAL file (or the snapshot as a
-    whole) failed. research.db and the other non-critical files must not block entries. A snapshot that lost the
+    """A snapshot failure counts toward the no-new-orders rule unless the error names only a SLOW file
+    (research.db), which is carried instead of failing the generation. truth_ledger.json and price_history.json
+    are not carried on error, so a persistent failure of either must block new entries. A snapshot that lost the
     race to a newer one is not a store failure."""
     if isinstance(exc, StaleSnapshot):
         return False
     msg = str(exc)
     if any(name in msg for name in CRITICAL):
         return True
-    if any(name in msg for name in FILES if name not in CRITICAL):
+    if any(name in msg for name in SLOW):
         return False
     return True
 

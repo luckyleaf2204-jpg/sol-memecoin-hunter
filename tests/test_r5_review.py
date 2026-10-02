@@ -472,6 +472,45 @@ def test_research_db_carried_in_a_row_is_surfaced(tmp_path, monkeypatch, capsys)
     assert "WARNING: research.db carried" in capsys.readouterr().out
 
 
+def test_only_a_research_db_error_is_exempt_from_the_entry_block(tmp_path, monkeypatch):
+    """truth_ledger.json is not carried on error, so a persistent upload failure (the object name is in the
+    message, as with httpx or FileNotFoundError) must count. research.db must not."""
+    assert S.blocks_entries(OSError("PUT https://store/gen-1--truth_ledger.json.gz failed")) is True
+    assert S.blocks_entries(FileNotFoundError(2, "No such file", "/data/gen-0--price_history.json")) is True
+    assert S.blocks_entries(OSError("PUT https://store/gen-1--research.db.gz failed")) is False
+
+    class NamedBoom(S.LocalStore):
+        def __init__(self, root, bad):
+            super().__init__(root)
+            self.bad = bad
+
+        def put(self, name, data):
+            if self.bad in name:
+                raise OSError(f"PUT {self.root}/{name} failed")
+            super().put(name, data)
+
+    store = NamedBoom(tmp_path / "store", "truth_ledger.json")
+    _setup(tmp_path, monkeypatch, store)
+    (tmp_path / "d" / "truth_ledger.json").write_text("{}", encoding="utf-8")
+    monkeypatch.setattr(S, "SNAPSHOT_EVERY_S", 0.05)
+    monkeypatch.setattr(S, "HOURLY_SLOW_TIMEOUT_S", 0.2)
+    app = _app(tmp_path, "ledger")
+    with TestClient(app):
+        st = app.state.hunter
+        assert _wait(lambda: st["snapshot"].get("fails_in_a_row", 0) >= S.SNAPSHOT_FAIL_BLOCK_N, 3)
+        assert "snapshots in a row" in (st["bot"].entry_block or "")
+    store_db = NamedBoom(tmp_path / "store-db", "research.db")
+    monkeypatch.setattr(S, "store_from_env", lambda: store_db)
+    _research_db(tmp_path / "d")
+    app = _app(tmp_path, "db")
+    with TestClient(app):
+        st = app.state.hunter
+        assert _wait(lambda: st["snapshot"].get("last") is not None, 3)
+        time.sleep(0.3)
+        assert st["snapshot"].get("fails_in_a_row", 0) == 0
+        assert st["bot"].entry_block is None
+
+
 def test_a_failing_research_db_does_not_block_orders_a_critical_file_does(tmp_path, monkeypatch):
     store = _Boom(tmp_path / "store", "research.db")
     _setup(tmp_path, monkeypatch, store)
