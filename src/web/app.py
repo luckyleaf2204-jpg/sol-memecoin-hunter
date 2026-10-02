@@ -381,7 +381,9 @@ def create_app(engine: ScannerEngine | None = None, start_scanner: bool = True,
         if not sn["durable"]:
             out["snapshot"]["warning"] = sn.get("warning") or NOT_DURABLE
         if bot is not None:
+            from trading.strategy_constants import constants_hash
             out["params"] = bot.cfg.sample_id()
+            out["constants"] = constants_hash()
             ep = bot.sample_epoch
             out["sample_epoch"] = {"strategy_version": ep.strategy_version, "fingerprint": ep.fingerprint,
                                    "started_at_utc": ep.as_dict()["started_at_utc"]}

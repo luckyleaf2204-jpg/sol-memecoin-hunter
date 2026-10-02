@@ -10,7 +10,8 @@ from __future__ import annotations
 
 LOOKBACK_S = 600.0
 MIN_HISTORY_S = 300.0          # gate: less price history than this in the lookback -> no entry (location unreliable)
-PULLBACK_STABLE_S = 180.0      # gate: a PULLBACK / SECOND_WAVE enters only if it made no new low for this long
+PULLBACK_STABLE_S = 180.0      # gate: a PULLBACK enters only if it made no new low for this long
+SECOND_WAVE_STABLE_S = 180.0   # gate: the same for a SECOND_WAVE (G7)
 EARLY, MID, EXTENDED, PULLBACK, SECOND_WAVE, UNKNOWN = ("EARLY_ENTRY", "MID_MOVE", "EXTENDED", "PULLBACK",
                                                        "SECOND_WAVE", "UNKNOWN")
 

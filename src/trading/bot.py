@@ -717,7 +717,7 @@ class PaperBot:
         c = self.cfg
         if decision != TRADE or not c.entry_location_gate:
             return decision
-        from trading.entry_location import MIN_HISTORY_S, PULLBACK_STABLE_S
+        from trading.entry_location import MIN_HISTORY_S, PULLBACK_STABLE_S, SECOND_WAVE_STABLE_S
         loc, ext = rec.get("entry_location"), rec.get("entry_extension")
         det = rec.get("entry_location_detail") or {}
         hist, low_age = det.get("history_s"), det.get("last_low_age_s")
@@ -729,13 +729,13 @@ class PaperBot:
         if loc == "PULLBACK":                       # a pullback always has a low after the high: unknown = falling
             stable = low_age is not None and low_age >= PULLBACK_STABLE_S
         elif loc == "SECOND_WAVE":                  # G7: no new low within 180 s (None = no low below the high)
-            stable = low_age is None or low_age >= PULLBACK_STABLE_S
+            stable = low_age is None or low_age >= SECOND_WAVE_STABLE_S
         else:
             stable = True
         rec["entry_pullback_stable"] = stable if loc in ("PULLBACK", "SECOND_WAVE") else None
         if not stable:
             why.append(f"entry_location: {loc} still falling (new low {low_age if low_age is not None else '?'}s "
-                       f"ago < {PULLBACK_STABLE_S:.0f}s)")
+                       f"ago < {SECOND_WAVE_STABLE_S if loc == 'SECOND_WAVE' else PULLBACK_STABLE_S:.0f}s)")
         if ext is not None and ext > c.entry_max_extension_5m_pct:
             why.append(f"entry_location: extension_5m {ext:.0f}% > {c.entry_max_extension_5m_pct:.0f}%")
         if loc in c.entry_block_locations:

@@ -13,9 +13,10 @@ import json
 import time
 from pathlib import Path
 
-STRATEGY_VERSION = "s6-sellretry-sw180"   # G1-G8: sells retry transient quote errors (haircut only on NO_ROUTE /
-# INVALID or a HARD exit after 60 s), SECOND_WAVE blocked on a new low < 180 s, buy cooldown survives restarts,
-# price history survives a quick restart (previous: s5-gate300-cooldown-haircut, fixes 1-8)
+STRATEGY_VERSION = "s7-sellguard-budget"   # s6 self-check: a waiting exit below the stop becomes a full HARD exit,
+# a HARD signal keeps the retry start, SELL/BUY execution beside the tick (concurrent short SELL quotes), one bot
+# quote budget 50/min with SELL first. Strategy module constants: trading/strategy_constants.py (hash pinned with
+# this version). (previous: s6-sellretry-sw180, never deployed)
 MIN_SAMPLE_COMMIT = "148af2c"            # the server must run this commit or a descendant
 LEGACY = "LEGACY"
 
