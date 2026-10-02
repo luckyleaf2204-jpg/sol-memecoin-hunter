@@ -39,6 +39,7 @@ FAST_SCORE_MARGIN, FAST_CONF_MARGIN = 0.05, 0.10   # fast getAsset lane: "genuin
 QUOTE_RETRY_WINDOW_S = 60.0     # transient Jupiter failures (429 / timeout / 5xx) are retried this long
 NO_ROUTE_BLOCK_S = 120.0        # after a confirmed "no route": no re-quote of that CA for this long
 MAX_ENTRIES_PER_TICK = 2
+FAILED_BUY_COOLDOWN_S = 300.0   # after a FAILED BUY fill, no new BUY attempt on that mint for this long
 TRUTH_QUOTES_PER_MIN = 24       # V1.3 truth SELL quotes: own budget, below Jupiter's 50/min (BUY quotes first)
 
 
@@ -351,6 +352,12 @@ class PaperBot:
                 if self.cfg.lifecycle and (rec.get("engine") or "old") != self.cfg.entry_engine:
                     rec["state"] = "SHADOW_ONLY"            # step 4: one frozen entry engine; the others are logged
                     continue
+                last_fail = self.last_buy_attempt.get(st.mint)
+                if last_fail is not None and now - last_fail < FAILED_BUY_COOLDOWN_S:
+                    rec["state"] = "BUY_COOLDOWN"            # a failed fill pays fees: do not hammer the same mint
+                    rec["blocked_by"] = (rec.get("blocked_by") or []) + [
+                        f"buy_cooldown: last BUY fill FAILED {now - last_fail:.0f}s ago < {FAILED_BUY_COOLDOWN_S:.0f}s"]
+                    continue
                 if st.mint in self.intents or st.mint in self.book.positions or \
                         any(o["mint"] == st.mint for o in self.pending.values()):
                     rec["state"] = "DUPLICATE"              # in flight / awaiting approval / held: never twice,
@@ -390,6 +397,8 @@ class PaperBot:
                     entries += 1
                 else:
                     self.book.record(ex)
+                    if ex.status == "FAILED":
+                        self.last_buy_attempt[st.mint] = now
                     self.log("FAILED", f"BUY: {ex.reason}", st, now=now)
             self._set("vet", RUN if vet_items else READY,
                       f"{sum(1 for x in vet_items if all(c['result'] in ('PASS', 'N/A') for c in x['checks']))}/{len(vet_items)} passed",
@@ -460,6 +469,8 @@ class PaperBot:
             self.audit.execution("buy", st, now, f"SIMULATED (no quote {qr.status}) ${usd:,.2f}", reason="simulated_noquote")
         else:
             self.book.record(ex)
+            if ex.status == "FAILED":
+                self.last_buy_attempt[st.mint] = now
             self.log("FAILED", f"BUY → QUOTE FAILED ({qr.status}) → simulated fill failed: {ex.reason}", st, now=now)
             self.audit.execution("skip", st, now, ex.reason, reason="simulated_fill_failed")
 
@@ -1446,6 +1457,8 @@ class PaperBot:
                 self._provenance_open(st, it, qobs, m_at_quote, ex, fill, now)
             else:
                 self.book.record(ex)
+                if ex.status == "FAILED":
+                    self.last_buy_attempt[mint] = now           # cooldown: FAILED_BUY_COOLDOWN_S
                 self.log("FAILED", f"BUY → QUOTE → MATCH → PAPER FILL FAILED: {ex.reason} · Jupiter impact "
                                    f"{fill['jupiter_impact_pct']:.2f}% + simulated latency slippage "
                                    f"{fill['latency_slippage_pct']:.2f}% = {fill['total_slippage_pct']:.2f}% "
