@@ -251,6 +251,10 @@ class TruthTracker:
     old_exit: dict | None = None
     pending_mirror: tuple | None = None
     production_open: bool = True              # keep quoting while production holds: values its exit timing too
+    # V1.3 final: the official TRUTH P&L of the production trade (TruthLedger)
+    exit_events: list = field(default_factory=list)   # one per production SELL (partial or final), quoted at its size
+    ctx: dict = field(default_factory=dict)           # entry context: setup, age, liquidity, opportunity, risk, cost
+    finalized: bool = False
 
     def __post_init__(self):
         self.exit = CommonSourceExit(self.entry_fill, self.entry_ts, self.sl_pct, self.tp1_pct, self.tp1_frac,
@@ -396,3 +400,230 @@ class TruthTracker:
                 "old_exit": self.old_exit, "exit_reason_old": map_reason(self.old_exit["reason"]) if self.old_exit else None,
                 "old_fast_sl_class": self.classify_old_exit(), "pnl_common_source": self.common_source_pnl(),
                 "rejected_snapshots": self.rejected, "events": ex["events"]}
+
+
+# ====================================================================== OFFICIAL TRUTH P&L (V1.3 final validation)
+# Every production SELL (partial or final) gets its own Jupiter SELL quote for EXACTLY the tokens sold, right after
+# the exit decision. TRUTH P&L = proceeds of those executable quotes - recorded entry cost - network fees. The legacy
+# book (DexScreener marks / liquidity model) stays as a REFERENCE and is never mixed in.
+EXIT_TRUTH_MAX_LAG_S = 10.0      # an exit quote taken later than this after the exit decision is not common-source
+LATENCY_REQUOTE_S = 2.0          # measured exit latency: re-quote the same size after a 2 s landing window
+SIZE_TOL = 1e-6
+LEGACY_FAST_SL = ("INVALID: legacy fast stop losses fired on stale DexScreener prints (V1.2 / V1.3 forensics); "
+                  "not used to judge the Exit Engine")
+ACCEPT_N, ACCEPT_VALID_PCT, ACCEPT_SLOT_PCT = 30, 95.0, 95.0
+
+
+def new_exit_event(ts: float, reason: str, tokens: float, legacy_fill: float | None, legacy_source: str) -> dict:
+    return {"ts": ts, "reason": reason, "tokens": tokens, "legacy_fill": legacy_fill, "legacy_source": legacy_source,
+            "status": "PENDING", "quote_ts": None, "lag_s": None, "quoted_tokens": None, "sol_out": None,
+            "price_usd": None, "impact_pct": None, "slot": None, "route": "", "requote_status": "PENDING",
+            "requote_ts": None, "exit_latency_pct": None, "sol_price": None}
+
+
+def apply_exit_quote(ev: dict, snap: TruthPriceSnapshot, sol_price: float | None) -> None:
+    ev.update(status=snap.source_status, quote_ts=snap.timestamp, lag_s=round(snap.timestamp - ev["ts"], 2),
+              quoted_tokens=snap.position_size, sol_out=snap.sol_out, price_usd=snap.price_usd,
+              impact_pct=snap.price_impact_pct, slot=snap.context_slot, route=snap.route, sol_price=sol_price)
+    if snap.source_status != VALID:
+        ev["requote_status"] = "SKIPPED"
+
+
+def apply_requote(ev: dict, snap: TruthPriceSnapshot) -> None:
+    """Measured exit latency: executable SOL out LATENCY_REQUOTE_S later vs at the exit (positive = adverse)."""
+    ev["requote_ts"] = snap.timestamp
+    if snap.source_status == VALID and snap.sol_out and ev.get("sol_out"):
+        ev["requote_status"] = VALID
+        ev["exit_latency_pct"] = round(100 * (1 - snap.sol_out / ev["sol_out"]), 4)
+    else:
+        ev["requote_status"] = snap.source_status
+
+
+def event_valid(ev: dict) -> tuple[bool, str]:
+    if ev["status"] != VALID:
+        return False, f"exit quote {ev['status']}"
+    if ev.get("slot") is None:
+        return False, "no contextSlot"
+    if not ev.get("quoted_tokens") or abs(ev["quoted_tokens"] / ev["tokens"] - 1) > SIZE_TOL:
+        return False, "quote size != tokens sold"
+    if ev.get("lag_s") is None or ev["lag_s"] < 0 or ev["lag_s"] > EXIT_TRUTH_MAX_LAG_S:
+        return False, f"exit quote lag {ev.get('lag_s')}s"
+    if not ev.get("sol_price"):
+        return False, "no SOL price"
+    return True, ""
+
+
+def trade_record(tr: "TruthTracker", legacy: dict, network_fee_usd: float) -> dict:
+    """Official TRUTH P&L of one closed production trade + execution-cost decomposition + truth excursions.
+    Entry = the recorded paper execution (Jupiter BUY quote x latency model); exit = executable SELL quotes."""
+    c, evs = tr.ctx, tr.exit_events
+    bad = [why for ok, why in (event_valid(e) for e in evs) if not ok]
+    if tr.entry_quote_price is None:
+        bad.append("no entry quote")
+    if not evs:
+        bad.append("no exit event")
+    cost = c.get("cost_usd")
+    if not cost:
+        bad.append("no entry cost")
+    proceeds = sum(e["sol_out"] * e["sol_price"] for e in evs if e.get("sol_out") and e.get("sol_price"))
+    sold = sum(e["tokens"] for e in evs)
+    fees = network_fee_usd * len(evs)
+    valid = not bad
+    exit_px = proceeds / sold if sold and proceeds else None
+    pnl_usd = proceeds - cost - fees if valid else None
+    pnl_pct = 100 * pnl_usd / cost if valid else None
+    w = [e["tokens"] / sold for e in evs] if sold else []
+    exit_imp = sum(wi * (e.get("impact_pct") or 0) for wi, e in zip(w, evs)) if valid else None
+    lat = [(wi, e["exit_latency_pct"]) for wi, e in zip(w, evs) if e.get("exit_latency_pct") is not None]
+    exit_lat = sum(wi * x for wi, x in lat) / sum(wi for wi, _ in lat) if lat else None
+    entry_meas = c.get("entry_latency_measured_pct")
+    q2q = pct(exit_px, tr.entry_quote_price) if valid else None
+    measured = None
+    if q2q is not None and entry_meas is not None and exit_lat is not None:
+        measured = round(100 * ((1 + q2q / 100) * (1 - exit_lat / 100) / (1 + entry_meas / 100) - 1), 3)
+    last = max(e["ts"] for e in evs) if evs else None
+    marks = [s["price_usd"] for s in tr.snapshots
+             if s["source_status"] == VALID and s.get("price_usd") and (last is None or s["timestamp"] <= last)]
+    marks += [e["price_usd"] for e in evs if e["status"] == VALID and e.get("price_usd")]
+    exc = [pct(px, tr.entry_fill) for px in marks]
+    entry_lat = entry_meas if entry_meas is not None else tr.latency_model_pct
+    parts = [x for x in (tr.execution_impact_pct, entry_lat, exit_imp, exit_lat) if x is not None]
+    fee_pct = 100 * fees / cost if cost else None
+    legacy_pct = legacy.get("pnl_pct")
+    return {"trade_id": tr.trade_id, "mint": tr.mint, "symbol": tr.symbol, "label": "TRUTH_PNL",
+            "valid": valid, "invalid_reasons": bad,
+            "setup": c.get("setup"), "lifecycle": tr.lifecycle, "age_s_at_entry": c.get("age_s"),
+            "liquidity_at_entry": c.get("liquidity_usd"), "opportunity_at_entry": c.get("opportunity"),
+            "risk_at_entry": c.get("risk"), "setup_score": c.get("setup_score"),
+            "entry_ts": tr.entry_ts, "exit_ts": last, "holding_s": round(last - tr.entry_ts, 1) if last else None,
+            "exit_reason": evs[-1]["reason"] if evs else None, "exit_reasons": [e["reason"] for e in evs],
+            "entry_quote_price": tr.entry_quote_price, "entry_truth_price": tr.entry_fill, "exit_truth_price": exit_px,
+            "cost_usd": cost, "proceeds_usd": round(proceeds, 6), "network_fees_usd": round(fees, 6),
+            "truth_pnl_usd": None if pnl_usd is None else round(pnl_usd, 4),
+            "truth_pnl_pct": None if pnl_pct is None else round(pnl_pct, 3),
+            "pnl_quote_to_quote_pct": q2q, "pnl_measured_latency_pct": measured,
+            "mfe_truth": max(exc) if exc else None, "mae_truth": min(exc) if exc else None,
+            "cost": {"entry_impact_pct": tr.execution_impact_pct, "entry_latency_sim_pct": tr.latency_model_pct,
+                     "entry_latency_measured_pct": entry_meas, "exit_impact_pct": exit_imp,
+                     "exit_latency_measured_pct": None if exit_lat is None else round(exit_lat, 4),
+                     "network_fee_pct": None if fee_pct is None else round(fee_pct, 4),
+                     "pool_fees": "inside Jupiter outAmount (not separable)",
+                     "total_execution_cost_pct": round(sum(parts) + (fee_pct or 0), 4) if parts else None},
+            "legacy_pnl_pct": legacy_pct, "legacy_pnl_usd": legacy.get("pnl_usd"),
+            "legacy_exit_source": legacy.get("source"),
+            "sign_differs_from_legacy": None if pnl_pct is None or legacy_pct is None else (pnl_pct > 0) != (legacy_pct > 0),
+            "events": evs}
+
+
+def _summ(vals: list) -> dict:
+    v = sorted(x for x in vals if x is not None)
+    if not v:
+        return {"n": 0, "mean": None, "median": None}
+    mid = v[len(v) // 2] if len(v) % 2 else (v[len(v) // 2 - 1] + v[len(v) // 2]) / 2
+    return {"n": len(v), "mean": round(sum(v) / len(v), 3), "median": round(mid, 3), "p10": v[int(0.1 * (len(v) - 1))],
+            "p90": v[int(0.9 * (len(v) - 1))], "min": v[0], "max": v[-1]}
+
+
+BUCKETS = {"age_s_at_entry": ((60, "<1m"), (300, "1-5m"), (900, "5-15m"), (3600, "15-60m"), (float("inf"), ">1h")),
+           "liquidity_at_entry": ((5_000, "<5k"), (10_000, "5-10k"), (25_000, "10-25k"), (100_000, "25-100k"),
+                                  (float("inf"), ">100k")),
+           "opportunity_at_entry": ((50, "<50"), (60, "50-60"), (70, "60-70"), (80, "70-80"), (float("inf"), ">=80")),
+           "risk_at_entry": ((20, "<20"), (35, "20-35"), (45, "35-45"), (55, "45-55"), (float("inf"), ">=55"))}
+
+
+def bucket(key: str, v) -> str:
+    if v is None:
+        return "UNKNOWN"
+    for edge, name in BUCKETS.get(key, ()):
+        if v < edge:
+            return name
+    return str(v)
+
+
+def ledger_stats(trades: list[dict]) -> dict:
+    """Distribution, win rate, profit factor, expectancy, excursions, execution cost — common-source trades only."""
+    t = [x for x in trades if x["valid"]]
+    usd = [x["truth_pnl_usd"] for x in t]
+    wins, losses = [u for u in usd if u > 0], [u for u in usd if u <= 0]
+    cost = {k: _summ([x["cost"][k] for x in t]) for k in ("entry_impact_pct", "entry_latency_sim_pct",
+                                                           "entry_latency_measured_pct", "exit_impact_pct",
+                                                           "exit_latency_measured_pct", "network_fee_pct",
+                                                           "total_execution_cost_pct")}
+    out = {"n": len(t), "truth_pnl_pct": _summ([x["truth_pnl_pct"] for x in t]),
+           "truth_pnl_usd_total": round(sum(usd), 4) if usd else 0.0,
+           "win_rate_pct": round(100 * len(wins) / len(t), 1) if t else None,
+           "profit_factor": round(sum(wins) / -sum(losses), 3) if losses and sum(losses) < 0 else None,
+           "expectancy_usd": round(sum(usd) / len(t), 4) if t else None,
+           "pnl_quote_to_quote_pct": _summ([x["pnl_quote_to_quote_pct"] for x in t]),
+           "pnl_measured_latency_pct": _summ([x["pnl_measured_latency_pct"] for x in t]),
+           "mfe_truth": _summ([x["mfe_truth"] for x in t]), "mae_truth": _summ([x["mae_truth"] for x in t]),
+           "holding_s": _summ([x["holding_s"] for x in t]), "execution_cost": cost,
+           "legacy_pnl_pct_same_trades": _summ([x["legacy_pnl_pct"] for x in t]),
+           "sign_differs_from_legacy": sum(1 for x in t if x["sign_differs_from_legacy"])}
+    for key, name in (("setup", "by_setup"), ("age_s_at_entry", "by_age"), ("liquidity_at_entry", "by_liquidity"),
+                      ("opportunity_at_entry", "by_opportunity"), ("risk_at_entry", "by_risk_at_entry")):
+        groups: dict[str, list] = {}
+        for x in t:
+            g = x.get(key) if key == "setup" else bucket(key, x.get(key))
+            groups.setdefault(str(g), []).append(x)
+        out[name] = {g: {"n": len(v), "mean_pct": _summ([x["truth_pnl_pct"] for x in v])["mean"],
+                         "median_pct": _summ([x["truth_pnl_pct"] for x in v])["median"],
+                         "win_rate_pct": round(100 * sum(1 for x in v if x["truth_pnl_usd"] > 0) / len(v), 1),
+                         "sample": "INSUFFICIENT" if len(v) < ACCEPT_N else "OK"} for g, v in groups.items()}
+    return out
+
+
+class TruthLedger:
+    """Completed production trades valued on executable quotes (persisted next to the paper book)."""
+
+    def __init__(self, path=None):
+        self.path = path
+        self.trades: list[dict] = []
+        self.quotes = {"VALID": 0, "INVALID": 0, "slot": 0}
+        if path is not None:
+            try:
+                import json
+                with open(path, encoding="utf-8") as f:
+                    d = json.load(f)
+                self.trades, self.quotes = d.get("trades", []), {**self.quotes, **d.get("quotes", {})}
+            except (OSError, ValueError):
+                pass
+
+    def count_quote(self, snap: TruthPriceSnapshot) -> None:
+        ok = snap.source_status == VALID
+        self.quotes["VALID" if ok else "INVALID"] += 1
+        self.quotes["slot"] += int(ok and snap.context_slot is not None)
+
+    def add(self, rec: dict) -> None:
+        self.trades.append(rec)
+        self.save()
+
+    def save(self) -> None:
+        if self.path is None:
+            return
+        import json
+        import os
+        tmp = str(self.path) + ".tmp"
+        try:
+            with open(tmp, "w", encoding="utf-8") as f:
+                json.dump({"trades": self.trades[-5000:], "quotes": self.quotes}, f, default=str)
+            os.replace(tmp, self.path)
+        except OSError:
+            pass
+
+    def acceptance(self) -> dict:
+        q = self.quotes
+        total = q["VALID"] + q["INVALID"]
+        valid_pct = round(100 * q["VALID"] / total, 2) if total else None
+        slot_pct = round(100 * q["slot"] / q["VALID"], 2) if q["VALID"] else None
+        good = [t for t in self.trades if t["valid"]]
+        checks = {"common_source_n>=30": len(good) >= ACCEPT_N,
+                  "sell_quote_valid>=95%": valid_pct is not None and valid_pct >= ACCEPT_VALID_PCT,
+                  "context_slot>=95%": slot_pct is not None and slot_pct >= ACCEPT_SLOT_PCT,
+                  # truth P&L never reads a reference price: a sign can only come from executable quotes
+                  "no_stale_reference_sign_errors": all(t["exit_truth_price"] is not None for t in good),
+                  "pnl_from_execution_source_only": all(not t["invalid_reasons"] for t in good)}
+        return {"status": "VALIDATED" if all(checks.values()) else "NOT VALIDATED YET", "checks": checks,
+                "common_source_n": len(good), "trades_total": len(self.trades), "quotes_valid": q["VALID"],
+                "quotes_invalid": q["INVALID"], "valid_quote_pct": valid_pct, "context_slot_pct": slot_pct,
+                "legacy_fast_sl": LEGACY_FAST_SL}

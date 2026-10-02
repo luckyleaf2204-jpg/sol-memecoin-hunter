@@ -156,7 +156,7 @@ def bot_status(bot: PaperBot, engine=None, now: float | None = None) -> dict:
     return {
         "pipeline": bot.pipeline(now),
         "doing": doing, "scan": scan, "evaluated": evaluated, "exit_rules": exits, "exit_engine": engine_rows,
-        "version": "web-11",
+        "version": "web-12",
         "engine": "lifecycle" if bot.cfg.lifecycle else ("experimental" if bot.cfg.experimental else "old"),
         "lifecycle_summary": bot.lifecycle_summary(now) if hasattr(bot, "lifecycle_summary") else None,
         "price_truth": bot.truth_panel(now) if hasattr(bot, "truth_panel") else None,

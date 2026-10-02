@@ -794,8 +794,28 @@ function truthPanel(d) {
   const pc = (v) => (v === null || v === undefined ? "—" : esc((v >= 0 ? "+" : "") + Number(v).toFixed(1) + "%"));
   const open = (T.open || []).map((p) => `<tr><td>${esc(p.symbol || "")}</td><td>${px(p.entry)}</td><td>${p.ds_mark_post_entry ? px(p.ds_mark) : "—"}</td><td>${p.truth === "VALID" ? px(p.jup_sell) : "TRUTH UNKNOWN"}</td><td>${pc(p.old_pnl_pct)}</td><td>${p.truth === "VALID" ? pc(p.truth_pnl_pct) : "TRUTH UNKNOWN"}</td></tr>`).join("");
   const rec = (T.recent || []).map((r) => `<tr><td>${esc(r.symbol || "")}</td><td>${px(r.ds)}</td><td>${px(r.jup_sell)}</td><td>${px(r.entry)}</td><td>${pc(r.discrepancy_pct)}</td><td>${r.ds_age_s == null ? "—" : esc(r.ds_age_s + "s")}</td><td>${esc(r.status)} · ${esc(r.class)}</td></tr>`).join("");
-  if (!open && !rec) return "";
-  return `<div class="panel"><h3><span>PRICE TRUTH</span><span class="meta">${esc(T.label)} · ${esc(T.quotes_last_min)} SELL quotes/min</span></h3>${open ? `<div class="tblw"><table class="tbl"><thead><tr><th>OPEN</th><th>ENTRY</th><th>DS MARK</th><th>JUP SELL</th><th>OLD P&L</th><th>TRUTH P&L</th></tr></thead><tbody>${open}</tbody></table></div>` : ""}${rec ? `<div class="tblw"><table class="tbl"><thead><tr><th>TOKEN</th><th>DS</th><th>JUP SELL</th><th>ENTRY</th><th>DISCREPANCY</th><th>AGE</th><th>STATUS</th></tr></thead><tbody>${rec}</tbody></table></div>` : ""}</div>`;
+  const kpi = (k, v, cls, sub) => `<div class="kpi"><div class="k">${esc(k)}</div><div class="v ${cls || ""}">${v}</div>${sub ? `<div class="s">${esc(sub)}</div>` : ""}</div>`;
+  const S = T.status || {}, X = T.truth || {}, G = T.legacy || {};
+  const pp = (o) => (o && o.mean !== null && o.mean !== undefined ? `${pc(o.mean)} / ${pc(o.median)}` : "—");
+  const ck = Object.entries(S.checks || {}).map(([k, v]) => `${v ? "✅" : "⏳"} ${esc(k)}`).join(" · ");
+  const ec = X.execution_cost || {};
+  const status = S.status ? `<div class="panel"><h3><span>TRUTH PRICE STATUS</span><span class="meta ${S.status === "VALIDATED" ? "c-green" : "c-orange"}">${esc(S.status)}</span></h3>
+    <div class="kgrid">
+      ${kpi("Common-source", esc(S.common_source_n + " / 30"), "", esc((S.trades_total ?? 0) + " closed trades"))}
+      ${kpi("VALID quotes", esc(S.quotes_valid ?? 0), "", esc((S.valid_quote_pct ?? "—") + "% · INVALID " + (S.quotes_invalid ?? 0)))}
+      ${kpi("contextSlot", esc((S.context_slot_pct ?? "—") + "%"), "", "of VALID quotes")}
+      ${kpi("TRUTH P&L", esc(money(X.truth_pnl_usd_total ?? 0, true)), pnlCls(X.truth_pnl_usd_total ?? 0), "executable SELL quotes")}
+      ${kpi("Truth win rate", esc(X.win_rate_pct ?? "—") + (X.win_rate_pct == null ? "" : "%"), "", esc("PF " + (X.profit_factor ?? "—")))}
+      ${kpi("Truth mean / median", pp(X.truth_pnl_pct), "", "per trade")}
+      ${kpi("MFE truth", pp(X.mfe_truth), "", "mean / median")}
+      ${kpi("MAE truth", pp(X.mae_truth), "", "mean / median")}
+      ${kpi("Execution cost", pp(ec.total_execution_cost_pct), "", "impact + latency (measured) + fees")}
+    </div>
+    <div class="meta">${ck}</div>
+    <div class="meta"><b>LEGACY / REFERENCE (not truth):</b> net ${esc(money(G.net_pnl ?? 0, true))} · ${esc(G.closed ?? 0)} trades · win ${esc(G.win_rate ?? "—")}% · same trades mean ${pc(G.same_trades_mean_pct)} · sign differs from truth ${esc(G.sign_differs_from_truth ?? 0)}</div>
+    <div class="meta">Legacy fast-SL: ${esc(S.legacy_fast_sl || "")}</div></div>` : "";
+  if (!open && !rec) return status;
+  return status + `<div class="panel"><h3><span>PRICE TRUTH</span><span class="meta">${esc(T.label)} · ${esc(T.quotes_last_min)} SELL quotes/min</span></h3>${open ? `<div class="tblw"><table class="tbl"><thead><tr><th>OPEN</th><th>ENTRY</th><th>DS MARK</th><th>JUP SELL</th><th>OLD P&L</th><th>TRUTH P&L</th></tr></thead><tbody>${open}</tbody></table></div>` : ""}${rec ? `<div class="tblw"><table class="tbl"><thead><tr><th>TOKEN</th><th>DS</th><th>JUP SELL</th><th>ENTRY</th><th>DISCREPANCY</th><th>AGE</th><th>STATUS</th></tr></thead><tbody>${rec}</tbody></table></div>` : ""}</div>`;
 }
 
 function shadowLine(x) {
@@ -907,7 +927,7 @@ async function renderBot(silent) {
     <div class="kgrid">
       ${kpi(t("web.bot.running"), d.live ? "RUNNING" : "STOPPED", d.live ? "c-green" : "c-red", esc(d.ticks + " ticks"))}
       ${kpi(t("web.bot.balance"), esc(money(s.equity)), "", esc(t("web.bot.from", { v: money(s.starting) })))}
-      ${kpi("NET P&L", esc(money(s.net_pnl, true)), pnlCls(s.net_pnl), s.net_pnl_pct === null ? "" : esc((s.net_pnl_pct > 0 ? "+" : "") + s.net_pnl_pct + "% · " + t("web.bot.today") + " " + money(s.today_pnl, true)))}
+      ${kpi("LEGACY P&L (ref)", esc(money(s.net_pnl, true)), pnlCls(s.net_pnl), s.net_pnl_pct === null ? "" : esc((s.net_pnl_pct > 0 ? "+" : "") + s.net_pnl_pct + "% · " + t("web.bot.today") + " " + money(s.today_pnl, true)))}
       ${kpi("Drawdown", esc(s.max_drawdown_pct + "%"), s.max_drawdown_pct >= L.max_drawdown_pct * 0.5 ? "c-orange" : "", "max " + esc(L.max_drawdown_pct + "%"))}
       ${kpi("Win rate", s.win_rate === null ? "—" : esc(s.win_rate + "%"), "", esc(s.wins + "W / " + s.losses + "L"))}
       ${kpi(t("web.bot.open"), esc(s.open + " / " + L.max_open_positions), "", esc(t("web.bot.exposure")) + " " + esc(money(s.exposure)))}

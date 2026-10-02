@@ -44,7 +44,7 @@ AUTH_WINDOW_S, AUTH_MAX_FAILS = 600, 10
 REFRESH_PER_MINT_S, REFRESH_GLOBAL_PER_MIN = 60, 10
 MAX_WATCH = 30
 LIST_KINDS = ("top", "new", "early", "whales", "dev", "social")
-VERSION = "web-11"
+VERSION = "web-12"
 HOME_LIMIT = {"opportunity": 60, "watch": 60, "nodata": 40, "excluded": 40}
 
 

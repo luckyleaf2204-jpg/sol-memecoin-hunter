@@ -84,6 +84,8 @@ class PaperBot:
         self.cs_shadow: dict[str, object] = {}  # V1.3 TRUTH trackers (trading.truth_price.TruthTracker), per trade
         self.truth_quotes: deque = deque(maxlen=200)   # timestamps of truth SELL quotes (own budget)
         self.truth_skipped_budget = 0
+        from trading.truth_price import TruthLedger
+        self.truth_ledger = TruthLedger(Path(state_path).with_name("truth_ledger.json") if state_path else None)
         self._last_cs = 0.0
         self._mf_sticky: dict[str, float] = {}
         self._last_onchain = 0.0
@@ -668,9 +670,19 @@ class PaperBot:
                           c.max_hold_min * 60, pair=(m.pair_address or "") if m else "", dex=(m.dex_id or "") if m else "",
                           entry_quote_price=qobs.get("price"), execution_impact_pct=ex.price_impact_pct,
                           latency_model_pct=ex.slippage_pct)
+        rec = self.decisions.get(st.mint) or {}
+        created = st.info.created_at or (m.pair_created_at if m else None)
+        probe = getattr(self, "_last_probe", None)
+        drift_ok = probe is not None and probe.get("mint") == st.mint and now - probe.get("quote_ts", 0) <= 15
+        cs.ctx = {"setup": "/".join(x for x in (it.get("lifecycle"), rec.get("setup_type")) if x) or None,
+                  "setup_score": rec.get("setup_score"), "age_s": round(now - created) if created else None,
+                  "liquidity_usd": m.liquidity_usd if m else None, "opportunity": rec.get("opportunity"),
+                  "risk": st.risk.score if st.risk else None, "cost_usd": p.cost_usd,
+                  # measured entry latency: Jupiter re-quote of the same BUY after the landing window (bps -> %)
+                  "entry_latency_measured_pct": round(probe["drift_bps"] / 100, 4) if drift_ok else None}
         self.cs_shadow[st.mint] = cs
         if len(self.cs_shadow) > 50:
-            for k in [k for k, t in self.cs_shadow.items() if not t.due(time.time())][:10]:
+            for k in [k for k, t in self.cs_shadow.items() if not t.due(time.time()) and t.finalized][:10]:
                 self.cs_shadow.pop(k, None)
 
     def _provenance_tick(self, states: dict, now: float) -> None:
@@ -699,10 +711,13 @@ class PaperBot:
         from trading.price_provenance import sell_quote_obs
         from trading.truth_price import compare_sources, curve_spot, snapshot_from_quote
         now = now or time.time()
-        if self.jupiter is None or self.intents or not hasattr(self.jupiter, "quote_result"):
+        if self.jupiter is None or not hasattr(self.jupiter, "quote_result"):
             return 0
-        n = 0
         states = {x.mint: x for x in (self.engine.published or [])}
+        n = await self._truth_exit_quotes(states, now)
+        self._truth_finalize(now)
+        if self.intents:
+            return n
         for mint, tr in list(self.cs_shadow.items()):
             if not tr.due(now):
                 continue
@@ -727,6 +742,7 @@ class PaperBot:
             n += 1
             snap = snapshot_from_quote(r, mint=mint, tokens=size, sol_price=self._sol(), t_req=t_req, t_resp=t_resp)
             snap.timestamp = max(snap.timestamp, now)        # bot clock (tests drive `now`)
+            self.truth_ledger.count_quote(snap)
             rec = self.decisions.get(mint) or {}
             snap.lifecycle = rec.get("lifecycle_name") or tr.lifecycle
             if st is not None and st.market is not None:
@@ -759,6 +775,57 @@ class PaperBot:
                 self._rec("price_provenance", mint, pv)
             self._truth_trade_rec(tr, now)
         return n
+
+    async def _sell_quote_snap(self, mint: str, tokens: float, dec: int, now: float):
+        from trading.jupiter import WSOL
+        from trading.truth_price import snapshot_from_quote
+        t_req = time.time()
+        r = await self.jupiter.quote_result(mint, WSOL, int(tokens * 10 ** dec), int(self.cfg.max_slippage_pct * 100))
+        t_resp = time.time()
+        self.truth_quotes.append(now)
+        snap = snapshot_from_quote(r, mint=mint, tokens=tokens, sol_price=self._sol(), t_req=t_req, t_resp=t_resp)
+        snap.timestamp = max(snap.timestamp, now)
+        self.truth_ledger.count_quote(snap)
+        return snap
+
+    async def _truth_exit_quotes(self, states: dict, now: float) -> int:
+        """OFFICIAL TRUTH P&L inputs: every production SELL gets a Jupiter SELL quote for EXACTLY the tokens sold as
+        soon as possible (priority over BUY intents and the periodic budget), then a same-size re-quote after
+        LATENCY_REQUOTE_S = measured exit latency. Quotes only; nothing is sent."""
+        from trading.truth_price import LATENCY_REQUOTE_S, apply_exit_quote, apply_requote
+        n = 0
+        for mint, tr in list(self.cs_shadow.items()):
+            st = states.get(mint)
+            dec = (st.info.decimals if st else None) or 6
+            for ev in tr.exit_events:
+                if ev["status"] == "PENDING":
+                    snap = await self._sell_quote_snap(mint, ev["tokens"], dec, now)
+                    apply_exit_quote(ev, snap, self._sol())
+                    n += 1
+                elif ev["requote_status"] == "PENDING" and now - (ev["quote_ts"] or now) >= LATENCY_REQUOTE_S:
+                    apply_requote(ev, await self._sell_quote_snap(mint, ev["tokens"], dec, now))
+                    n += 1
+        return n
+
+    def _truth_finalize(self, now: float) -> None:
+        """Closed production trade + every exit quoted (and re-quoted) -> one TRUTH P&L record in the ledger."""
+        from trading.truth_price import trade_record
+        for mint, tr in list(self.cs_shadow.items()):
+            if tr.finalized or tr.production_open or not tr.exit_events:
+                continue
+            if any(e["status"] == "PENDING" or e["requote_status"] == "PENDING" for e in tr.exit_events):
+                continue
+            o = tr.old_exit or {}
+            cost = tr.ctx.get("cost_usd")
+            legacy = {"pnl_pct": o.get("pnl_pct"), "source": o.get("fill_source"),
+                      "pnl_usd": None if o.get("pnl_pct") is None or not cost else round(cost * o["pnl_pct"] / 100, 4)}
+            rec = trade_record(tr, legacy, self.exec.network_fee(self._sol()))
+            tr.finalized = True
+            self.truth_ledger.add(rec)
+            self._rec("truth_ledger_trade", rec)
+            self.log("INFO", f"TRUTH P&L {rec['symbol']}: {rec['truth_pnl_pct']}% (legacy {rec['legacy_pnl_pct']}%) · "
+                             f"{'common-source' if rec['valid'] else 'INVALID: ' + '; '.join(rec['invalid_reasons'])}",
+                     None, now=now)
 
     def _truth_trade_rec(self, tr, now: float) -> None:
         """trade_price_truth (+ truth_exit_shadow once production closed). DS-only P&L = the production rules on
@@ -826,7 +893,18 @@ class PaperBot:
                                "entry": tr.entry_fill, "discrepancy_pct": x["ds_vs_truth_pct"], "ds_age_s": x["ds_age_s"],
                                "status": x["source_status"], "class": x["ds_class"], "confidence": x["confidence"]})
         recent.sort(key=lambda r: -r["ts"])
-        return {"open": opened, "recent": recent[:15], "label": "TRUTH_PNL_CANDIDATE (shadow, not validated)",
+        from trading.truth_price import ledger_stats
+        led = self.truth_ledger
+        st_ = ledger_stats(led.trades)
+        book = self.book.stats(now)
+        return {"status": led.acceptance(), "truth": st_,
+                "legacy": {"label": "LEGACY / REFERENCE (DexScreener marks + liquidity model) — not truth",
+                           "net_pnl": book.get("net_pnl"), "closed": book.get("closed"), "win_rate": book.get("win_rate"),
+                           "same_trades_mean_pct": st_["legacy_pnl_pct_same_trades"]["mean"],
+                           "sign_differs_from_truth": st_["sign_differs_from_legacy"]},
+                "last_trades": [{k: t.get(k) for k in ("symbol", "valid", "truth_pnl_pct", "legacy_pnl_pct", "exit_reason",
+                                                       "holding_s", "mfe_truth", "mae_truth")} for t in led.trades[-8:]][::-1],
+                "open": opened, "recent": recent[:15], "label": "TRUTH_PNL (executable SELL quotes)",
                 "quotes_last_min": sum(1 for t in self.truth_quotes if now - t <= 60),
                 "skipped_budget": self.truth_skipped_budget}
 
@@ -1022,6 +1100,13 @@ class PaperBot:
 
     def _after_sell(self, p, st, ex, reason: str, frac: float, now: float) -> None:
         self.book.reduce(p, ex, now, reason)
+        tr = self.cs_shadow.get(p.mint)
+        if tr is not None and ex.status == "FILLED" and ex.tokens:
+            from trading.truth_price import new_exit_event
+            tr.exit_events.append(new_exit_event(
+                now, reason, ex.tokens, ex.fill_price,
+                "jupiter_sell_quote" if (getattr(ex, "model", "") or "").startswith("PAPER on a real Jupiter")
+                else "liquidity_model_at_dexscreener_mark"))
         fx = self.forensics.get(p.mint)
         if fx is not None and st is not None and fx["exit"] is None:
             fx["exit"] = {"reason": reason, **self._risk_snap(st, "EXIT", now - fx["entry_ts"], fx["snaps"][0],
@@ -1291,7 +1376,7 @@ class PaperBot:
                 if self.recorder is not None and time.time() - self._last_followup >= 30:
                     self._last_followup = time.time()
                     await self.recorder.run_followups()
-                if self.cs_shadow and time.time() - self._last_cs >= 2.5:
+                if self.cs_shadow and time.time() - self._last_cs >= 1.0:
                     self._last_cs = time.time()
                     try:
                         await self.common_source_round(time.time())

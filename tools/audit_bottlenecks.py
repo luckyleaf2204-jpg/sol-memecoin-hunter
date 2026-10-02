@@ -880,6 +880,10 @@ def report(bot, eng, shocks, es_pass, liq_blocked, best, promo=None, cand_first=
     out["v11"] = v11_section(bot, paths)
     out["v12"] = v12_section(bot)
     out["v13"] = v13_section(bot)
+    from trading.truth_price import ledger_stats
+    out["truth_ledger"] = {"acceptance": bot.truth_ledger.acceptance(), "stats": ledger_stats(bot.truth_ledger.trades),
+                           "trades": bot.truth_ledger.trades,
+                           "pending_trackers": sum(1 for t in bot.cs_shadow.values() if not t.finalized)}
     rugs = []
     for k, c in cand_first.items():
         f = fwd(paths.get(k), c["ts"], c["price"])
