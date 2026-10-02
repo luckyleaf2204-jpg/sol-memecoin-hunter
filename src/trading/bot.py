@@ -74,6 +74,8 @@ class PaperBot:
         self.last_buy_attempt: dict[str, float] = {}
         self.quote_block: dict[str, float] = {}  # mint -> until: Jupiter confirmed NO route (no re-quote spam)
         self.quote_stats: dict[str, int] = {}    # Jupiter BUY-quote outcomes by status
+        from trading.sample_epoch import SampleEpoch
+        self.sample_epoch = SampleEpoch(Path(state_path).with_name("sample_epoch.json") if state_path else None)
         from trading.audit import RunAudit
         self.audit = RunAudit(Path(state_path).with_name("bot_audit.json") if state_path else None)
         self.recorder = None                   # research.dataset.DatasetRecorder (read-only research log)
@@ -623,6 +625,7 @@ class PaperBot:
         if p is not None:
             p.entry_engine = (self.decisions.get(mint) or {}).get("engine") or "old"
             p.sample_id = self.cfg.sample_id()
+            p.sample_epoch = self.sample_epoch.id if self.sample_epoch.started_at else ""
             p.entry_lifecycle, p.entry_setup, p.entry_setup_score = it.get("lifecycle"), it.get("setup_type"), it.get("setup_score")
 
     def _history(self, mint: str):
@@ -1427,6 +1430,16 @@ class PaperBot:
                 self.audit.execution("skip", st, now, ex.reason, reason="paper_fill_failed")
         self.persist()
 
+    def begin_sample(self, now: float | None = None) -> dict:
+        """Start / resume the sample epoch for the running code + parameters (call once the config is final)."""
+        from core.version import git_commit
+        new = self.sample_epoch.start(self.cfg.sample_id(), git_commit(), now)
+        d = self.sample_epoch.as_dict()
+        self.log("INFO", f"SAMPLE {'NEW EPOCH' if new else 'epoch resumed'}: commit {d['commit'][:7]} · params "
+                         f"{d['fingerprint']} · strategy {d['strategy_version']} · counting trades opened since "
+                         f"{d['started_at_utc']}")
+        return d
+
     def set_mode(self, mode: str, confirm: str = "") -> None:
         """PAPER = automatic paper fills · CONFIRM = the same decisions wait for the owner's approval, then fill
         through the installed executor (paper in this build) · AUTO = automatic LIVE execution: refused, because
@@ -1444,6 +1457,8 @@ class PaperBot:
 
     async def run(self, stop: asyncio.Event | None = None) -> None:
         self._stop = stop or asyncio.Event()
+        if self.sample_epoch.started_at is None:
+            self.begin_sample()
         while not self._stop.is_set():
             try:
                 self.tick()

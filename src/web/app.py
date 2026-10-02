@@ -121,6 +121,9 @@ def create_app(engine: ScannerEngine | None = None, start_scanner: bool = True,
                 if os.environ.get("RESEARCH_ONCHAIN", "1") != "0":                  # shadow anti-rug data (budgeted)
                     from research.onchain import OnchainResearch
                     state["bot"].onchain = OnchainResearch(state["engine"].rpc, state["bot"].recorder)
+            ep = state["bot"].begin_sample()
+            print(f"[startup] commit {ep['commit']} · params {ep['fingerprint']} · strategy {ep['strategy_version']} "
+                  f"· sample epoch since {ep['started_at_utc']}", flush=True)
             state["task"] = asyncio.create_task(state["engine"].run())
             state["bot_stop"] = asyncio.Event()
             state["bot_task"] = asyncio.create_task(state["bot"].run(state["bot_stop"]))
@@ -162,7 +165,16 @@ def create_app(engine: ScannerEngine | None = None, start_scanner: bool = True,
     # ------------------------------------------------------------------ public (no data)
     @app.get("/healthz")
     async def healthz():
-        return {"ok": True}
+        """Public liveness + which code and parameters are running (no secret, no paper data)."""
+        from core.version import git_commit
+        bot = state.get("bot")
+        out = {"ok": True, "commit": git_commit()}
+        if bot is not None:
+            out["params"] = bot.cfg.sample_id()
+            ep = bot.sample_epoch
+            out["sample_epoch"] = {"strategy_version": ep.strategy_version, "fingerprint": ep.fingerprint,
+                                   "started_at_utc": ep.as_dict()["started_at_utc"]}
+        return out
 
     # ------------------------------------------------------------------ API
     @app.get("/api/auth")

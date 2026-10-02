@@ -41,7 +41,12 @@ H = {"X-Access-Code": CODE}
 def test_healthz_public_and_minimal(env):
     c, _, _ = env
     r = c.get("/healthz")
-    assert r.status_code == 200 and r.json() == {"ok": True}
+    d = r.json()
+    # public: liveness + running code / parameter fingerprint only — no secret, no paper data
+    assert r.status_code == 200 and d["ok"] is True and set(d) <= {"ok", "commit", "params", "sample_epoch"}
+    assert isinstance(d["commit"], str) and d["commit"]
+    text = r.text.lower()
+    assert all(w not in text for w in ("api-key", "helius", "balance", "equity", "position", "access"))
 
 
 def test_api_requires_code(env):

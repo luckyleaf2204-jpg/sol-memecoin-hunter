@@ -124,6 +124,7 @@ class Position:
     runner_active: bool = False            # step 3: TP2 runner armed
     entry_engine: str = ""                 # step 4: engine that gave the BUY signal (lifecycle / experimental / old)
     sample_id: str = ""                    # step 4: TradingConfig.sample_id() when opened
+    sample_epoch: str = ""                 # SampleEpoch.id when opened ("" = no epoch -> LEGACY)
     exit_mid_value: float = 0.0            # sum(tokens sold x mid at that sell)
 
     @property
