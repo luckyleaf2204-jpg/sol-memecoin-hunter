@@ -180,3 +180,57 @@ def test_after_restore_open_positions_are_re_evaluated_and_the_downtime_is_a_gap
     assert b2.sell_intents[MINT]["reason"] == "stop_loss"
     r = b2.sample_report(now + 2)
     assert r["gaps"]["count"] >= 1
+
+
+# ---------------------------------------------------------------- B7: transient vs lost, renew during restore, fencing
+def test_missing_or_corrupt_lease_is_rewritten_not_lost(tmp_path):
+    store, clk = S.LocalStore(tmp_path / "store"), Clock()
+    a = L.Lease(store, "A", clock=clk, settle_s=0)
+    assert a.acquire()
+    (tmp_path / "store" / L.LEASE).unlink()                           # 404
+    assert a.renew() and a.held() and "rewritten" in a.status
+    store.put(L.LEASE, b"{broken")                                    # unreadable JSON
+    assert a.renew() and a.held()
+    store.put(L.LEASE, json.dumps({"owner": "B", "acquired_at": 1, "renewed_at": 1, "expires_at": clk.t + 99,
+                                   "released": False}).encode())
+    assert not a.renew() and a.status == "LOST to B"                  # only another holder means lost
+
+
+def test_store_errors_are_transient_until_the_ttl_then_self_fence(tmp_path, monkeypatch, two_instances):
+    from test_r3_robust import Flaky
+    d = tmp_path / "d"
+    d.mkdir()
+    monkeypatch.setattr(webapp, "DATA_DIR", d)
+    store = Flaky(two_instances)
+    monkeypatch.setattr(S, "store_from_env", lambda: store)
+    monkeypatch.setattr(L, "LEASE_RENEW_S", 0.05)
+    monkeypatch.setattr(L, "LEASE_TTL_S", 0.6)
+    app = _app(tmp_path, "a")
+    with TestClient(app):
+        st = app.state.hunter
+        assert st["role"] == "ACTIVE"
+        store.fail = True                                             # 5xx / timeouts on the lease
+        time.sleep(0.3)
+        assert st["role"] == "ACTIVE" and not st.get("halted")        # transient: keeps trading
+        assert _wait(lambda: st.get("role") == "FENCED")              # > TTL without a renew: self-fence
+        assert st["bot_stop"].is_set() and "self-fenced" in st["halted"]
+
+
+def test_lease_is_renewed_during_a_slow_restore(tmp_path, monkeypatch, two_instances):
+    d = tmp_path / "d"
+    d.mkdir()
+    monkeypatch.setattr(webapp, "DATA_DIR", d)
+    monkeypatch.setattr(L, "LEASE_RENEW_S", 0.05)
+    orig = S.restore
+    renewals = []
+
+    def slow_restore(data_dir, store):
+        t0 = json.loads(S.LocalStore(two_instances).get(L.LEASE))["renewed_at"]
+        time.sleep(0.4)                                               # a big research.db download
+        renewals.append(json.loads(S.LocalStore(two_instances).get(L.LEASE))["renewed_at"] - t0)
+        return orig(data_dir, store)
+    monkeypatch.setattr(S, "restore", slow_restore)
+    app = _app(tmp_path, "a")
+    with TestClient(app):
+        assert app.state.hunter["role"] == "ACTIVE"
+    assert renewals and renewals[0] > 0

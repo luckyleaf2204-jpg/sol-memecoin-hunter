@@ -42,6 +42,7 @@ class Lease:
         self.store, self.owner, self.ttl, self.settle_s = store, owner or instance_id(), ttl, settle_s
         self.clock, self.sleep = clock, sleep
         self.status = "NOT ACQUIRED"
+        self.last_ok: float | None = None             # last successful acquire / renew (self-fencing clock)
 
     def read(self) -> dict | None:
         raw = self.store.get(LEASE)
@@ -73,6 +74,8 @@ class Lease:
             self.sleep(settle)                      # another instance writing now overwrites us: back off
         mine = (self.read() or {}).get("owner") == self.owner
         self.status = "HELD" if mine else "STANDBY: lost the acquire race"
+        if mine:
+            self.last_ok = self.clock()
         return mine
 
     def held(self) -> bool:
@@ -80,12 +83,22 @@ class Lease:
         return bool(d) and d["owner"] == self.owner and not d.get("released") and d["expires_at"] > self.clock()
 
     def renew(self) -> bool:
+        """True = still ours (renewed). False ONLY when another instance holds it (or we released it): that is the
+        one case to stop. A missing (404) or unreadable lease is rewritten as ours (nobody else holds a valid one);
+        a store error RAISES — the caller treats it as transient and self-fences after the TTL (see app)."""
         d = self.read()
-        if not d or d["owner"] != self.owner or d.get("released"):
-            self.status = f"LOST to {(d or {}).get('owner', 'nobody')}"
+        if d is not None and (d["owner"] != self.owner or d.get("released")):
+            self.status = f"LOST to {d['owner']}" if d["owner"] != self.owner else "LOST (released)"
             return False
-        self._write(self.clock(), d.get("acquired_at", self.clock()))
+        now = self.clock()
+        self._write(now, (d or {}).get("acquired_at", now))
+        self.status = "HELD" if d is not None else "HELD (lease object was missing / unreadable: rewritten)"
+        self.last_ok = now
         return True
+
+    def fenced(self, ttl: float | None = None) -> bool:
+        """No successful renew for longer than the TTL: another instance may legitimately hold the lease now."""
+        return self.last_ok is not None and self.clock() - self.last_ok > (ttl or self.ttl)
 
     def release(self) -> None:
         d = self.read()

@@ -210,8 +210,6 @@ def create_app(engine: ScannerEngine | None = None, start_scanner: bool = True,
             state["aux"].append(asyncio.create_task(_snapshot_loop()))
         else:
             state["aux"].append(asyncio.create_task(_not_durable_loop()))
-        if state.get("lease") is not None:
-            state["aux"].append(asyncio.create_task(_lease_loop(state["lease"])))
         from web.keepalive import keepalive_url, keepalive_loop
         ka = keepalive_url()
         if ka:
@@ -222,6 +220,9 @@ def create_app(engine: ScannerEngine | None = None, start_scanner: bool = True,
     async def _activate() -> None:
         """Lease held (or no store): restore, build the real bot, start. Halted: nothing runs."""
         store = state.get("snapshot_store")
+        if state.get("lease") is not None:             # renew from now on, also DURING a long restore
+            state["lease_task"] = asyncio.create_task(_lease_loop(state["lease"]))
+            state["aux"].append(state["lease_task"])
         if store is not None:
             await _restore(store)
         _ensure_engine()
@@ -237,6 +238,8 @@ def create_app(engine: ScannerEngine | None = None, start_scanner: bool = True,
         if halted:
             print(f"[HALT] {halted}. Fix the snapshot store, then restart. Scanner, bot and snapshots are NOT "
                   "started (a snapshot now would overwrite the good one).", flush=True)
+            if state.get("lease_task") is not None:
+                state["lease_task"].cancel()
             if state.get("lease") is not None:
                 await asyncio.to_thread(state["lease"].release)       # a halted instance never writes anything
             state["role"] = "HALTED"
@@ -267,23 +270,30 @@ def create_app(engine: ScannerEngine | None = None, start_scanner: bool = True,
                 await _activate()
                 return
 
+    def _fence(why: str, role: str) -> None:
+        state["halted"] = why
+        state["snapshot"]["halted"] = why
+        state["role"] = role
+        if state.get("bot_stop") is not None:
+            state["bot_stop"].set()
+        print(f"[lease] {role}: {why}. Bot and snapshots stopped on this instance.", flush=True)
+
     async def _lease_loop(lease) -> None:
-        from core.lease import LEASE_RENEW_S
+        from core import lease as L
         while True:
-            await asyncio.sleep(LEASE_RENEW_S)
+            await asyncio.sleep(L.LEASE_RENEW_S)
             try:
                 ok = await asyncio.to_thread(lease.renew)
-            except Exception as e:                     # store unreachable: the lease simply ages; try again
+            except Exception as e:                     # store unreachable: transient, unless it lasts beyond the TTL
                 print(f"[lease] renew failed: {type(e).__name__}", flush=True)
+                if lease.fenced(L.LEASE_TTL_S):
+                    _fence(f"lease not renewed for > {L.LEASE_TTL_S:.0f}s (store errors): self-fenced — another "
+                           "instance may hold it now", "FENCED")
+                    return
                 continue
             if not ok:
-                state["halted"] = f"lease lost ({lease.status}): another instance is active — this one stopped " \
-                                  "trading and snapshots"
-                state["snapshot"]["halted"] = state["halted"]
-                state["role"] = "LEASE LOST"
-                if state.get("bot_stop") is not None:
-                    state["bot_stop"].set()
-                print(f"[lease] LOST: {lease.status}. Bot and snapshots stopped on this instance.", flush=True)
+                _fence(f"lease lost ({lease.status}): another instance is active — this one stopped trading and "
+                       "snapshots", "LEASE LOST")
                 return
 
     async def _not_durable_loop() -> None:
