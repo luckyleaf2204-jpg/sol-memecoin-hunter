@@ -13,9 +13,9 @@ import json
 import time
 from pathlib import Path
 
-STRATEGY_VERSION = "s8-protective-exits"   # B4: break-even and trailing stops are protective (filled on a bad
-# route, haircut after the retry window, SL-gap scenario); a waiting exit through the stop escalates even when the route
-# impact is above max. (previous: s7-sellguard-budget, never deployed)
+STRATEGY_VERSION = "s9-stale-timeout"   # B6: a position without a validated price for STALE_TIMEOUT_S (600 s) is
+# closed ("stale_timeout", protective: Jupiter quote, else haircut); a protective exit of a token that left the feed is
+# closed at the haircut instead of being dropped. (previous: s8-protective-exits, never deployed)
 MIN_SAMPLE_COMMIT = "148af2c"            # the server must run this commit or a descendant
 LEGACY = "LEGACY"
 

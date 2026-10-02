@@ -57,3 +57,55 @@ def test_escalated_reasons_count_in_the_sl_gap_scenario():
     r = report(rows, e)
     assert r["sl_gap_scenario"]["hard_exits"] == 2 and r["sl_gap_scenario"]["stop_exits"] == 1
     assert r["reference_only"]["sl_exits"] == 1
+
+
+# ---------------------------------------------------------------- B6: stale positions are closed and counted
+import trading.bot as B  # noqa: E402
+
+
+def _stale(b, st, p, minutes):
+    """No validated price since `minutes` (the print stays older than the fill)."""
+    p.last_price_ts = time.time() - minutes * 60
+    st.stamps["market"].updated_at = p.opened_at - 100
+    st.market.updated_at = p.opened_at - 100
+
+
+def test_stale_position_is_force_closed_after_10_min_with_quote_or_haircut():
+    b, st, p = opened()
+    b.jupiter = SellScript([J.NO_ROUTE], p.entry_price)
+    _stale(b, st, p, 9)
+    b.tick()
+    assert MINT not in b.sell_intents                                          # 9 min: still waiting
+    _stale(b, st, p, B.STALE_TIMEOUT_S / 60 + 1)
+    b.tick()
+    it = b.sell_intents[MINT]
+    assert it["reason"] == "stale_timeout" and it["hard"] and it["mark"] == p.last_price
+    asyncio.run(b.execute_sells())
+    j = b.book.journal[-1]
+    assert MINT not in b.book.positions and j["exit_reason"] == "stale_timeout" and j["haircut"]
+    assert j["net_pnl_pct"] < -25                                              # the haircut is in the P&L
+
+
+def test_stale_token_gone_from_the_feed_is_closed_at_the_haircut():
+    b, st, p = opened()
+    b.jupiter = SellScript([J.OK], p.entry_price)
+    p.last_price_ts = time.time() - B.STALE_TIMEOUT_S - 60
+    b.engine.published = []                                                    # the token left the feed
+    b.tick()
+    j = b.book.journal[-1]
+    assert MINT not in b.book.positions and j["exit_reason"] == "stale_timeout" and j["haircut"]
+
+
+def test_protective_intent_of_a_vanished_token_is_not_dropped():
+    b, st, p = opened()
+    b.jupiter = SellScript([J.TIMEOUT], p.entry_price * 0.8)
+    _signal(b, st, p, 0.8)
+    b.engine.published = []
+    asyncio.run(b.execute_sells())
+    assert MINT not in b.book.positions and b.book.journal[-1]["exit_reason"] == "stop_loss"
+
+
+def test_stale_timeout_counts_in_the_report():
+    e = epoch()
+    r = report([row(e, -30.0, "stale_timeout"), row(e, 10.0, "take_profit_1")], e)
+    assert r["n"] == 2 and r["sl_gap_scenario"]["hard_exits"] == 1

@@ -42,6 +42,7 @@ GATE_EVAL_EVERY_S = 600.0       # blocked vs entered vs baseline (research.db) r
 SELL_QUOTE_ATTEMPTS, SELL_QUOTE_BUDGET_S = 2, 4.0   # one SELL quote call is short: the bot-level retry does the rest
 NO_ROUTE_BLOCK_S = 120.0        # after a confirmed "no route": no re-quote of that CA for this long
 MAX_ENTRIES_PER_TICK = 2
+STALE_TIMEOUT_S = 600.0         # no validated price for this long -> forced exit "stale_timeout" (P&L counted)
 FAILED_BUY_COOLDOWN_S = 300.0   # after a FAILED BUY fill, no new BUY attempt on that mint for this long
 TRUTH_QUOTES_PER_MIN = 24       # V1.3 truth SELL quotes: own budget, below Jupiter's 50/min (BUY quotes first)
 
@@ -223,6 +224,12 @@ class PaperBot:
                     self._path_marks(p, price, now)
                 sig = apply_exit_options(p, exit_signal(p, st, price, self.cfg, now, p.entry_liq, p.entry_vol),
                                          price, self.cfg, now)       # A/B variants (off by default)
+                if price is None and now - (p.last_price_ts or p.opened_at) >= STALE_TIMEOUT_S and p.last_price:
+                    sig = (1.0, "stale_timeout")         # B6: never keep an unpriceable position out of the P&L
+                    if st is None:                       # token gone from the feed: nothing to quote with
+                        self.sell_intents.pop(p.mint, None)
+                        self._close_without_state(p, "stale_timeout", now)
+                        continue
                 if not sig:
                     continue
                 frac, reason = sig
@@ -1230,6 +1237,17 @@ class PaperBot:
         if p.sl_hit_ts is None and price <= p.initial_stop:
             p.sl_hit_ts = now
 
+    def _close_without_state(self, p, reason: str, now: float, frac: float = 1.0) -> None:
+        """Protective / stale exit of a token the feed no longer publishes: no quote is possible, so the haircut at the
+        last validated mark (counted in the P&L like every haircut exit)."""
+        from types import SimpleNamespace
+        st0 = SimpleNamespace(mint=p.mint, info=SimpleNamespace(symbol=p.symbol, decimals=None), market=None)
+        ex = self.exec.sell_haircut(st0, p.tokens * frac, p.last_price or p.entry_price, self._sol(), reason,
+                                    self.cfg.hard_exit_no_quote_haircut_pct / 100, now)
+        ex.reason = (ex.reason + " · " if ex.reason else "") + "token no longer in the feed"
+        self.log("RISK", f"{p.symbol}: {reason} without market state → haircut at the last mark", None, now=now)
+        self._after_sell(p, None, ex, reason, frac, now)
+
     def _after_sell(self, p, st, ex, reason: str, frac: float, now: float) -> None:
         self.book.reduce(p, ex, now, reason)
         self.book.heartbeat = max(self.book.heartbeat or 0.0, now)   # alive at the sell: gaps start after it
@@ -1307,8 +1325,13 @@ class PaperBot:
             if now < it.get("next", 0.0) and not expired:
                 continue                                # backing off after a transient quote error
             p, st = self.book.positions.get(mint), states.get(mint)
-            if p is None or st is None:
+            if p is None:
                 self.sell_intents.pop(mint, None)
+                continue
+            if st is None:                              # the token left the feed
+                self.sell_intents.pop(mint, None)
+                if it.get("hard"):                      # a protective exit is never dropped: haircut at the mark
+                    self._close_without_state(p, it["reason"], now, it.get("frac", 1.0))
                 continue
             due.append((mint, it, p, st, p.tokens))
         sol = self._sol()

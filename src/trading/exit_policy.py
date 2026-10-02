@@ -8,7 +8,7 @@ from __future__ import annotations
 
 from trading.exits import HARD
 
-PROTECTIVE = tuple(HARD) + ("break_even_stop", "trailing_stop")
+PROTECTIVE = tuple(HARD) + ("break_even_stop", "trailing_stop", "stale_timeout")
 STOPS = ("stop_loss", "break_even_stop", "trailing_stop")
 
 
