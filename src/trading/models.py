@@ -120,6 +120,8 @@ class Position:
     entry_setup_score: float | None = None
     # cost-free price move (step 1: P&L at fixed round-trip costs): mid prices backed out of every fill
     entry_mid: float | None = None
+    high_ts: float | None = None           # last time the observed price made a new high (step 3 time stop)
+    runner_active: bool = False            # step 3: TP2 runner armed
     exit_mid_value: float = 0.0            # sum(tokens sold x mid at that sell)
 
     @property

@@ -310,8 +310,10 @@ def trade_blockers(st: TokenState, v: Vet, sc: Score, cfg: TradingConfig) -> lis
 def size(st: TokenState, sc: Score, cfg: TradingConfig, equity: float, cash: float, exposure: float) -> Size:
     reasons = []
     risk_usd = equity * cfg.risk_per_trade_pct / 100
-    usd = risk_usd / (cfg.stop_loss_pct / 100)
-    reasons.append(f"risk {cfg.risk_per_trade_pct}% of ${equity:,.0f} / stop {cfg.stop_loss_pct:.0f}% = ${usd:,.0f}")
+    from trading.exit_options import stop_pct
+    stop = stop_pct(cfg)                       # wide_stop_pct (A/B) or stop_loss_pct: risk at the stop stays fixed
+    usd = risk_usd / (stop / 100)
+    reasons.append(f"risk {cfg.risk_per_trade_pct}% of ${equity:,.0f} / stop {stop:.0f}% = ${usd:,.0f}")
     q = 0.5 + 0.5 * max(0.0, min(1.0, ((sc.opportunity or 0) - cfg.trade_min_opportunity) / max(1, 100 - cfg.trade_min_opportunity)))
     usd *= q * (sc.confidence / 100)
     reasons.append(f"× opportunity factor {q:.2f} × confidence {sc.confidence}%")

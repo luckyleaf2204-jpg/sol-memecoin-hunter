@@ -15,6 +15,7 @@ import time
 from dataclasses import asdict
 from pathlib import Path
 
+from trading.exit_options import stop_pct
 from trading.models import Execution, Position
 
 
@@ -115,7 +116,7 @@ class PaperBook:
         self.record(ex)
         p = Position(id=self.next_id, mint=ex.mint, symbol=ex.symbol, opened_at=now, entry_price=ex.fill_price,
                      tokens=ex.tokens, cost_usd=ex.usd_in + ex.network_fee_usd, initial_tokens=ex.tokens,
-                     stop_price=ex.fill_price * (1 - cfg.stop_loss_pct / 100),
+                     stop_price=ex.fill_price * (1 - stop_pct(cfg) / 100),
                      tp1_price=ex.fill_price * (1 + cfg.tp1_pct / 100), tp2_price=ex.fill_price * (1 + cfg.tp2_pct / 100),
                      trailing_pct=cfg.trailing_pct, high_price=ex.fill_price, last_price=ex.fill_price, last_price_ts=now,
                      fees_usd=ex.fee_usd + ex.network_fee_usd,

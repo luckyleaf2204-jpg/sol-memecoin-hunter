@@ -19,6 +19,7 @@ from trading import lifecycle_decision as LD
 from trading.book import PaperBook
 from trading.config import ModeNotAllowed, PAPER, TradingConfig
 from trading.execution import PaperExecutor
+from trading.exit_options import apply_exit_options, on_filled_sell, stop_pct
 from trading.exits import HARD, exit_signal
 from trading.models import BLOCKED, ERROR, PENDING_IDENTITY, READY, RUN, TRADE, WATCH, Activity, ModuleState
 from trading.risk import RiskEngine
@@ -30,7 +31,8 @@ EXIT_WHY = {"stop_loss": "price hit the stop loss", "break_even_stop": "fell bac
             "whale_dump": "whales distributing", "risk_spike": "Risk > 60 or a rug flag",
             "identity_conflict": "token identity conflict", "holder_anomaly": "holder data anomaly",
             "momentum_deterioration": "momentum reversed (DISTRIBUTION / DECLINING)",
-            "volume_collapse": "volume collapsed below entry", "max_hold_time": "max holding time"}
+            "volume_collapse": "volume collapsed below entry", "max_hold_time": "max holding time",
+            "runner_trailing_stop": "TP2 runner left on its trailing stop", "time_stop": "no new high (time stop)"}
 TICK_S = 5.0
 LAT_P90_MIN, LAT_P75_MIN = 50, 100        # AUTO latency model: samples needed for EMPIRICAL P90 / P75
 FAST_SCORE_MARGIN, FAST_CONF_MARGIN = 0.05, 0.10   # fast getAsset lane: "genuinely near a NEW BUY"
@@ -195,9 +197,12 @@ class PaperBot:
                 p.stale = price is None
                 if price is not None:
                     p.last_price, p.last_price_ts = price, now
+                    if price > p.high_price:
+                        p.high_ts = now                  # step 3 time stop: last new high
                     p.high_price = max(p.high_price, price)
                     self._path_marks(p, price, now)
-                sig = exit_signal(p, st, price, self.cfg, now, p.entry_liq, p.entry_vol)
+                sig = apply_exit_options(p, exit_signal(p, st, price, self.cfg, now, p.entry_liq, p.entry_vol),
+                                         price, self.cfg, now)       # A/B variants (off by default)
                 if not sig:
                     continue
                 frac, reason = sig
@@ -712,7 +717,7 @@ class PaperBot:
         c = self.cfg
         m = st.market
         cs = TruthTracker(f"{p.id}:{st.mint}", st.mint, st.info.symbol, it.get("lifecycle"), ex.fill_price, now,
-                          p.initial_tokens, c.stop_loss_pct, c.tp1_pct, c.tp1_sell_frac, c.tp2_pct, c.trailing_pct,
+                          p.initial_tokens, stop_pct(c), c.tp1_pct, c.tp1_sell_frac, c.tp2_pct, c.trailing_pct,
                           c.max_hold_min * 60, pair=(m.pair_address or "") if m else "", dex=(m.dex_id or "") if m else "",
                           entry_quote_price=qobs.get("price"), execution_impact_pct=ex.price_impact_pct,
                           latency_model_pct=ex.slippage_pct)
@@ -883,7 +888,7 @@ class PaperBot:
         pnl_ds = None
         dm = (pv.get("quote_market") or {}).get("price")
         if dm:
-            mc = CommonSourceExit(dm, tr.entry_ts, c.stop_loss_pct, c.tp1_pct, c.tp1_sell_frac, c.tp2_pct,
+            mc = CommonSourceExit(dm, tr.entry_ts, stop_pct(c), c.tp1_pct, c.tp1_sell_frac, c.tp2_pct,
                                   c.trailing_pct, c.max_hold_min * 60)
             for mk in pv.get("marks") or []:
                 if mk.get("price") and mk.get("post_entry"):
@@ -1178,6 +1183,7 @@ class PaperBot:
                 self._truth_trade_rec(cs, now)
             self._rec("price_provenance", p.mint, pv)
         if ex.status == "FILLED":
+            on_filled_sell(p, reason, self.cfg)
             if reason == "take_profit_1":
                 p.tp1_done = True
                 p.stop_price = max(p.stop_price, p.entry_price)      # break-even

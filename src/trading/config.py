@@ -43,6 +43,11 @@ class TradingConfig:
     tp2_pct: float = 80.0
     trailing_pct: float = 15.0               # armed after TP1
     max_hold_min: float = 120.0
+    # EXIT variants for A/B (step 3, trading/exit_options.py) — all OFF by default
+    wide_stop_pct: float | None = None       # e.g. 20-25: stop at this % instead of stop_loss_pct; sizing follows it
+    tp2_runner_frac: float = 0.0             # e.g. 0.25: keep this fraction as a runner at TP2 (break-even stop)
+    runner_trailing_pct: float | None = None # runner's trailing stop (None = trailing_pct)
+    time_stop_min: float | None = None       # e.g. 20-30: exit when no new high for this many minutes
     cooldown_min: float = 30.0               # no re-entry on the same CA after an exit
     # EXECUTION model
     seed: int = 7

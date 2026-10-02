@@ -141,7 +141,7 @@ def bot_status(bot: PaperBot, engine=None, now: float | None = None) -> dict:
     c = bot.cfg
     exits = [{"key": "take_profit", "value": f"+{c.tp1_pct:.0f}% (bán {100 * c.tp1_sell_frac:.0f}%) · +{c.tp2_pct:.0f}% (bán hết)"},
              {"key": "trailing", "value": f"-{c.trailing_pct:.0f}% từ đỉnh sau TP1"},
-             {"key": "stop_loss", "value": f"-{c.stop_loss_pct:.0f}% (sau TP1: hoà vốn)"},
+             {"key": "stop_loss", "value": f"-{(c.wide_stop_pct or c.stop_loss_pct):.0f}% (sau TP1: hoà vốn)"},
              {"key": "liquidity", "value": "liquidity < 60% lúc vào / SHOCK"},
              {"key": "momentum", "value": "DISTRIBUTION / DECLINING · volume sụp"},
              {"key": "risk", "value": "Risk > 60 · cờ rug · cá voi xả · identity conflict"},
