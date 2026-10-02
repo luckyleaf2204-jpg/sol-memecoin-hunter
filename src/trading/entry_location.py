@@ -9,6 +9,8 @@ Classes: EARLY_ENTRY · MID_MOVE · EXTENDED · PULLBACK · SECOND_WAVE (post-mi
 from __future__ import annotations
 
 LOOKBACK_S = 600.0
+MIN_HISTORY_S = 300.0          # gate: less price history than this in the lookback -> no entry (location unreliable)
+PULLBACK_STABLE_S = 180.0      # gate: a PULLBACK enters only if it made no new low for this long
 EARLY, MID, EXTENDED, PULLBACK, SECOND_WAVE, UNKNOWN = ("EARLY_ENTRY", "MID_MOVE", "EXTENDED", "PULLBACK",
                                                        "SECOND_WAVE", "UNKNOWN")
 
@@ -26,7 +28,9 @@ def entry_location(points: list, now: float, post_state: str | None = None, buye
     pts = sorted(p for p in points if p[1] and now - LOOKBACK_S <= p[0] <= now)
     out = {"entry_location": UNKNOWN, "dist_from_low_pct": None, "dist_from_high_pct": None, "extension_5m_pct": None,
            "pullback_depth_pct": None, "volume_retention": None, "liquidity_retention": None, "acceleration": None,
-           "buyer_retention": buyer_acceleration}
+           "buyer_retention": buyer_acceleration,
+           "history_s": round(now - min(seen), 1) if (seen := [p[0] for p in points if p[1] and p[0] <= now]) else 0.0,
+           "last_low_age_s": None}                 # history_s: price history of this pair up to now (any age)
     if post_state == "SECOND_WAVE_READY":
         out["entry_location"] = SECOND_WAVE
     if len(pts) < 3 or pts[-1][0] - pts[0][0] < 60:
@@ -41,6 +45,8 @@ def entry_location(points: list, now: float, post_state: str | None = None, buye
         out["extension_5m_pct"] = round(100 * (cur[1] / p5[1] - 1), 2)
     after = pts[i_high:]
     out["pullback_depth_pct"] = round(100 * (1 - min(p[1] for p in after) / high), 2)
+    low_after = min(after, key=lambda p: (p[1], -p[0]))           # latest point at the lowest price after the high
+    out["last_low_age_s"] = round(now - low_after[0], 1)
     vols = [p[2] for p in pts if p[2] is not None]
     if vols and cur[2] is not None and max(vols):
         out["volume_retention"] = round(cur[2] / max(vols), 3)

@@ -46,6 +46,7 @@ def test_momentum_weighs_less_in_opportunity(good_state):
 
 # ---------------------------------------------------------------- gate unit
 def gate(rec, **cfg):
+    rec.setdefault("entry_location_detail", {"history_s": 400.0, "last_low_age_s": 300.0})
     b = bot([post_tok()], **cfg)
     st = b.engine.published[0]
     return b._entry_location_gate(st, rec, TRADE, 0.0), rec
@@ -53,13 +54,26 @@ def gate(rec, **cfg):
 
 @pytest.mark.parametrize("loc, ext, blocked", [("EXTENDED", 10.0, True), ("MID_MOVE", 5.0, True),
                                                ("EARLY_ENTRY", 41.0, True), ("PULLBACK", 12.0, False),
-                                               ("SECOND_WAVE", None, False), ("UNKNOWN", None, False),
+                                               ("SECOND_WAVE", None, False), ("UNKNOWN", None, True),
                                                ("EARLY_ENTRY", 40.0, False)])
 def test_gate_rules(loc, ext, blocked):
     d, rec = gate({"entry_location": loc, "entry_extension": ext})
     assert (d == WATCH) is blocked
     if blocked:
         assert rec["entry_gate_blocked"] and any(r.startswith("entry_location") for r in rec["blocked_by"])
+
+
+def test_gate_needs_300s_of_history_and_a_stable_pullback():
+    d, rec = gate({"entry_location": "EARLY_ENTRY", "entry_extension": 5.0,
+                   "entry_location_detail": {"history_s": 120.0, "last_low_age_s": None}})
+    assert d == WATCH and any("history 120s < 300s" in r for r in rec["blocked_by"])
+    d, rec = gate({"entry_location": "PULLBACK", "entry_extension": -10.0,
+                   "entry_location_detail": {"history_s": 900.0, "last_low_age_s": 60.0}})
+    assert d == WATCH and any("PULLBACK still falling" in r for r in rec["blocked_by"])
+    assert rec["entry_pullback_stable"] is False
+    d, rec = gate({"entry_location": "PULLBACK", "entry_extension": -10.0,
+                   "entry_location_detail": {"history_s": 900.0, "last_low_age_s": 200.0}})
+    assert d == TRADE and rec["entry_pullback_stable"] is True
 
 
 def test_gate_off_and_non_trade_untouched():
@@ -73,7 +87,7 @@ def _fake_location(name, ext):
     def f(points, now, post_state=None, buyer_acceleration=None):
         return {"entry_location": name, "extension_5m_pct": ext, "dist_from_low_pct": None, "dist_from_high_pct": None,
                 "pullback_depth_pct": None, "volume_retention": None, "liquidity_retention": None,
-                "acceleration": None, "buyer_retention": None}
+                "acceleration": None, "buyer_retention": None, "history_s": 900.0, "last_low_age_s": 600.0}
     return f
 
 
@@ -101,6 +115,19 @@ def test_preferred_locations_take_the_entry_slot_first(monkeypatch):
     b = bot([a, c], ScriptedJupiter([J.OK]))
     b.cfg.experimental, b.cfg.lifecycle = True, True
     b.engine.history = Store({a.mint: history(SECOND_WAVE), c.mint: history(SECOND_WAVE)})
-    b.decisions[c.mint] = {"entry_location": "PULLBACK"}        # last known location of C
+    b.decisions[c.mint] = {"entry_location": "PULLBACK", "entry_pullback_stable": True}   # last known: C stable
     b.tick()
     assert list(b.intents) == [c.mint]
+
+
+def test_falling_pullback_gets_no_slot_priority(monkeypatch):
+    monkeypatch.setattr(EL, "entry_location", _fake_location("EARLY_ENTRY", 5.0))
+    monkeypatch.setattr(B, "MAX_ENTRIES_PER_TICK", 1)
+    a, c = post_tok(), post_tok()
+    a.info.mint, c.info.mint = "A" * 43, "C" * 43
+    b = bot([a, c], ScriptedJupiter([J.OK]))
+    b.cfg.experimental, b.cfg.lifecycle = True, True
+    b.engine.history = Store({a.mint: history(SECOND_WAVE), c.mint: history(SECOND_WAVE)})
+    b.decisions[c.mint] = {"entry_location": "PULLBACK", "entry_pullback_stable": False}  # C still falling
+    b.tick()
+    assert list(b.intents) == [a.mint]

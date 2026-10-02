@@ -257,8 +257,11 @@ class PaperBot:
         if self.cfg.lifecycle and self.cfg.entry_location_gate:
             # step 2: PULLBACK / SECOND_WAVE (last known location) take the limited entry slots first
             pref = set(self.cfg.entry_prefer_locations)
-            cands = sorted(cands, key=lambda c: 0 if (self.decisions.get(c[0].mint) or {}).get("entry_location") in pref
-                           else 1)
+            def prio(c):
+                r = self.decisions.get(c[0].mint) or {}
+                ok = r.get("entry_location") in pref and r.get("entry_pullback_stable") is not False
+                return 0 if ok else 1                   # a PULLBACK that is still falling gets no priority
+            cands = sorted(cands, key=prio)
         try:
             for st, reasons in cands:
                 v = D.vet(st, self.cfg, now)
@@ -685,8 +688,20 @@ class PaperBot:
         c = self.cfg
         if decision != TRADE or not c.entry_location_gate:
             return decision
+        from trading.entry_location import MIN_HISTORY_S, PULLBACK_STABLE_S
         loc, ext = rec.get("entry_location"), rec.get("entry_extension")
+        det = rec.get("entry_location_detail") or {}
+        hist, low_age = det.get("history_s"), det.get("last_low_age_s")
         why = []
+        if loc in (None, "UNKNOWN"):
+            why.append("entry_location: UNKNOWN")
+        if hist is None or hist < MIN_HISTORY_S:
+            why.append(f"entry_location: history {hist or 0:.0f}s < {MIN_HISTORY_S:.0f}s")
+        stable = loc != "PULLBACK" or (low_age is not None and low_age >= PULLBACK_STABLE_S)
+        rec["entry_pullback_stable"] = stable if loc == "PULLBACK" else None
+        if not stable:
+            why.append(f"entry_location: PULLBACK still falling (new low {low_age if low_age is not None else '?'}s "
+                       f"ago < {PULLBACK_STABLE_S:.0f}s)")
         if ext is not None and ext > c.entry_max_extension_5m_pct:
             why.append(f"entry_location: extension_5m {ext:.0f}% > {c.entry_max_extension_5m_pct:.0f}%")
         if loc in c.entry_block_locations:
