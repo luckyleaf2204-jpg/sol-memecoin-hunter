@@ -444,7 +444,15 @@ def create_app(engine: ScannerEngine | None = None, start_scanner: bool = True,
         rep = b.sample_report()
         from trading.sample_report import summary_line
         rep["summary_line"] = summary_line(rep)
-        return build(b.book.journal, rep, _snapshot_view())
+        import json
+
+        from trading.review_bundle import check_no_secrets
+        out = build(b.book.journal, rep, _snapshot_view())
+        try:
+            check_no_secrets(json.dumps(out, default=str))
+        except ValueError as e:                            # never hand out anything credential-like
+            return JSONResponse({"error": str(e)}, status_code=500)
+        return out
 
     def _snapshot_view() -> dict:
         sn = state["snapshot"]

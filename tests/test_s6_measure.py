@@ -137,3 +137,46 @@ def test_export_tool_offline(tmp_path):
                         "--out", str(out)], capture_output=True, text=True, encoding="utf-8")
     assert r.returncode == 0, r.stderr
     assert "NONE found" in out.read_text(encoding="utf-8")
+
+
+# ---------------------------------------------------------------- B10: wider credential check
+@pytest.mark.parametrize("text", [
+    "https://h/x?token=abcd1234efgh", "key=abcdef123456", "secret: hunter2hunter2", "client_secret=xyzxyzxyz",
+    "...&sig=0a1b2c3d4e5f", "X-Amz-Signature=deadbeefcafe", "X-Amz-Credential=AKIAEXAMPLE/2026",
+    "SNAPSHOT_TOKEN=s3cr3t-v4lue", "snapshot_url: https://worker.example/hunter", "Authorization: Bearer abcdefghijk",
+    "Bearer abcdefghijklmnop", "api-key=0123456789abcdef",
+    "5" + "K" * 87,                                                      # a base58 private key shape
+])
+def test_credential_like_strings_are_refused(text):
+    with pytest.raises(ValueError):
+        RB.check_no_secrets(f"some text {text} more")
+
+
+@pytest.mark.parametrize("text", [
+    "api-key=REDACTED", "token=***", "key=<your key>", "secret=REDACTED", "SNAPSHOT_TOKEN=xxxx",
+    "Bearer REDACTED", "So11111111111111111111111111111111111111112",   # a mint (44 base58) is fine
+    "unique tokens with a TRADE decision", "keys: 5",
+])
+def test_redacted_or_harmless_strings_pass(text):
+    RB.check_no_secrets(f"some text {text} more")
+
+
+def test_env_values_are_refused_and_the_store_target_is_not_in_the_bundle(monkeypatch):
+    monkeypatch.setenv("SNAPSHOT_URL", "https://worker.example.dev/hunter")
+    e = epoch()
+    rep = report([], e)
+    b = RB.build([], rep, {"store": "http", "target": "https://worker.example.dev/hunter", "durable": True})
+    assert b["snapshot"]["target"] == "configured"
+    RB.to_markdown(b)                                                    # passes: the URL is not in it
+    with pytest.raises(ValueError, match="SNAPSHOT_URL"):
+        RB.check_no_secrets("store at https://worker.example.dev/hunter")
+
+
+def test_endpoint_refuses_a_bundle_with_a_credential(monkeypatch):
+    import web.app as webapp
+    b, _, _ = opened()
+    b.book.journal.append({"trade_id": "t", "symbol": "token=abcd1234efgh"})       # something leaked into data
+    app = webapp.create_app(engine=b.engine, start_scanner=False, access_code="c0de", bot=b)
+    with TestClient(app) as c:
+        r = c.get("/api/review_bundle", headers={"X-Access-Code": "c0de"})
+        assert r.status_code == 500 and "refused" in r.json()["error"] and "abcd1234efgh" not in r.text

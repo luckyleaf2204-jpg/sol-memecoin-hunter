@@ -12,9 +12,18 @@ TRADE_FIELDS = ("trade_id", "symbol", "engine", "sample_id", "epoch", "lifecycle
                 "extension_5m_pct", "entry_ts", "exit_ts", "holding_s", "entry_price", "exit_reason", "mfe_pct",
                 "mae_pct", "gross_move_pct", "net_pnl_pct", "net_pnl_usd", "real_cost_pct", "fixed_fee_pct", "haircut",
                 "n_tx", "size_usd")
-SECRET_ENV = ("HELIUS_API_KEY", "SNAPSHOT_TOKEN", "APP_ACCESS_CODE", "TELEGRAM_BOT_TOKEN", "REVIEW_ACCESS_CODE",
-              "SOLANA_RPC_URL")
-SECRET_RE = re.compile(r"(api-key=|api_key=|bearer\s+[a-z0-9]|x-access-code|authorization:)", re.I)
+SECRET_ENV = ("HELIUS_API_KEY", "SNAPSHOT_TOKEN", "SNAPSHOT_URL", "APP_ACCESS_CODE", "TELEGRAM_BOT_TOKEN",
+              "REVIEW_ACCESS_CODE", "SOLANA_RPC_URL")
+_REDACTED = r"(?!REDACTED|redacted|\*{3,}|<[^>]*>|x{3,}|X{3,})"
+SECRET_RES = (
+    # key = value / key: value with a real value (REDACTED, ***, <placeholder> are fine)
+    re.compile(r"(?i)\b(api[-_]?key|access[-_]?code|client[-_]?secret|secret|token|key|sig|signature|password|passwd|"
+               r"x-amz-signature|x-amz-credential|x-amz-security-token|snapshot_url|snapshot_token)"
+               r"\s*[=:]\s*['\"]?" + _REDACTED + r"[^\s&'\"<>,;)]{3,}"),
+    re.compile(r"(?i)\bbearer\s+" + _REDACTED + r"[a-z0-9._~+/-]{8,}"),
+    re.compile(r"(?i)x-access-code|authorization\s*:"),
+    re.compile(r"\b[1-9A-HJ-NP-Za-km-z]{60,}\b"),            # base58 run longer than a mint (44): key-like
+)
 
 
 def build(journal: list[dict], report: dict, snapshot: dict | None = None, now: float | None = None,
@@ -27,12 +36,21 @@ def build(journal: list[dict], report: dict, snapshot: dict | None = None, now: 
             "summary_line": report.get("summary_line"), "conclusion": report.get("conclusion"),
             "report": {k: v for k, v in report.items() if k not in ("summary_line",)},
             "last_trades": [{k: r.get(k) for k in TRADE_FIELDS} for r in trades[-50:]],
-            "snapshot": snapshot or {"status": "unknown (offline bundle)"}}
+            "snapshot": _safe_snapshot(snapshot) if snapshot else {"status": "unknown (offline bundle)"}}
+
+
+def _safe_snapshot(sn: dict) -> dict:
+    """Durability status without WHERE the store is (the target URL is configuration, not review material)."""
+    out = {k: v for k, v in sn.items() if k not in ("target",)}
+    if "target" in sn:
+        out["target"] = "configured" if sn["target"] not in (None, "-") else "-"
+    return out
 
 
 def check_no_secrets(text: str) -> None:
-    if SECRET_RE.search(text):
-        raise ValueError("review bundle refused: it contains a credential-like string")
+    for rx in SECRET_RES:
+        if rx.search(text):
+            raise ValueError("review bundle refused: it contains a credential-like string")
     for k in SECRET_ENV:
         v = os.environ.get(k, "")
         if len(v) >= 6 and v in text:
@@ -51,7 +69,7 @@ def to_markdown(b: dict) -> str:
     r = b["report"]
     L = ["# Review bundle — SOL Memecoin Hunter (PAPER only)", "",
          f"Generated {time.strftime('%Y-%m-%d %H:%M UTC', time.gmtime(b['generated_at']))}. No wallet, no signing, "
-         "no real transaction. No secret in this file.", "", f"Source: **{b.get('source', '-')}**", ""]
+         "no real transaction. No credentials in this file.", "", f"Source: **{b.get('source', '-')}**", ""]
     c = b.get("conclusion") or {}
     L += [f"**Kết luận:** {c.get('text', '-')}", ""]
     for w in c.get("why") or []:

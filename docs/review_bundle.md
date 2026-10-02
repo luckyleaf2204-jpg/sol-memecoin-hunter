@@ -1,6 +1,6 @@
 # Review bundle — SOL Memecoin Hunter (PAPER only)
 
-Generated 2026-10-02 08:51 UTC. No wallet, no signing, no real transaction. No secret in this file.
+Generated 2026-10-02 10:14 UTC. No wallet, no signing, no real transaction. No credentials in this file.
 
 Source: **local files in data/ — NONE found: the paper sample lives on the server; the owner runs this tool with --url to export it**
 
