@@ -20,7 +20,9 @@ import json
 import os
 import sqlite3
 import tempfile
+import threading
 import time
+import weakref
 from pathlib import Path
 
 FILES = ("paper_bot.json", "sample_epoch.json", "holdout_lock.json", "trading.json", "truth_ledger.json",
@@ -183,6 +185,39 @@ class SnapshotError(RuntimeError):
     pass
 
 
+class StaleSnapshot(SnapshotError):
+    """A newer snapshot has claimed the store. Writes from this one must not land."""
+
+
+# One snapshot() at a time. Shutdown waits only within its deadline, then refuses to race.
+_SNAP_LOCK = threading.Lock()
+# Held across a manifest put (check + write) so a late put cannot replace a newer manifest.
+# File uploads only take it for the epoch check: a slow research.db must not block the switch.
+_PUT_LOCK = threading.Lock()
+_EPOCH = 0
+_CLAIMED: weakref.WeakKeyDictionary = weakref.WeakKeyDictionary()
+
+
+def _current(epoch: int) -> None:
+    if epoch != _EPOCH:
+        raise StaleSnapshot("stale snapshot write skipped (a newer snapshot is in progress)")
+
+
+def _put_file(store, name: str, data: bytes, epoch: int) -> None:
+    """File objects are named by generation, and a later snapshot claims a higher generation, so this put does not
+    hold the lock across the upload (a slow research.db must not block the manifest switch)."""
+    with _PUT_LOCK:
+        _current(epoch)
+    store.put(name, data)
+
+
+def _put_manifest(store, name: str, data: bytes, epoch: int) -> None:
+    """The check and the manifest write share the lock, so a late put cannot land after a newer manifest."""
+    with _PUT_LOCK:
+        _current(epoch)
+        store.put(name, data)
+
+
 def _obj(slot: int, name: str) -> str:
     return f"gen-{slot}--{name}.gz"                  # flat object names (no "/"): any simple key-value store works
 
@@ -237,11 +272,12 @@ def _protected(store, slot: int) -> set[str]:
     return refs
 
 
-def _put_verified(store, slot: int, name: str, raw: bytes, gen: int, protected: set[str] = frozenset()) -> dict:
+def _put_verified(store, slot: int, name: str, raw: bytes, gen: int, protected: set[str] = frozenset(),
+                  epoch: int = 0) -> dict:
     gz = gzip.compress(raw, 6)
     sha = hashlib.sha256(raw).hexdigest()
     obj = _free_obj(slot, name, protected)
-    store.put(obj, gz)
+    _put_file(store, obj, gz, epoch)
     back = store.get(obj)
     if back is None or hashlib.sha256(gzip.decompress(back)).hexdigest() != sha:
         raise SnapshotError(f"verify failed for {name}: manifest not switched (generation {gen} discarded)")
@@ -282,11 +318,36 @@ def snapshot(data_dir: Path, store, commit: str = "", now: float | None = None,
     The manifest is not switched when the budget runs out, so a late critical file cannot publish a mixed generation.
     With slow_timeout_s set (hourly and shutdown), an error is carried only for a SLOW file (research.db). Any other
     file that errors fails the snapshot, so a stale truth_ledger.json or price_history.json is never published next
-    to a new book and epoch."""
+    to a new book and epoch.
+    Overlapping calls (an hourly snapshot still running when shutdown starts one) take one lock. The later call
+    waits only within its deadline, then gives up rather than racing. Each put is tied to an epoch, so a write
+    that was already in flight cannot replace a newer manifest."""
+    global _EPOCH
     t0 = time.time()
     now = now or t0
     _log_research_db(data_dir)
     end = None if deadline_s is None else t0 + max(float(deadline_s), 0.0)
+    wait = None if end is None else max(0.0, end - time.time())
+    if not _SNAP_LOCK.acquire(timeout=-1 if wait is None else wait):
+        raise SnapshotError(f"deadline: another snapshot still running after {deadline_s}s — "
+                            f"this one will not overwrite it")
+    try:
+        put_wait = None if end is None else max(0.0, end - time.time())
+        if not _PUT_LOCK.acquire(timeout=-1 if put_wait is None else put_wait):
+            raise SnapshotError(f"deadline: another snapshot is still publishing after {deadline_s}s — "
+                                f"this one will not overwrite it")
+        try:
+            _EPOCH += 1
+            epoch = _EPOCH
+        finally:
+            _PUT_LOCK.release()
+        return _snapshot_locked(data_dir, store, commit, now, slow_timeout_s, deadline_s, t0, end, epoch)
+    finally:
+        _SNAP_LOCK.release()
+
+
+def _snapshot_locked(data_dir, store, commit: str, now: float, slow_timeout_s: float | None,
+                     deadline_s: float | None, t0: float, end: float | None, epoch: int) -> dict:
 
     def _run(fn, cap: float | None = None, grace: float = 0.0):
         """Run fn within the time still left in the deadline (and within cap, when given).
@@ -319,6 +380,12 @@ def snapshot(data_dir: Path, store, commit: str = "", now: float | None = None,
 
         gens.extend(_run(_older_gens))
         gen = max(gens) + 1
+        with _PUT_LOCK:
+            _current(epoch)                    # a newer snapshot claimed the store while we were reading
+            claimed = _CLAIMED.get(store, 0)   # the previous attempt may not have published, but its uploads can still finish
+            if gen <= claimed:
+                gen = claimed + 1
+            _CLAIMED[store] = gen
         slot = gen % GENERATIONS
         protected = _run(lambda: _protected(store, slot))
     except TimeoutError:
@@ -337,8 +404,10 @@ def snapshot(data_dir: Path, store, commit: str = "", now: float | None = None,
                 rem = end - time.time()
                 cap = min(cap, max(0.0, rem - PUBLISH_RESERVE_S))   # leave the manifest puts their reserve
         try:
-            files[name] = _run(lambda p=p, name=name: _put_verified(store, slot, name, _read(p), gen, protected),
-                               cap)
+            files[name] = _run(
+                lambda p=p, name=name: _put_verified(store, slot, name, _read(p), gen, protected, epoch), cap)
+        except StaleSnapshot:
+            raise
         except TimeoutError:
             if name in CRITICAL:
                 raise SnapshotError(f"deadline: {name} not written in {deadline_s}s — generation {gen} discarded, "
@@ -367,8 +436,8 @@ def snapshot(data_dir: Path, store, commit: str = "", now: float | None = None,
     payload = json.dumps(man).encode()
 
     def _publish():
-        store.put(_gen_manifest_name(slot), payload)   # this generation's own manifest (fallback)
-        store.put(MANIFEST, payload)                   # the switch: one object write
+        _put_manifest(store, _gen_manifest_name(slot), payload, epoch)   # this generation's own manifest
+        _put_manifest(store, MANIFEST, payload, epoch)                   # the switch: one object write
 
     # A deadline long enough to hold the reserve spends that reserve on the two puts (no extra second past
     # the deadline). A shorter deadline keeps the 1s grace so a carried slow file can still publish.
@@ -391,7 +460,10 @@ def _log_research_db(data_dir) -> None:
 
 def blocks_entries(exc: BaseException) -> bool:
     """A snapshot failure counts toward the no-new-orders rule only when a CRITICAL file (or the snapshot as a
-    whole) failed. research.db and the other non-critical files must not block entries."""
+    whole) failed. research.db and the other non-critical files must not block entries. A snapshot that lost the
+    race to a newer one is not a store failure."""
+    if isinstance(exc, StaleSnapshot):
+        return False
     msg = str(exc)
     if any(name in msg for name in CRITICAL):
         return True

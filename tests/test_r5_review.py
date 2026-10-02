@@ -118,6 +118,94 @@ def test_slow_file_leaves_the_publish_reserve(tmp_path, monkeypatch):
     assert json.loads(store.get(S.MANIFEST))["gen"] == m["gen"]
 
 
+def test_a_second_snapshot_waits_inside_its_deadline(tmp_path):
+    """Shutdown must not start a second generation while an hourly snapshot still holds the store."""
+    import threading
+    d = tmp_path / "d"
+
+    class Gate(S.LocalStore):
+        def __init__(self, root):
+            super().__init__(root)
+            self.block = False
+            self.entered = threading.Event()
+            self.release = threading.Event()
+
+        def put(self, name, data):
+            if self.block and name == S.MANIFEST:
+                self.entered.set()
+                assert self.release.wait(3)
+            super().put(name, data)
+
+    store = Gate(tmp_path / "store")
+    _files(d, 1)
+    S.snapshot(d, store, now=1.0)
+    store.block = True
+    _files(d, 2)
+    box = {}
+
+    def run():
+        try:
+            box["m"] = S.snapshot(d, store, now=2.0)
+        except Exception as e:
+            box["e"] = e
+
+    th = threading.Thread(target=run)
+    th.start()
+    assert store.entered.wait(2)
+    t0 = time.time()
+    with pytest.raises(S.SnapshotError, match="another snapshot"):
+        S.snapshot(d, store, now=3.0, deadline_s=0.25)
+    assert time.time() - t0 < 0.8
+    store.release.set()
+    th.join(3)
+    assert "e" not in box
+    man = json.loads(store.get(S.MANIFEST))
+    assert man["gen"] == box["m"]["gen"]
+    assert man["files"]["paper_bot.json"]["sha256"] == box["m"]["files"]["paper_bot.json"]["sha256"]
+
+
+def test_abandoned_manifest_put_cannot_overwrite_a_newer_snapshot(tmp_path):
+    """A manifest put that outlives its deadline must not replace the snapshot that ran after it."""
+    import threading
+    d = tmp_path / "d"
+
+    class DelayedManifest(S.LocalStore):
+        def __init__(self, root):
+            super().__init__(root)
+            self.delay = 0.0
+
+        def put(self, name, data):
+            if self.delay and name == S.MANIFEST:
+                time.sleep(self.delay)
+            super().put(name, data)
+
+    store = DelayedManifest(tmp_path / "store")
+    _files(d, 1)
+    first = S.snapshot(d, store, now=1.0)
+    store.delay = 1.0
+    _files(d, 2)
+    box = {}
+
+    def late():
+        try:
+            S.snapshot(d, store, now=2.0, deadline_s=0.35)
+        except S.SnapshotError as e:
+            box["e"] = e
+
+    th = threading.Thread(target=late)
+    th.start()
+    th.join(3)
+    assert "e" in box
+    store.delay = 0.0
+    _files(d, 3)
+    newer = S.snapshot(d, store, now=3.0)
+    time.sleep(1.1)                                            # the abandoned put finishes, if it still can
+    man = json.loads(store.get(S.MANIFEST))
+    assert man["gen"] == newer["gen"]
+    assert man["files"]["paper_bot.json"]["sha256"] == newer["files"]["paper_bot.json"]["sha256"]
+    assert man["files"]["paper_bot.json"]["sha256"] != first["files"]["paper_bot.json"]["sha256"]
+
+
 def test_release_is_bounded_when_every_store_call_is_slow(tmp_path):
     store = SlowCalls(tmp_path / "store")
     a = L.Lease(store, "A", settle_s=0)
@@ -329,7 +417,7 @@ def test_an_error_carries_only_research_db(tmp_path):
             super().put(name, data)
 
     store = Boom(tmp_path / "store")
-    S.snapshot(d, store, now=1.0)
+    first = S.snapshot(d, store, now=1.0)
     (d / "paper_bot.json").write_text(json.dumps({"cash": 2}), encoding="utf-8")
     (d / "truth_ledger.json").write_text('{"n": 2}', encoding="utf-8")
     (d / "price_history.json").write_text('{"n": 2}', encoding="utf-8")
@@ -343,11 +431,11 @@ def test_an_error_carries_only_research_db(tmp_path):
     assert json.loads(store.get(S.MANIFEST))["gen"] == 1
     store.bad = "research.db"
     m = S.snapshot(d, store, now=4.0, slow_timeout_s=60)
-    assert m["gen"] == 2 and m["files"]["research.db"]["carried_from"] == 1
+    # Failed attempts claim a generation (their uploads may still be in flight) so this one is newer than gen 2.
+    assert m["gen"] > first["gen"] and m["files"]["research.db"]["carried_from"] == first["gen"]
     assert "carried_from" not in m["files"]["truth_ledger.json"]
     assert "carried_from" not in m["files"]["price_history.json"]
-    assert m["files"]["truth_ledger.json"]["sha256"] != json.loads(
-        store.get("manifest-gen-1.json"))["files"]["truth_ledger.json"]["sha256"]
+    assert m["files"]["truth_ledger.json"]["sha256"] != first["files"]["truth_ledger.json"]["sha256"]
 
 
 def test_research_db_carried_in_a_row_is_surfaced(tmp_path, monkeypatch, capsys):
