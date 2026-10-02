@@ -44,7 +44,7 @@ AUTH_WINDOW_S, AUTH_MAX_FAILS = 600, 10
 REFRESH_PER_MINT_S, REFRESH_GLOBAL_PER_MIN = 60, 10
 MAX_WATCH = 30
 LIST_KINDS = ("top", "new", "early", "whales", "dev", "social")
-VERSION = "web-15"
+VERSION = "web-16"
 HOME_LIMIT = {"opportunity": 60, "watch": 60, "nodata": 40, "excluded": 40}
 
 
@@ -91,10 +91,49 @@ def create_app(engine: ScannerEngine | None = None, start_scanner: bool = True,
     set_language("vi")
     guard = Guard(access_code if access_code is not None else env("APP_ACCESS_CODE"))
     state: dict = {"engine": engine, "task": None, "started_at": time.time(), "bot": bot, "bot_task": None,
-                   "bot_stop": None}
+                   "bot_stop": None, "snapshot": {"store": "NOT CONFIGURED", "last_ts": None, "restore": None},
+                   "aux": []}
+
+    async def _snapshot_now(reason: str) -> None:
+        from core.snapshot import snapshot
+        from core.version import git_commit
+        store = state.get("snapshot_store")
+        if store is None:
+            return
+        try:
+            if state["bot"] is not None:
+                state["bot"].persist()
+            man = await asyncio.to_thread(snapshot, DATA_DIR, store, git_commit())
+            state["snapshot"]["last_ts"] = man["ts"]
+            print(f"[snapshot] {reason}: {', '.join(man['files'])} -> {store.kind} store", flush=True)
+        except Exception as e:                             # never break trading for a backup
+            print(f"[snapshot] {reason} FAILED: {type(e).__name__}", flush=True)
+
+    async def _snapshot_loop() -> None:
+        from core.snapshot import SNAPSHOT_EVERY_S
+        while True:
+            await asyncio.sleep(SNAPSHOT_EVERY_S)
+            await _snapshot_now("hourly")
+            if state["bot"] is not None:
+                print("[sample] " + state["bot"].sample_summary_line(), flush=True)
 
     @contextlib.asynccontextmanager
     async def lifespan(app: FastAPI):
+        if start_scanner and state["bot"] is None:     # restore the sample BEFORE anything opens the files
+            from core.snapshot import restore, store_from_env
+            store = store_from_env()
+            state["snapshot_store"] = store
+            if store is not None:
+                state["snapshot"]["store"] = store.kind
+                try:
+                    res = await asyncio.to_thread(restore, DATA_DIR, store)
+                except Exception as e:
+                    res = {"status": f"RESTORE FAILED: {type(e).__name__}", "restored": []}
+                state["snapshot"]["restore"] = res
+                print(f"[snapshot] restore: {res['status']} {', '.join(res.get('restored', []))}", flush=True)
+            else:
+                print("[snapshot] NOT CONFIGURED (SNAPSHOT_DIR / SNAPSHOT_URL): the sample restarts with the "
+                      "container", flush=True)
         if state["engine"] is None:
             state["engine"] = ScannerEngine(Settings.load(), Database(DB_PATH), on_log=lambda m: print(m, flush=True))
         if state["bot"] is None:                         # PAPER trading bot: reads scanner results only
@@ -126,12 +165,24 @@ def create_app(engine: ScannerEngine | None = None, start_scanner: bool = True,
                   f"· sample epoch since {ep['started_at_utc']}", flush=True)
             state["task"] = asyncio.create_task(state["engine"].run())
             state["bot_stop"] = asyncio.Event()
+            state["bot"].snapshot_status = state["snapshot"]
             state["bot_task"] = asyncio.create_task(state["bot"].run(state["bot_stop"]))
+            if state.get("snapshot_store") is not None:
+                state["aux"].append(asyncio.create_task(_snapshot_loop()))
+            from web.keepalive import keepalive_url, keepalive_loop
+            ka = keepalive_url()
+            if ka:
+                state["aux"].append(asyncio.create_task(keepalive_loop(ka)))
+                print(f"[keepalive] pinging {ka} every 10 min (Render free plan spins down after 15 min idle)",
+                      flush=True)
         yield
+        for t in state["aux"]:
+            t.cancel()
         if state["bot_task"]:
             state["bot_stop"].set()
             with contextlib.suppress(Exception):
                 await asyncio.wait_for(state["bot_task"], 10)
+            await _snapshot_now("shutdown")                # SIGTERM before a deploy / restart
         eng = state["engine"]
         if state["task"]:
             eng.stop()
@@ -169,6 +220,8 @@ def create_app(engine: ScannerEngine | None = None, start_scanner: bool = True,
         from core.version import git_commit
         bot = state.get("bot")
         out = {"ok": True, "commit": git_commit()}
+        out["snapshot"] = {"store": state["snapshot"]["store"], "last_utc": time.strftime(
+            "%Y-%m-%dT%H:%M:%SZ", time.gmtime(state["snapshot"]["last_ts"])) if state["snapshot"]["last_ts"] else None}
         if bot is not None:
             out["params"] = bot.cfg.sample_id()
             ep = bot.sample_epoch

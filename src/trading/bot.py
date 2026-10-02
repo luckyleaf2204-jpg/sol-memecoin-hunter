@@ -74,6 +74,9 @@ class PaperBot:
         self.last_buy_attempt: dict[str, float] = {}
         self.quote_block: dict[str, float] = {}  # mint -> until: Jupiter confirmed NO route (no re-quote spam)
         self.quote_stats: dict[str, int] = {}    # Jupiter BUY-quote outcomes by status
+        self.snapshot_status: dict | None = None   # set by the web app: durable store of the sample (core.snapshot)
+        from trading.gaps import GapTracker
+        self.gap_tracker = GapTracker(self.book)
         from trading.sample_epoch import SampleEpoch
         self.sample_epoch = SampleEpoch(Path(state_path).with_name("sample_epoch.json") if state_path else None)
         from trading.audit import RunAudit
@@ -184,6 +187,7 @@ class PaperBot:
                   f"equity ${eq:,.2f} · {len(self.book.positions)} open · net {self.book.stats(now)['net_pnl']:+,.2f}", now=now)
         self.ticks += 1
         self.last_tick = now
+        self.gap_tracker.beat(now, self._feeds_ok()[0])
         self._log_pipeline(now)
         self.tick_ms = round((time.monotonic() - t0) * 1000, 1)
         self.ops.append((now, len(states) + len(self.book.positions)))
@@ -1436,12 +1440,29 @@ class PaperBot:
     def begin_sample(self, now: float | None = None) -> dict:
         """Start / resume the sample epoch for the running code + parameters (call once the config is final)."""
         from core.version import git_commit
+        self.gap_tracker.on_start(now or time.time())          # restart / sleep since the last heartbeat
         new = self.sample_epoch.start(self.cfg.sample_id(), git_commit(), now)
         d = self.sample_epoch.as_dict()
         self.log("INFO", f"SAMPLE {'NEW EPOCH' if new else 'epoch resumed'}: commit {d['commit'][:7]} · params "
                          f"{d['fingerprint']} · strategy {d['strategy_version']} · counting trades opened since "
                          f"{d['started_at_utc']}")
         return d
+
+    def sample_report(self, now: float | None = None) -> dict:
+        from trading.sample_report import report
+        now = now or time.time()
+        r = report(self.book.journal, self.sample_epoch, self.cfg.cost_stress_pct, self.cfg.starting_balance,
+                   gaps=self.gap_tracker.all_gaps(now), now=now)
+        snap = self.snapshot_status or {}
+        r["durability"] = {"store": snap.get("store", "NOT CONFIGURED"), "last_snapshot_ts": snap.get("last_ts")}
+        if r["durability"]["store"] == "NOT CONFIGURED":
+            r["warnings"].append("no durable snapshot store (SNAPSHOT_DIR / SNAPSHOT_URL): the sample restarts "
+                                 "with the container (deploy, restart)")
+        return r
+
+    def sample_summary_line(self, now: float | None = None) -> str:
+        from trading.sample_report import summary_line
+        return summary_line(self.sample_report(now))
 
     def set_mode(self, mode: str, confirm: str = "") -> None:
         """PAPER = automatic paper fills · CONFIRM = the same decisions wait for the owner's approval, then fill

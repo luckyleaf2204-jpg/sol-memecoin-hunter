@@ -114,6 +114,8 @@ class PaperBook:
         self.next_id = 1
         self.last_exit: dict[str, float] = {}
         self.journal: list[dict] = []          # step 4: one row per closed trade (journal_row)
+        self.gaps: list[dict] = []             # trading.gaps: periods the bot could not watch its positions
+        self.heartbeat: float | None = None    # last bot tick (persisted -> restart gaps)
         self.fees = self.network_fees = self.slippage = self.failed_fees = 0.0
         self.failed = 0
 
@@ -263,6 +265,8 @@ class PaperBook:
         data["equity_history"] = self.equity_history[-2000:]
         data["last_exit"] = self.last_exit
         data["journal"] = self.journal[-5000:]
+        data["gaps"] = self.gaps[-1000:]
+        data["heartbeat"] = self.heartbeat
         path.parent.mkdir(parents=True, exist_ok=True)
         tmp = path.with_suffix(".tmp")
         tmp.write_text(json.dumps(data), encoding="utf-8")
@@ -285,4 +289,6 @@ class PaperBook:
         b.equity_history = [tuple(x) for x in data.get("equity_history", [])]
         b.last_exit = data.get("last_exit", {})
         b.journal = data.get("journal", [])
+        b.gaps = data.get("gaps", [])
+        b.heartbeat = data.get("heartbeat")
         return b

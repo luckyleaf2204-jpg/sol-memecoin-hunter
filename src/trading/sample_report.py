@@ -88,9 +88,18 @@ def warnings(n: int, by_cost: dict) -> tuple[str, list[str]]:
     return status, w
 
 
-def report(journal: list[dict], epoch, levels=(5.0, 7.0, 10.0), starting: float = 1000.0) -> dict:
-    counted = [r for r in journal if epoch is not None and epoch.counts(r) and r.get("gross_move_pct") is not None]
+def report(journal: list[dict], epoch, levels=(5.0, 7.0, 10.0), starting: float = 1000.0,
+           gaps: list[dict] | None = None, now: float | None = None) -> dict:
+    import time
+    from trading.gaps import overlaps
+    now = now or time.time()
+    gaps = gaps or []
+    in_epoch = [r for r in journal if epoch is not None and epoch.counts(r) and r.get("gross_move_pct") is not None]
     legacy = sum(1 for r in journal if epoch is None or not epoch.counts(r))
+    start = epoch.started_at if epoch is not None and epoch.started_at else 0.0
+    epoch_gaps = [g for g in gaps if g["end"] >= start]
+    in_gap = [r for r in in_epoch if overlaps(r, epoch_gaps, now)]
+    counted = [r for r in in_epoch if not overlaps(r, epoch_gaps, now)]
     tp = sum(1 for r in counted if r.get("exit_reason") in TP_REASONS)
     sl = sum(1 for r in counted if r.get("exit_reason") in STOP_REASONS)
     by_cost = cost_table(counted, levels, starting)
@@ -99,6 +108,9 @@ def report(journal: list[dict], epoch, levels=(5.0, 7.0, 10.0), starting: float 
         "epoch": epoch.as_dict() if epoch is not None else None,
         "sample_status": status, "warnings": warns,
         "n": len(counted), "excluded_legacy_or_noquote": legacy,
+        "gaps": {"count": len(epoch_gaps), "minutes": round(sum(g["minutes"] for g in epoch_gaps), 1),
+                 "excluded_trades": len(in_gap), "list": epoch_gaps[-20:],
+                 "rule": "trades whose holding period overlaps a gap (bot stopped / feed down > 5 min) are excluded"},
         "primary_metric": "net expectancy per trade after a fixed round-trip cost (95 % bootstrap CI)",
         "by_cost": by_cost,
         "modelled_cost": metrics(counted, [r["net_pnl_pct"] for r in counted if r.get("net_pnl_pct") is not None],
@@ -109,3 +121,17 @@ def report(journal: list[dict], epoch, levels=(5.0, 7.0, 10.0), starting: float 
         "reference_only": {"tp_share": round(tp / (tp + sl), 4) if tp + sl else None, "tp_exits": tp, "sl_exits": sl,
                            "note": "TP/(TP+SL) mostly reflects volatility; NOT a decision metric"},
     }
+
+
+def summary_line(r: dict) -> str:
+    """One line printed by every report: n, status, net expectancy with its 95 % CI at each cost, gaps."""
+    parts = []
+    for k, m in (r.get("by_cost") or {}).items():
+        ci = m.get("ci95_pct")
+        parts.append(f"@{k} {m['expectancy_pct'] if m['expectancy_pct'] is not None else '-'}%"
+                     f"{f' [{ci[0]}, {ci[1]}]' if ci else ' [CI n/a]'}")
+    ep = r.get("epoch") or {}
+    g = r.get("gaps") or {}
+    return (f"SAMPLE {r.get('sample_status')} n={r.get('n')} (thresholds 30 preliminary / 200 A/B) · "
+            f"net expectancy {' · '.join(parts)} · gaps {g.get('count', 0)} ({g.get('excluded_trades', 0)} trades "
+            f"excluded) · epoch since {ep.get('started_at_utc')} params {ep.get('fingerprint')}")

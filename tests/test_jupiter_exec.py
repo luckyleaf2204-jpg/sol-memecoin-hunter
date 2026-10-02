@@ -216,7 +216,7 @@ def test_status_payload_carries_audit_and_quote_stats():
     b.tick()
     asyncio.run(b.execute_intents())
     d = json.loads(json.dumps(bot_status(b, b.engine), default=str))
-    assert d["version"] == "web-15" and d["jupiter_quotes"] == {"NO_ROUTE": 1}
+    assert d["version"] == "web-16" and d["jupiter_quotes"] == {"NO_ROUTE": 1}
     a = d["audit"]
     assert a["stats"]["buy_candidate"] == 1 and a["stats"]["buy_skipped"] == 1 and a["blocked_by"]["jupiter_quote"] == 1
     assert len(a["top"]) == 1 and a["events"][0]["kind"] == "skip"

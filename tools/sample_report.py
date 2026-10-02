@@ -10,7 +10,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
 from trading.sample_epoch import SampleEpoch  # noqa: E402
-from trading.sample_report import report  # noqa: E402
+from trading.sample_report import report, summary_line  # noqa: E402
 
 
 def main():
@@ -20,9 +20,10 @@ def main():
     ap.add_argument("--starting", type=float, default=1000.0)
     ap.add_argument("--out", default="")
     a = ap.parse_args()
-    journal = json.loads(Path(a.book).read_text(encoding="utf-8")).get("journal", [])
-    res = report(journal, SampleEpoch.load(Path(a.epoch)), starting=a.starting)
+    book = json.loads(Path(a.book).read_text(encoding="utf-8"))
+    res = report(book.get("journal", []), SampleEpoch.load(Path(a.epoch)), starting=a.starting, gaps=book.get("gaps", []))
     text = json.dumps(res, indent=1)
+    print(summary_line(res))                     # n, status, CI first
     print(text)
     if a.out:
         Path(a.out).write_text(text, encoding="utf-8")
