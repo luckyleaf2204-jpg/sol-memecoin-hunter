@@ -180,3 +180,45 @@ def test_endpoint_refuses_a_bundle_with_a_credential(monkeypatch):
     with TestClient(app) as c:
         r = c.get("/api/review_bundle", headers={"X-Access-Code": "c0de"})
         assert r.status_code == 500 and "refused" in r.json()["error"] and "abcd1234efgh" not in r.text
+
+
+# ---------------------------------------------------------------- C6: JSON pairs, user:pass URLs, long hex
+@pytest.mark.parametrize("text", [
+    '{"api_key": "abc123xyz"}', '{"token": "eyJhbGciOiJIUzI1NiJ9abc123"}', '{"secret": "hunter22"}',
+    '{"SNAPSHOT_TOKEN": "t0ken-value"}', '{"password": "pa55word"}', '{"Authorization": "Bearer abcdefghij"}',
+    "https://user:pa55@store.example/hunter", "postgres://admin:s3cret@db:5432/x",
+    "sha " + "a1b2c3d4" * 8,                                            # 64 hex chars
+])
+def test_json_pairs_userpass_urls_and_long_hex_are_refused(text):
+    with pytest.raises(ValueError):
+        RB.check_no_secrets(text)
+
+
+@pytest.mark.parametrize("text", [
+    '{"api_key": "REDACTED"}', '{"token": "***"}', '{"SNAPSHOT_TOKEN": "<set in Render>"}',
+    "KEY:USDT", "pair KEY:SOL", "commit 3f2a1b4c5d6e7f8091a2b3c4d5e6f708192a3b4c",   # a 40-char git SHA
+    "https://store.example/hunter", '{"tokens": 5}', "sig: n/a",
+])
+def test_json_and_text_false_positives_pass(text):
+    RB.check_no_secrets(text)
+
+
+def test_check_obj_walks_nested_json():
+    RB.check_obj({"a": [{"b": {"api_key": "REDACTED", "tokens": 3, "token": None}}]})
+    with pytest.raises(ValueError, match="a.b.client_secret"):
+        RB.check_obj({"a": {"b": {"client_secret": "zzz999"}}})
+    with pytest.raises(ValueError):
+        RB.check_obj([{"Authorization": "Basic dXNlcjpwYXNz"}])
+
+
+def test_endpoint_refuses_a_json_secret_value(monkeypatch):
+    import web.app as webapp
+    b, _, _ = opened()
+    b.book.journal.append({"trade_id": "t", "symbol": "x"})
+    app = webapp.create_app(engine=b.engine, start_scanner=False, access_code="c0de", bot=b)
+    import trading.review_bundle as RBm
+    orig = RBm._safe_snapshot
+    monkeypatch.setattr(RBm, "_safe_snapshot", lambda sn: {**orig(sn), "password": "pa55word99"})
+    with TestClient(app) as c:
+        r = c.get("/api/review_bundle", headers={"X-Access-Code": "c0de"})
+        assert r.status_code == 500 and "pa55word99" not in r.text

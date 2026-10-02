@@ -484,9 +484,10 @@ def create_app(engine: ScannerEngine | None = None, start_scanner: bool = True,
         rep["summary_line"] = summary_line(rep)
         import json
 
-        from trading.review_bundle import check_no_secrets
+        from trading.review_bundle import check_no_secrets, check_obj
         out = build(b.book.journal, rep, _snapshot_view())
         try:
+            check_obj(out)
             check_no_secrets(json.dumps(out, default=str))
         except ValueError as e:                            # never hand out anything credential-like
             return JSONResponse({"error": str(e)}, status_code=500)

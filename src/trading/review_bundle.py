@@ -4,28 +4,14 @@ code or URL credential: `check_no_secrets` refuses to write a bundle that contai
 from __future__ import annotations
 
 import json
-import os
-import re
 import time
+
+from core.secret_scan import check_no_secrets, check_obj  # noqa: F401  (re-exported)
 
 TRADE_FIELDS = ("trade_id", "symbol", "engine", "sample_id", "epoch", "lifecycle", "setup_type", "location",
                 "extension_5m_pct", "entry_ts", "exit_ts", "holding_s", "entry_price", "exit_reason", "mfe_pct",
                 "mae_pct", "gross_move_pct", "net_pnl_pct", "net_pnl_usd", "real_cost_pct", "fixed_fee_pct", "haircut",
                 "n_tx", "size_usd")
-SECRET_ENV = ("HELIUS_API_KEY", "SNAPSHOT_TOKEN", "SNAPSHOT_URL", "APP_ACCESS_CODE", "TELEGRAM_BOT_TOKEN",
-              "REVIEW_ACCESS_CODE", "SOLANA_RPC_URL")
-_REDACTED = r"(?!REDACTED|redacted|\*{3,}|<[^>]*>|x{3,}|X{3,})"
-SECRET_RES = (
-    # key = value / key: value with a real value (REDACTED, ***, <placeholder> are fine)
-    re.compile(r"(?i)\b(api[-_]?key|access[-_]?code|client[-_]?secret|secret|token|key|sig|signature|password|passwd|"
-               r"x-amz-signature|x-amz-credential|x-amz-security-token|snapshot_url|snapshot_token)"
-               r"\s*[=:]\s*['\"]?" + _REDACTED + r"[^\s&'\"<>,;)]{3,}"),
-    re.compile(r"(?i)\bbearer\s+" + _REDACTED + r"[a-z0-9._~+/-]{8,}"),
-    re.compile(r"(?i)x-access-code|authorization\s*:"),
-    re.compile(r"\b[1-9A-HJ-NP-Za-km-z]{60,}\b"),            # base58 run longer than a mint (44): key-like
-)
-
-
 def build(journal: list[dict], report: dict, snapshot: dict | None = None, now: float | None = None,
           source: str = "server /api/review_bundle") -> dict:
     now = now or time.time()
@@ -45,16 +31,6 @@ def _safe_snapshot(sn: dict) -> dict:
     if "target" in sn:
         out["target"] = "configured" if sn["target"] not in (None, "-") else "-"
     return out
-
-
-def check_no_secrets(text: str) -> None:
-    for rx in SECRET_RES:
-        if rx.search(text):
-            raise ValueError("review bundle refused: it contains a credential-like string")
-    for k in SECRET_ENV:
-        v = os.environ.get(k, "")
-        if len(v) >= 6 and v in text:
-            raise ValueError(f"review bundle refused: it contains the value of {k}")
 
 
 def _f(v, nd=2):
