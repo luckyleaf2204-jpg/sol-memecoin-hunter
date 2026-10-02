@@ -46,11 +46,16 @@ sample restarts with the container. `SNAPSHOT_EVERY_S` changes the interval (def
   object is read back and checksum-verified, and only then is `manifest.json` switched to generation N. A failed
   write / verify keeps the previous manifest, so the live restore point is never overwritten.
 * Restore is all-or-nothing: every file of the manifest's generation is downloaded and verified into a staging
-  directory first, then all are moved in. If any sample file already exists locally, nothing is restored.
+  directory first, then all are moved in. All sample files already present locally -> nothing is restored; only
+  SOME present (leftovers) -> HALT. A corrupt current generation falls back to the newest older generation that
+  verifies (each generation has its own `manifest-gen-<slot>.json`); a corrupt manifest or no valid generation ->
+  HALT. Only the instance holding the lease (`instance_lease.json`, see `docs/deploy_checklist.md`) restores,
+  trades and snapshots.
 * If the restore FAILS the server does not trade on an empty book: scanner, bot and snapshots are not started,
   `/healthz` shows `"halted": "restore failed (...)"`, the log prints `[HALT] ...`. Fix the store and restart.
 * Snapshotted: `paper_bot.json`, `sample_epoch.json`, `truth_ledger.json`, `trading.json`, `holdout_lock.json`
-  (keep the replay lock at `data/holdout_lock.json`), `research.db`. Epoch and lock files are written atomically.
+  (keep the replay lock at `data/holdout_lock.json`), `research.db`, `price_history.json` (optional: loaded only
+  if its newest point is <= 120 s old). Epoch and lock files are written atomically.
 
 ### Start-up durability check and status
 
