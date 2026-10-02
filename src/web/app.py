@@ -112,7 +112,7 @@ def create_app(engine: ScannerEngine | None = None, start_scanner: bool = True,
         except Exception as e:                     # never block a snapshot / shutdown on this
             print(f"[history] save failed: {type(e).__name__}", flush=True)
 
-    async def _snapshot_now(reason: str) -> None:
+    async def _snapshot_now(reason: str, slow_timeout_s: float | None = None) -> None:
         from core.snapshot import snapshot
         from core.version import git_commit
         store = state.get("snapshot_store")
@@ -127,7 +127,7 @@ def create_app(engine: ScannerEngine | None = None, start_scanner: bool = True,
             if state["bot"] is not None:
                 state["bot"].persist()
             _save_price_history()
-            man = await asyncio.to_thread(snapshot, DATA_DIR, store, git_commit())
+            man = await asyncio.to_thread(snapshot, DATA_DIR, store, git_commit(), None, slow_timeout_s)
             state["snapshot"].update(last_ts=man["ts"], last_error=None, last={
                 "reason": reason,
                 "files": {k: {"size": v["size"], "size_gz": v["size_gz"]} for k, v in man["files"].items()},
@@ -135,7 +135,8 @@ def create_app(engine: ScannerEngine | None = None, start_scanner: bool = True,
                 "target": man["target"], "store": man["store"]})
             print(f"[snapshot] {reason} OK {_utc(man['ts'])}: {len(man['files'])} files, "
                   f"{fmt_bytes(man['bytes_gz'])} gz ({fmt_bytes(man['bytes_raw'])} raw) -> {man['store']} "
-                  f"{man['target']} in {man['duration_s']} s", flush=True)
+                  f"{man['target']} in {man['duration_s']} s · steps "
+                  + ", ".join(f"{k} {v}s" for k, v in (man.get("steps") or {}).items()), flush=True)
         except Exception as e:                             # never break trading for a backup (type only: no URL)
             state["snapshot"]["last_error"] = {"ts": time.time(), "reason": reason, "error": type(e).__name__}
             print(f"[snapshot] {reason} FAILED: {type(e).__name__}", flush=True)
@@ -335,7 +336,8 @@ def create_app(engine: ScannerEngine | None = None, start_scanner: bool = True,
                     await asyncio.wait_for(state["bot_task"], 10)
                 if state.get("snapshot_store") is None:
                     _save_price_history()                  # local restart without a store still keeps it
-                await _snapshot_now("shutdown")            # SIGTERM before a deploy / restart: last snapshot ...
+                from core.snapshot import SHUTDOWN_SLOW_TIMEOUT_S
+                await _snapshot_now("shutdown", SHUTDOWN_SLOW_TIMEOUT_S)   # SIGTERM: last snapshot ...
         except Exception as e:                             # nothing here may skip the release / engine stop
             print(f"[shutdown] snapshot step error: {type(e).__name__}", flush=True)
         finally:

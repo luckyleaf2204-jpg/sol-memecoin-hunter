@@ -16,6 +16,15 @@ nothing. On `SIGTERM` the active instance writes its final snapshot, THEN releas
 restores that final snapshot and starts. Open positions are re-evaluated on the first tick at the current price;
 the downtime is recorded as a GAP and trades overlapping it leave the main sample.
 
+## 0. Shutdown delay (once)
+
+`render.yaml` sets `maxShutdownDelaySeconds: 120` (Blueprint field, 1-300 s, default 30 — render.com/docs/blueprint-spec).
+It only takes effect if the service is managed by the Blueprint (Blueprint sync). If the service was created by hand,
+set the same value in Dashboard -> service -> Settings -> "Shutdown delay" (check the exact label there). With the
+default 30 s the final snapshot can be cut short: the book / epoch / lock are written first, research.db gets at most
+60 s (`SHUTDOWN_SLOW_TIMEOUT_S`) and otherwise the previous verified copy is kept (`carried_from` in the manifest).
+The log prints the seconds of every file: `[snapshot] shutdown OK ... steps paper_bot.json 0.1s, ...`.
+
 ## 1. Set the environment variables — ALL in ONE save
 
 Render restarts the service on every save of the Environment page. Two saves = two restarts = two hand-overs.

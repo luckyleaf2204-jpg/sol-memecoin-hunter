@@ -62,3 +62,60 @@ def test_shutdown_still_releases_and_stops_the_engine_when_held_fails(tmp_path, 
     out = capsys.readouterr().out
     assert "[snapshot] shutdown FAILED: TimeoutError" in out and "[lease] release failed: TimeoutError" in out
     assert stopped == [1]
+
+
+# ---------------------------------------------------------------- A2: a short shutdown snapshot
+class SlowDB(S.LocalStore):
+    """research.db uploads take `delay` seconds (slow HTTP store); everything else is fast."""
+    def __init__(self, root, delay=0.0):
+        super().__init__(root)
+        self.delay = delay
+
+    def put(self, name, data):
+        if "research.db" in name and self.delay:
+            time.sleep(self.delay)
+        super().put(name, data)
+
+
+def _files(d, cash):
+    import json
+    import sqlite3
+    d.mkdir(parents=True, exist_ok=True)
+    (d / "paper_bot.json").write_text(json.dumps({"cash": cash}), encoding="utf-8")
+    (d / "sample_epoch.json").write_text("{}", encoding="utf-8")
+    db = sqlite3.connect(d / "research.db")
+    db.execute("CREATE TABLE IF NOT EXISTS t (v INT)")
+    db.execute("INSERT INTO t VALUES (?)", (cash,))
+    db.commit()
+    db.close()
+
+
+def test_book_first_research_db_carried_when_the_store_is_slow(tmp_path):
+    import json
+    import sqlite3
+    d, store = tmp_path / "d", SlowDB(tmp_path / "store")
+    _files(d, 1)
+    m1 = S.snapshot(d, store, now=1.0)                                # normal hourly snapshot
+    assert list(m1["files"])[:2] == ["paper_bot.json", "sample_epoch.json"] and list(m1["files"])[-1] == "research.db"
+    assert set(m1["steps"]) == {"paper_bot.json", "sample_epoch.json", "research.db"}
+    _files(d, 2)
+    store.delay = 1.0
+    t0 = time.time()
+    m2 = S.snapshot(d, store, now=2.0, slow_timeout_s=0.2)           # SIGTERM with a slow store
+    assert time.time() - t0 < 0.9
+    assert m2["files"]["research.db"]["carried_from"] == 1 and "research.db (timeout, carried)" in m2["steps"]
+    time.sleep(1.1)                                                   # the late upload lands in the NEW slot only
+    fresh = tmp_path / "fresh"
+    r = S.restore(fresh, S.LocalStore(tmp_path / "store"))
+    assert r["gen"] == 2 and json.loads((fresh / "paper_bot.json").read_text()) == {"cash": 2}   # newest book
+    db = sqlite3.connect(fresh / "research.db")
+    assert db.execute("SELECT MAX(v) FROM t").fetchone()[0] == 1      # the previous verified research.db
+    db.close()
+
+
+def test_render_yaml_shutdown_delay():
+    from pathlib import Path
+    text = (Path(__file__).resolve().parents[1] / "render.yaml").read_text(encoding="utf-8")
+    import re
+    m = re.search(r"maxShutdownDelaySeconds:\s*(\d+)", text)
+    assert m and 120 <= int(m.group(1)) <= 300 and S.SHUTDOWN_SLOW_TIMEOUT_S + 10 + 30 <= int(m.group(1))

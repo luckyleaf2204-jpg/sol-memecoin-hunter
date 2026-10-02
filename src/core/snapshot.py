@@ -23,13 +23,16 @@ import tempfile
 import time
 from pathlib import Path
 
-FILES = ("paper_bot.json", "sample_epoch.json", "truth_ledger.json", "trading.json", "holdout_lock.json",
-         "research.db", "price_history.json")
+FILES = ("paper_bot.json", "sample_epoch.json", "holdout_lock.json", "trading.json", "truth_ledger.json",
+         "price_history.json", "research.db")   # priority order: the book and the epoch first, the big DB last
+SLOW = ("research.db",)               # may be carried over from the previous generation when it does not fit in time
 OPTIONAL = ("price_history.json",)    # restored with the rest, but never part of the "partial local data" check
 GENERATIONS = 3                       # rotating slots: the live generation is never overwritten
 MANIFEST = "manifest.json"
 PROBE = "probe.json"
 NOT_DURABLE = "MẪU KHÔNG BỀN - sẽ mất khi restart"
+SHUTDOWN_SLOW_TIMEOUT_S = 60.0       # at SIGTERM: research.db gets this long, else the previous copy is kept
+# (render.yaml maxShutdownDelaySeconds 120: bot stop <= 10 s + book files + this + lease release fit inside it)
 SNAPSHOT_EVERY_S = float(os.environ.get("SNAPSHOT_EVERY_S", "3600") or 3600)
 
 
@@ -177,13 +180,28 @@ def _manifest(store) -> dict | None:
         return None
 
 
-def snapshot(data_dir: Path, store, commit: str = "", now: float | None = None) -> dict:
+def _put_verified(store, slot: int, name: str, raw: bytes, gen: int) -> dict:
+    gz = gzip.compress(raw, 6)
+    sha = hashlib.sha256(raw).hexdigest()
+    store.put(_obj(slot, name), gz)
+    back = store.get(_obj(slot, name))
+    if back is None or hashlib.sha256(gzip.decompress(back)).hexdigest() != sha:
+        raise SnapshotError(f"verify failed for {name}: manifest not switched (generation {gen} discarded)")
+    return {"sha256": sha, "size": len(raw), "size_gz": len(gz), "object": _obj(slot, name)}
+
+
+def snapshot(data_dir: Path, store, commit: str = "", now: float | None = None,
+             slow_timeout_s: float | None = None) -> dict:
     """Write generation N+1 into its own slot (GENERATIONS slots, rotating), read every object back and verify its
     checksum, and only then switch the manifest to it. A failed write / verify leaves the previous generation as
-    the restore point (the manifest still points to it)."""
+    the restore point (the manifest still points to it).
+    Files go in priority order (book, epoch, lock first; research.db last). With slow_timeout_s (shutdown), a SLOW
+    file that is not written + verified in time keeps the previous generation's verified copy (`carried_from`), so
+    the book is never lost waiting for the research DB. `steps` gives the seconds of every file."""
     t0 = time.time()
     now = now or t0
-    gens = [(_manifest(store) or {}).get("gen", 0)]
+    prev = _manifest(store) or {}
+    gens = [prev.get("gen", 0)]
     for slot in range(GENERATIONS):                    # an unreadable main manifest must not reuse a live slot
         raw = store.get(_gen_manifest_name(slot))
         if raw is not None:
@@ -193,20 +211,30 @@ def snapshot(data_dir: Path, store, commit: str = "", now: float | None = None) 
                 pass
     gen = max(gens) + 1
     slot = gen % GENERATIONS
-    files = {}
+    files, steps = {}, {}
     for name in FILES:
         p = Path(data_dir) / name
         if not p.exists():
             continue
-        raw = _read(p)
-        gz = gzip.compress(raw, 6)
-        sha = hashlib.sha256(raw).hexdigest()
-        store.put(_obj(slot, name), gz)
-        back = store.get(_obj(slot, name))
-        if back is None or hashlib.sha256(gzip.decompress(back)).hexdigest() != sha:
-            raise SnapshotError(f"verify failed for {name}: manifest not switched (generation {gen} discarded)")
-        files[name] = {"sha256": sha, "size": len(raw), "size_gz": len(gz), "object": _obj(slot, name)}
-    man = {"gen": gen, "slot": slot, "ts": now, "commit": commit, "files": files,
+        ts = time.time()
+        if name in SLOW and slow_timeout_s is not None:
+            import concurrent.futures as cf
+            ex = cf.ThreadPoolExecutor(max_workers=1)
+            fut = ex.submit(lambda p=p, name=name: _put_verified(store, slot, name, _read(p), gen))
+            try:
+                files[name] = fut.result(timeout=slow_timeout_s)
+            except cf.TimeoutError:
+                old = (prev.get("files") or {}).get(name)
+                if old is not None:                         # the previous generation's verified copy
+                    files[name] = {**old, "carried_from": old.get("carried_from", prev.get("gen"))}
+                steps[name + " (timeout, carried)" if old else name + " (timeout, omitted)"] = round(time.time() - ts, 2)
+                ex.shutdown(wait=False)
+                continue
+            ex.shutdown(wait=False)
+        else:
+            files[name] = _put_verified(store, slot, name, _read(p), gen)
+        steps[name] = round(time.time() - ts, 2)
+    man = {"gen": gen, "slot": slot, "ts": now, "commit": commit, "files": files, "steps": steps,
            "bytes_raw": sum(f["size"] for f in files.values()), "bytes_gz": sum(f["size_gz"] for f in files.values()),
            "duration_s": round(time.time() - t0, 2), "target": target_of(store), "store": store.kind}
     store.put(_gen_manifest_name(slot), json.dumps(man).encode())   # this generation's own manifest (fallback)
