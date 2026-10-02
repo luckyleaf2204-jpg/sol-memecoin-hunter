@@ -26,6 +26,15 @@ class SampleEpoch:
         self.commit: str | None = None
         self.started_at: float | None = None
 
+    @classmethod
+    def load(cls, path: Path) -> "SampleEpoch":
+        """Read a stored epoch (reporting: no new epoch is started)."""
+        e = cls(None)
+        d = json.loads(Path(path).read_text(encoding="utf-8"))
+        e.strategy_version, e.fingerprint, e.commit, e.started_at = (d.get("strategy_version"), d.get("fingerprint"),
+                                                                      d.get("commit"), d.get("started_at"))
+        return e
+
     @property
     def id(self) -> str:
         return f"{self.strategy_version}:{self.fingerprint}:{int(self.started_at or 0)}"

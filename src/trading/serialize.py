@@ -5,6 +5,7 @@ import time
 
 from trading.bot import EXIT_WHY, MODULES, PaperBot, _ex_dict
 from trading.models import TRADE, WATCH
+from trading.sample_report import report as sample_report
 from trading.config import ALLOWED_MODES
 
 
@@ -156,10 +157,12 @@ def bot_status(bot: PaperBot, engine=None, now: float | None = None) -> dict:
     return {
         "pipeline": bot.pipeline(now),
         "doing": doing, "scan": scan, "evaluated": evaluated, "exit_rules": exits, "exit_engine": engine_rows,
-        "version": "web-13",
+        "version": "web-14",
         "engine": "lifecycle" if bot.cfg.lifecycle else ("experimental" if bot.cfg.experimental else "old"),
         "lifecycle_summary": bot.lifecycle_summary(now) if hasattr(bot, "lifecycle_summary") else None,
         "price_truth": bot.truth_panel(now) if hasattr(bot, "truth_panel") else None,
+        "sample_report": sample_report(bot.book.journal, bot.sample_epoch, bot.cfg.cost_stress_pct,
+                                       bot.cfg.starting_balance) if hasattr(bot, "sample_epoch") else None,
         "fast_lane": bot.fast_lane_stats() if hasattr(bot, "fast_lane_stats") else None,
         "jupiter_quotes": dict(getattr(bot, "quote_stats", {}) or {}),
         "audit": _audit_summary(bot, now),

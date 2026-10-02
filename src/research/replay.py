@@ -110,6 +110,8 @@ def replay(db_path: str, horizon: str = "1h", split: float = 0.6, bought_only: b
     ins, oos = cand[:k], cand[k:]
     out = {"horizon": horizon, "levels": "TP +30 % / SL -15 % (dataset)", "bought_only": bought_only,
            "break_even_tp_share": round(BREAK_EVEN_TP_SHARE, 4),
+           "metric_note": "REFERENCE ONLY: TP share reflects volatility. The decision metric is net expectancy "
+                          "after 5 / 7 / 10 % round-trip cost (trading/sample_report.py).",
            "all": compare(cand, base, seed),
            "walk_forward": {"split": split, "in_sample": compare(ins, base, seed), "out_of_sample": compare(oos, base, seed)}}
     n = len(cand)

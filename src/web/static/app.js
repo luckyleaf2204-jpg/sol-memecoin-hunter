@@ -787,6 +787,20 @@ function lcSummary(d) {
   return `<div class="panel"><h3><span>LIFECYCLE</span><span class="meta">${esc(d.engine || "")}</span></h3>${row("NEW")}${row("PRE_MIGRATION")}${row("POST_MIGRATION")}${row("UNKNOWN")}${unk ? `<div class="meta">UNKNOWN: ${esc(unk)}</div>` : ""}</div>`;
 }
 
+function sampleReport(d) {
+  const R = d.sample_report;
+  if (!R) return "";
+  const pc = (v) => (v === null || v === undefined ? "—" : esc((v >= 0 ? "+" : "") + Number(v).toFixed(2) + "%"));
+  const ci = (c) => (c ? `[${pc(c[0])} … ${pc(c[1])}]` : "—");
+  const row = (k, m) => `<tr><td>${esc(k)}</td><td>${pc(m.expectancy_pct)}</td><td>${ci(m.ci95_pct)}</td><td>${esc(m.win_rate_pct ?? "—")}%</td><td>${esc(m.rr_realised ?? "—")}</td><td>${esc(money(m.max_drawdown.usd))}</td></tr>`;
+  const t = (tbl) => Object.entries(tbl || {}).map(([k, m]) => row(k, m)).join("");
+  const ep = R.epoch || {};
+  const warn = (R.warnings || []).map((w) => `<div class="meta c-orange">⚠ ${esc(w)}</div>`).join("");
+  return `<div class="panel"><h3><span>SAMPLE REPORT · net expectancy after cost</span><span class="meta">n=${esc(R.n)} · epoch ${esc(ep.fingerprint || "—")} since ${esc(ep.started_at_utc || "—")}</span></h3>${warn}
+    <div class="tblw"><table class="tbl"><thead><tr><th>COST</th><th>EXPECTANCY</th><th>95% CI</th><th>WIN</th><th>R:R</th><th>MAX DD</th></tr></thead><tbody>${t(R.by_cost)}</tbody></table></div>
+    <div class="meta">STOP GAP −20%: ${Object.entries((R.sl_gap_scenario || {}).by_cost || {}).map(([k, m]) => `${esc(k)} ${pc(m.expectancy_pct)}`).join(" · ")} · TP/(TP+SL) ${esc(R.reference_only?.tp_share ?? "—")} (reference only: volatility) · excluded LEGACY ${esc(R.excluded_legacy_or_noquote)}</div></div>`;
+}
+
 function truthPanel(d) {
   const T = d.price_truth;
   if (!T) return "";
@@ -978,6 +992,7 @@ async function renderBot(silent) {
 
   <section class="b-more">
     ${lcSummary(d)}
+    ${sampleReport(d)}
     ${truthPanel(d)}
     ${shadowTables(d)}
     ${auditPanel(d)}
