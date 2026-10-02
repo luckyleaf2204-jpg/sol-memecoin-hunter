@@ -141,7 +141,7 @@ def test_mid_price_backs_out_impact_and_slippage():
     buy = Execution(ts=0, mint="m", symbol="s", side="BUY", route="r", ref_price=1.0, latency_ms=0, status="FILLED",
                     fill_price=1.0 * 1.02 * 1.01, tokens=1.0, price_impact_pct=2.0, slippage_pct=1.0)
     sell = Execution(ts=0, mint="m", symbol="s", side="SELL", route="r", ref_price=1.0, latency_ms=0, status="FILLED",
-                     fill_price=0.7, tokens=1.0, price_impact_pct=0.0, slippage_pct=30.0)     # 30 % haircut
+                     fill_price=0.7, tokens=1.0, price_impact_pct=0.0, slippage_pct=30.0)     # 30 % slippage (not a haircut)
     assert mid_price(buy) == pytest.approx(1.0) and mid_price(sell) == pytest.approx(1.0)
 
 

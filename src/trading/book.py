@@ -30,6 +30,8 @@ def mid_price(ex: Execution) -> float | None:
     recorded as slippage). Pool fees inside a Jupiter quote stay in (not separable)."""
     if ex.status != "FILLED" or not ex.fill_price:
         return None
+    if ex.model == HAIRCUT_MODEL:
+        return ex.fill_price          # no executable quote: the haircut IS the exit price, not a removable cost
     imp, slip = (ex.price_impact_pct or 0.0) / 100, (ex.slippage_pct or 0.0) / 100
     if ex.side == "BUY":
         return ex.fill_price / ((1 + imp) * (1 + slip))

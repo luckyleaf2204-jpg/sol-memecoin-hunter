@@ -1,9 +1,10 @@
 """SAMPLE REPORT — the decision metric for the current sample epoch (paper trading, read-only).
 
-PRIMARY metric: net expectancy per trade = mean(gross mid-to-mid move - round-trip cost) for costs of 5, 7 and 10 %,
+PRIMARY metric: net expectancy per trade = mean(gross mid-to-mid move - round-trip cost); an exit filled with the
+no-quote haircut counts at its haircut price (the haircut is part of the gross move, not a removable cost) for costs of 5, 7 and 10 %,
 with a 95 % bootstrap confidence interval. Next to it: win rate, realised R:R (mean win / |mean loss|), max drawdown
-(trades in exit order, $ = position cost x net %), and a STOP-GAP scenario where every stop-loss exit fills at -20 %
-(or worse if it already was).
+(trades in exit order, $ = position cost x net %), and a STOP-GAP scenario where every HARD exit (stop loss, risk,
+liquidity, whale, holder, identity) fills at -20 % (or worse if it already was).
 TP/(TP+SL) is shown for reference only: it mostly reflects volatility, not edge.
 Only trades of the current epoch count (trading/sample_epoch.py); LEGACY and NO_ROUTE trades are excluded.
 """
@@ -11,7 +12,10 @@ from __future__ import annotations
 
 import random
 
+from trading.exits import HARD
+
 STOP_REASONS = ("stop_loss",)
+GAP_REASONS = HARD               # stop gap floor applies to every HARD exit (stop, risk, liquidity, whale, ...)
 TP_REASONS = ("take_profit_1", "take_profit_2", "runner_trailing_stop")
 SL_GAP_PCT = -20.0
 MIN_PRELIMINARY_N = 30          # per sample: preliminary check only (docs/sample_plan.md)
@@ -52,7 +56,7 @@ def metrics(rows: list[dict], nets: list[float], starting: float) -> dict:
 
 def gross_of(r: dict, sl_gap: bool = False) -> float:
     g = r["gross_move_pct"]
-    if sl_gap and r.get("exit_reason") in STOP_REASONS:
+    if sl_gap and r.get("exit_reason") in GAP_REASONS:
         return min(g, SL_GAP_PCT)
     return g
 
@@ -115,8 +119,10 @@ def report(journal: list[dict], epoch, levels=(5.0, 7.0, 10.0), starting: float 
         "by_cost": by_cost,
         "modelled_cost": metrics(counted, [r["net_pnl_pct"] for r in counted if r.get("net_pnl_pct") is not None],
                                  starting) if all(r.get("net_pnl_pct") is not None for r in counted) else None,
-        "sl_gap_scenario": {"assumption": f"every stop-loss exit fills at {SL_GAP_PCT:.0f}% (or worse)",
-                            "stop_exits": sl, "by_cost": cost_table(counted, levels, starting, sl_gap=True)},
+        "sl_gap_scenario": {"assumption": f"every HARD exit ({', '.join(GAP_REASONS)}) fills at "
+                                          f"{SL_GAP_PCT:.0f}% (or worse)",
+                            "stop_exits": sl, "hard_exits": sum(1 for r in counted if r.get("exit_reason") in GAP_REASONS),
+                            "by_cost": cost_table(counted, levels, starting, sl_gap=True)},
         "haircut": haircut_split(counted, levels, starting),
         "reference_only": {"tp_share": round(tp / (tp + sl), 4) if tp + sl else None, "tp_exits": tp, "sl_exits": sl,
                            "note": "TP/(TP+SL) mostly reflects volatility; NOT a decision metric"},
