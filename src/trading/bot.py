@@ -75,6 +75,7 @@ class PaperBot:
         self.last_buy_attempt: dict[str, float] = {}
         self.quote_block: dict[str, float] = {}  # mint -> until: Jupiter confirmed NO route (no re-quote spam)
         self.quote_stats: dict[str, int] = {}    # Jupiter BUY-quote outcomes by status
+        self.sell_quote_stats: dict[str, int] = {}  # Jupiter SELL-quote outcomes by status
         self.snapshot_status: dict | None = None   # set by the web app: durable store of the sample (core.snapshot)
         from trading.gaps import GapTracker
         self.gap_tracker = GapTracker(self.book)
@@ -221,10 +222,13 @@ class PaperBot:
                 hard = reason in HARD
                 if self.jupiter is not None:
                     it = {"frac": frac, "reason": reason, "mark": mark, "ts": now, "hard": hard}
-                    if hard:                            # protective exit replaces any pending TP / momentum intent
+                    cur = self.sell_intents.get(p.mint)
+                    if cur is not None:
+                        cur["mark"] = mark                  # keep its retry state, refresh the reference
+                    if hard and (cur is None or not cur.get("hard")):
+                        self.sell_intents[p.mint] = it      # protective exit replaces a pending TP / momentum intent
+                    elif cur is None:
                         self.sell_intents[p.mint] = it
-                    else:
-                        self.sell_intents.setdefault(p.mint, it)
                     continue                            # filled on a real Jupiter SELL quote in execute_sells()
                 # no Jupiter client at all: no executable quote -> haircut for EVERY exit, never near the mark
                 ex = self.exec.sell_haircut(st, tokens, mark, self._sol(), reason,
@@ -481,8 +485,8 @@ class PaperBot:
     async def _latency_probe(self, st, mint: str, lamports: int, q: dict):
         """Real latency drift: wait a simulated latency (0.4-1.5 s), re-quote the same size, compare outAmount.
         Positive = adverse (fewer tokens). Quotes only. Returns bps or None."""
-        if not self.cfg.latency_probe or not hasattr(self.jupiter, "quote_result"):
-            return None
+        if not self.cfg.latency_probe or not hasattr(self.jupiter, "quote_result") or self.sell_intents:
+            return None                                 # research probe never competes with a pending SELL
         q_ts = time.time()
         await asyncio.sleep(self._probe_rng.uniform(0.4, 1.5))
         from trading.jupiter import WSOL, route_label
@@ -804,6 +808,8 @@ class PaperBot:
         if self.jupiter is None or not hasattr(self.jupiter, "quote_result"):
             return 0
         states = {x.mint: x for x in (self.engine.published or [])}
+        if self.sell_intents:                     # SELL quotes first: truth quotes wait (own budget, lower priority)
+            return 0
         n = await self._truth_exit_quotes(states, now)
         self._truth_finalize(now)
         if self.intents:
@@ -1239,40 +1245,59 @@ class PaperBot:
             self.log("FAILED", f"SELL {reason}: {ex.reason}", st, now=now)
 
     async def execute_sells(self, now: float | None = None) -> None:
-        """Every exit: fresh Jupiter SELL quote right before the fill.
-        HARD / SL exits (stop loss, risk, liquidity, whale, holder, identity): filled on the quote whatever its impact;
-        no quote -> HAIRCUT fill (reference x (1 - hard_exit_no_quote_haircut_pct)), never near the DexScreener mark.
-        Non-protective exits (TP, trailing, momentum, volume, time): no quote -> the same HAIRCUT fill (an exit is
-        never skipped, never priced at the mark); impact above the limit -> retry next tick."""
-        from trading.jupiter import WSOL, price_impact
+        """Every exit is filled on a fresh Jupiter SELL quote. The quote result keeps its classification:
+          OK                      -> fill (non-HARD: waits while the route impact is above max_slippage_pct)
+          NO_ROUTE / INVALID      -> no executable route: HAIRCUT fill (hard_exit_no_quote_haircut_pct), any exit
+          RATE_LIMITED / TIMEOUT / API_ERROR / COOLDOWN (breaker open) / no SOL price -> TRANSIENT: the intent is
+                                     KEPT and retried with backoff for QUOTE_RETRY_WINDOW_S (like a BUY). When the
+                                     window is over a HARD exit takes the haircut (emergency); a non-HARD exit is
+                                     dropped and comes back with the next exit signal (never sold blind).
+        The intent is removed only once there is an outcome. SELL quotes have priority over truth / probe quotes."""
+        from trading.jupiter import INVALID, NO_ROUTE, price_impact
         now = now or time.time()
         states = {s.mint: s for s in (self.engine.published or [])}
         for mint, it in list(self.sell_intents.items()):
-            self.sell_intents.pop(mint, None)
+            expired = it.get("hard") and "first" in it and now - it["first"] >= QUOTE_RETRY_WINDOW_S
+            if now < it.get("next", 0.0) and not expired:
+                continue                                # backing off after a transient quote error
             p, st = self.book.positions.get(mint), states.get(mint)
             if p is None or st is None:
+                self.sell_intents.pop(mint, None)
                 continue
             tokens, reason, sol = p.tokens * it["frac"], it["reason"], self._sol()
-            q = await self._sell_quote(mint, int(tokens * 10 ** (st.info.decimals or 6))) if sol else None
-            if it.get("hard"):
-                if q is not None:
-                    ex = self.exec.sell_from_quote(st, tokens, q, sol, reason, now)
-                    ex.ref_price = it["mark"]           # validated mark (post-entry print or the fill), not a raw print
-                else:
-                    ex = self.exec.sell_haircut(st, tokens, it["mark"], sol, reason,
-                                                self.cfg.hard_exit_no_quote_haircut_pct / 100, now)
-                self._after_sell(p, st, ex, reason, it["frac"], now)
-                continue
-            if q is not None:
+            qr = await self._sell_quote(mint, int(tokens * 10 ** (st.info.decimals or 6)), sol)
+            self.sell_quote_stats[qr.status] = self.sell_quote_stats.get(qr.status, 0) + 1
+            haircut = self.cfg.hard_exit_no_quote_haircut_pct / 100
+            if qr.ok:
+                q = qr.quote
                 imp = price_impact(q)
-                if imp is not None and 100 * imp > self.cfg.max_slippage_pct:
-                    self.log("INFO", f"SELL {reason} waits: Jupiter impact {100 * imp:.2f}% > {self.cfg.max_slippage_pct}%",
-                             st, now=now)
+                if not it.get("hard") and imp is not None and 100 * imp > self.cfg.max_slippage_pct:
+                    self.sell_intents.pop(mint, None)   # re-signalled next tick
+                    self.log("INFO", f"SELL {reason} waits: Jupiter impact {100 * imp:.2f}% > "
+                                     f"{self.cfg.max_slippage_pct}%", st, now=now)
                     continue
                 ex = self.exec.sell_from_quote(st, tokens, q, sol, reason, now)
-            else:                                       # no executable quote: haircut, never a mark-price fill
-                ex = self.exec.sell_haircut(st, tokens, it["mark"], sol, reason,
-                                            self.cfg.hard_exit_no_quote_haircut_pct / 100, now)
+                if it.get("hard"):
+                    ex.ref_price = it["mark"]           # validated mark (post-entry print or the fill), not a raw print
+            elif qr.status in (NO_ROUTE, INVALID):      # really no executable route
+                ex = self.exec.sell_haircut(st, tokens, it["mark"], sol, reason, haircut, now)
+            else:                                       # transient: keep the intent, retry inside the window
+                first = it.setdefault("first", now)
+                if now - first < QUOTE_RETRY_WINDOW_S:
+                    it["retries"] = it.get("retries", 0) + 1
+                    wait = min(20.0, 2.5 * 2 ** (it["retries"] - 1))
+                    it["next"] = now + wait
+                    self.log("INFO", f"SELL {reason} → QUOTE {qr.label()} → RETRY in {wait:.0f}s "
+                                     f"(attempt {it['retries'] + 1})", st, now=now)
+                    continue
+                if not it.get("hard"):
+                    self.sell_intents.pop(mint, None)
+                    self.log("INFO", f"SELL {reason} postponed: no quote for {QUOTE_RETRY_WINDOW_S:.0f}s "
+                                     f"({qr.label()}); re-signalled next tick, never sold blind", st, now=now)
+                    continue
+                ex = self.exec.sell_haircut(st, tokens, it["mark"], sol, reason, haircut, now)
+                ex.reason = (ex.reason + " · " if ex.reason else "") + f"emergency after {QUOTE_RETRY_WINDOW_S:.0f}s of {qr.status}"
+            self.sell_intents.pop(mint, None)
             self._after_sell(p, st, ex, reason, it["frac"], now)
 
     # ---------------------------------------------------------------- CONFIRM mode
@@ -1294,14 +1319,17 @@ class PaperBot:
             if now > o["expires"]:
                 self.pending.pop(oid, None)
 
-    async def _sell_quote(self, mint: str, amount_raw: int) -> dict | None:
-        """Jupiter SELL quote (token -> SOL) or None. Classified client when available, else the plain one."""
-        from trading.jupiter import WSOL
+    async def _sell_quote(self, mint: str, amount_raw: int, sol: float | None = None):
+        """Classified Jupiter SELL quote (token -> SOL) as a trading.jupiter.QuoteResult. A quote-only client is
+        wrapped like _buy_quote (None -> API_ERROR, transient). No SOL price -> API_ERROR (cannot value the fill)."""
+        from trading.jupiter import API_ERROR, OK, WSOL, QuoteResult
+        if not sol:
+            return QuoteResult(API_ERROR, detail="no SOL price", attempts=0)
         slip = int(self.cfg.max_slippage_pct * 100)
         if hasattr(self.jupiter, "quote_result"):
-            r = await self.jupiter.quote_result(mint, WSOL, amount_raw, slip)
-            return r.quote if r.ok else None
-        return await self.jupiter.quote(mint, WSOL, amount_raw, slip)
+            return await self.jupiter.quote_result(mint, WSOL, amount_raw, slip)
+        q = await self.jupiter.quote(mint, WSOL, amount_raw, slip)
+        return QuoteResult(OK, quote=q, http=200, attempts=1) if q else QuoteResult(API_ERROR, detail="no quote", attempts=1)
 
     async def _buy_quote(self, mint: str, lamports: int):
         """Classified Jupiter quote (trading.jupiter.QuoteResult); a quote-only client is wrapped."""

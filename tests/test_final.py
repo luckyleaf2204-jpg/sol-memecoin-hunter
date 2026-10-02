@@ -10,7 +10,7 @@ from core.config import ApiKeys, Settings
 from core.models import EarlySignal, TokenInfo
 from database.db import Database
 from scanner.engine import ScannerEngine
-from test_bot_v2 import FakeJupiter, bot, good, run
+from test_bot_v2 import FakeJupiter, NoRouteJupiter, bot, good, run
 from trading.bot import PaperBot
 from trading.config import TradingConfig
 from trading.execution import ExecutionInterface, live_available
@@ -95,7 +95,7 @@ def test_sell_without_quote_takes_the_haircut_and_waits_on_high_impact():
     st, b, p = _held()
     st.market.price_usd *= 1.9
     st.stamps["market"].updated_at = time.time()
-    b.jupiter = FakeJupiter(fail=True)
+    b.jupiter = NoRouteJupiter()                                   # no executable route at all
     b.tick()
     asyncio.run(b.execute_sells())
     sell = b.book.executions[-1]                                   # exit never skipped, never at the mark (fix 5)
@@ -110,14 +110,17 @@ def test_sell_without_quote_takes_the_haircut_and_waits_on_high_impact():
     assert st2.mint in b2.book.positions and any("waits" in a.text for a in b2.activity)
 
 
-def test_stop_loss_never_waits_for_jupiter():
+def test_stop_loss_retries_a_down_jupiter_then_takes_the_emergency_haircut():
     st, b, p = _held()
     b.jupiter = FakeJupiter(fail=True)
     st.market.price_usd *= 0.7
     st.stamps["market"].updated_at = time.time()
     b.tick()
     assert b.sell_intents[st.mint]["hard"] is True                 # same loop iteration: execute_sells()
-    asyncio.run(b.execute_sells())                                  # Jupiter down -> HAIRCUT fill, no waiting
+    t = time.time()
+    asyncio.run(b.execute_sells(t))                                 # transient: kept and retried, not sold blind
+    assert st.mint in b.book.positions and b.sell_intents[st.mint]["first"] == t
+    asyncio.run(b.execute_sells(t + 61))                            # retry window over: emergency haircut
     assert not b.sell_intents and not b.book.positions and b.book.closed[0].exit_reason == "stop_loss"
     sell = [e for e in b.book.executions if e.side == "SELL"][-1]
     assert sell.fill_price == pytest.approx(st.market.price_usd * (1 - b.cfg.hard_exit_no_quote_haircut_pct / 100))

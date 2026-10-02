@@ -64,6 +64,17 @@ class FakeJupiter:
                 "routePlan": [{"swapInfo": {"label": "Pump.fun Amm"}}]}
 
 
+class NoRouteJupiter(FakeJupiter):
+    """BUY quotes like FakeJupiter; every SELL quote is NO_ROUTE (no executable route at all)."""
+    async def quote_result(self, input_mint, output_mint, amount_raw, slippage_bps):
+        from trading import jupiter as J
+        if output_mint == WSOL:
+            self.calls.append((input_mint, output_mint, amount_raw))
+            return J.QuoteResult(J.NO_ROUTE, http=400, code="COULD_NOT_FIND_ANY_ROUTE", attempts=1)
+        return J.QuoteResult(J.OK, quote=await self.quote(input_mint, output_mint, amount_raw, slippage_bps),
+                             http=200, attempts=1)
+
+
 def bot(states, jup=None, feeds=None, **cfg):
     b = PaperBot(Eng(states, feeds), TradingConfig(seed=4, **cfg))
     b.exec.rng.random = lambda: 0.99
@@ -152,10 +163,13 @@ def test_liquidity_collapse_sells_even_when_jupiter_is_down():
     st = good()
     b = bot([st], FakeJupiter())
     run(b)
-    b.jupiter = FakeJupiter(fail=True)
+    b.jupiter = FakeJupiter(fail=True)                            # Jupiter down: transient errors
     st.liquidity_intel = LiquidityIntel(state="SHOCK")
     run(b)
-    asyncio.run(b.execute_sells())                               # no quote -> HAIRCUT fill, never skipped
+    t = time.time()
+    asyncio.run(b.execute_sells(t))
+    assert st.mint in b.book.positions and b.sell_intents[st.mint]["retries"] == 1   # kept, retried
+    asyncio.run(b.execute_sells(t + 61))                         # window over: HARD exit -> emergency haircut
     assert not b.book.positions and b.book.closed[0].exit_reason == "liquidity_collapse"
     sell = next(a for a in b.activity if a.kind == "SELL")
     assert "WHY:" in sell.text and "NET P&L" in sell.text

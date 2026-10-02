@@ -5,7 +5,7 @@ import time
 
 import pytest
 
-from test_bot_v2 import FakeJupiter
+from test_bot_v2 import FakeJupiter, NoRouteJupiter
 from test_stepB_report import epoch, row
 from test_v12 import opened
 from trading.book import mid_price
@@ -23,7 +23,7 @@ def test_haircut_fill_mid_is_the_fill():
 
 def test_haircut_exit_loss_is_in_the_gross_move():
     b, st, p = opened()
-    b.jupiter = FakeJupiter(fail=True)                    # no SELL quote -> haircut 30 %
+    b.jupiter = NoRouteJupiter()                    # no SELL quote -> haircut 30 %
     st.stamps["market"].updated_at = time.time() + 1
     st.market.price_usd = p.entry_price * 0.8
     b.tick()

@@ -7,7 +7,7 @@ import time
 import pytest
 
 from core.models import LiquidityIntel
-from test_bot_v2 import FakeJupiter, bot, good
+from test_bot_v2 import FakeJupiter, NoRouteJupiter, bot, good
 from test_v12 import MINT, opened
 from trading.book import PaperBook, cost_stress, mid_price
 from trading.config import TradingConfig
@@ -42,7 +42,7 @@ def test_stop_loss_is_filled_on_a_jupiter_sell_quote_even_above_the_impact_limit
 
 def test_stop_loss_without_quote_takes_the_configured_haircut():
     b, st, p = opened()
-    b.jupiter = FakeJupiter(fail=True)
+    b.jupiter = NoRouteJupiter()
     b.cfg.hard_exit_no_quote_haircut_pct = 50.0
     crash(b, st, p)
     asyncio.run(b.execute_sells())

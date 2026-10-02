@@ -4,7 +4,7 @@ import time
 
 import pytest
 
-from test_bot_v2 import FakeJupiter
+from test_bot_v2 import FakeJupiter, NoRouteJupiter
 from test_stepB_report import epoch, row
 from test_v12 import opened
 from trading.sample_report import report
@@ -12,7 +12,7 @@ from trading.sample_report import report
 
 def test_haircut_exit_is_flagged_in_the_journal():
     b, st, p = opened()
-    b.jupiter = FakeJupiter(fail=True)                       # no SELL quote
+    b.jupiter = NoRouteJupiter()                       # no SELL quote
     st.stamps["market"].updated_at = time.time() + 1
     st.market.price_usd = p.entry_price * 0.8
     b.tick()

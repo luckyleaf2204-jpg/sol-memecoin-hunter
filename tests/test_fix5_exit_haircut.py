@@ -5,7 +5,7 @@ import time
 
 import pytest
 
-from test_bot_v2 import FakeJupiter
+from test_bot_v2 import FakeJupiter, NoRouteJupiter
 from test_v12 import MINT, opened
 
 
@@ -17,7 +17,7 @@ def _tp1(b, st, p):
 
 def test_take_profit_without_quote_is_a_haircut():
     b, st, p = opened()
-    b.jupiter = FakeJupiter(fail=True)
+    b.jupiter = NoRouteJupiter()
     _tp1(b, st, p)
     assert b.sell_intents[MINT]["hard"] is False
     asyncio.run(b.execute_sells())
