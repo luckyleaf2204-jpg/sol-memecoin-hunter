@@ -270,3 +270,40 @@ def test_a_raising_buy_intent_does_not_stop_the_others(capsys):
     asyncio.run(b.execute_intents())
     assert MB in b.book.positions and MINT not in b.book.positions
     assert "[buy] GoodMint round error: ValueError" in capsys.readouterr().out
+
+
+# ---------------------------------------------------------------- C5: a fill that raises after the quote
+def test_fill_error_backs_off_and_a_hard_exit_takes_the_haircut_after_3():
+    from test_g1_sell_retry import SellScript
+    b, st, p = opened()
+    b.jupiter = SellScript([J.OK], p.entry_price * 0.8)
+    _signal(b, st, p, 0.8)                                        # stop loss (HARD)
+    calls = []
+
+    def broken(*a, **kw):
+        calls.append(1)
+        raise ValueError("quote shape changed")
+    b.exec.sell_from_quote = broken
+    t = time.time()
+    asyncio.run(b.execute_sells(t))
+    it = b.sell_intents[MINT]
+    assert it["fill_errors"] == 1 and it["next"] == t + 2.5 and MINT in b.book.positions
+    asyncio.run(b.execute_sells(t + 1))                          # backing off: no new attempt
+    assert len(calls) == 1
+    asyncio.run(b.execute_sells(t + 3))
+    asyncio.run(b.execute_sells(t + 9))
+    assert len(calls) == 3 and MINT not in b.book.positions
+    sell = [e for e in b.book.executions if e.side == "SELL"][-1]
+    assert sell.model.startswith("PAPER haircut") and "3 fill errors" in sell.reason
+
+
+def test_fill_error_on_a_non_hard_exit_never_haircuts():
+    from test_g1_sell_retry import SellScript
+    b, st, p = opened()
+    b.jupiter = SellScript([J.OK], p.entry_price * 1.35)
+    _signal(b, st, p, 1.35)                                       # TP1
+    b.exec.sell_from_quote = lambda *a, **kw: (_ for _ in ()).throw(ValueError("x"))
+    t = time.time()
+    for k in range(6):
+        asyncio.run(b.execute_sells(t + 30 * k))
+    assert MINT in b.book.positions and not [e for e in b.book.executions if e.side == "SELL"]

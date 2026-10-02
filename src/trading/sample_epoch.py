@@ -13,8 +13,8 @@ import json
 import time
 from pathlib import Path
 
-STRATEGY_VERSION = "s12-stale-healthy-clock"   # C1: stale time counts only while the feed has published and is healthy and Jupiter is not in its breaker; restarts / pauses never count
-# (previous: s11-constants-v2, never deployed)
+STRATEGY_VERSION = "s13-fill-error-haircut"   # C5: a HARD exit whose fill raises SELL_FILL_ERROR_MAX (3) times is filled at the haircut; fill errors back off
+# (previous: s12-stale-healthy-clock, never deployed)
 MIN_SAMPLE_COMMIT = "148af2c"            # the server must run this commit or a descendant
 LEGACY = "LEGACY"
 

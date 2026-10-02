@@ -43,6 +43,7 @@ SELL_QUOTE_ATTEMPTS, SELL_QUOTE_BUDGET_S = 2, 4.0   # one SELL quote call is sho
 NO_ROUTE_BLOCK_S = 120.0        # after a confirmed "no route": no re-quote of that CA for this long
 MAX_ENTRIES_PER_TICK = 2
 STALE_TIMEOUT_S = 600.0         # no validated price for this long -> forced exit "stale_timeout" (P&L counted)
+SELL_FILL_ERROR_MAX = 3          # a HARD exit whose fill raised this many times -> emergency haircut
 STALE_MAX_STEP_S = 30.0         # one tick adds at most this much stale time (a pause / restart never counts)
 FAILED_BUY_COOLDOWN_S = 300.0   # after a FAILED BUY fill, no new BUY attempt on that mint for this long
 TRUTH_QUOTES_PER_MIN = 24       # V1.3 truth SELL quotes: own budget, below Jupiter's 50/min (BUY quotes first)
@@ -1255,6 +1256,24 @@ class PaperBot:
         if p.sl_hit_ts is None and price <= p.initial_stop:
             p.sl_hit_ts = now
 
+    def _sell_fill_error(self, mint: str, it: dict, p, st, err: Exception, now: float) -> None:
+        """The quote came back but filling it raised: back off like a transient quote error; a protective (HARD) exit
+        that fails SELL_FILL_ERROR_MAX times is filled at the haircut instead of retrying forever."""
+        if self.sell_intents.get(mint) is not it or self.book.positions.get(mint) is not p:
+            return
+        it["fill_errors"] = it.get("fill_errors", 0) + 1
+        it["next"] = now + min(20.0, 2.5 * 2 ** (it["fill_errors"] - 1))
+        if not it.get("hard") or it["fill_errors"] < SELL_FILL_ERROR_MAX:
+            return
+        try:
+            ex = self.exec.sell_haircut(st, p.tokens * it["frac"], p.last_price or it["mark"], self._sol(), it["reason"],
+                                        self.cfg.hard_exit_no_quote_haircut_pct / 100, now)
+            ex.reason = (ex.reason + " · " if ex.reason else "") +                 f"emergency after {it['fill_errors']} fill errors ({type(err).__name__})"
+            self.sell_intents.pop(mint, None)
+            self._after_sell(p, st, ex, it["reason"], it["frac"], now)
+        except Exception as e2:                          # even the haircut failed: keep the intent, try next round
+            print(f"[sell] {mint[:8]} emergency haircut failed: {type(e2).__name__}: {e2}", flush=True)
+
     def _close_without_state(self, p, reason: str, now: float, frac: float = 1.0) -> None:
         """Protective / stale exit of a token the feed no longer publishes: no quote is possible, so the haircut at the
         last validated mark (counted in the P&L like every haircut exit)."""
@@ -1422,6 +1441,7 @@ class PaperBot:
             except Exception as e:                     # logged; the other sells of this round still run
                 print(f"[sell] {mint[:8]} round error: {type(e).__name__}: {e}", flush=True)
                 self.log("INFO", f"SELL round error on {mint[:8]}: {type(e).__name__}: {e}")
+                self._sell_fill_error(mint, it, p, st, e, now)
 
     # ---------------------------------------------------------------- CONFIRM mode
     def approve(self, order_id: str, now: float | None = None) -> bool:
