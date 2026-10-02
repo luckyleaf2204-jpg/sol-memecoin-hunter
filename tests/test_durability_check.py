@@ -73,7 +73,8 @@ def test_healthz_and_api_snapshot_show_the_warning(env):  # noqa: F811
     c, _, _ = env
     h = c.get("/healthz").json()["snapshot"]
     assert h["durable"] is False and h["warning"] == "MẪU KHÔNG BỀN - sẽ mất khi restart"
-    assert set(h) <= {"durable", "store", "last_utc", "last_restore_utc", "warning"}     # no target on /healthz
+    assert set(h) <= {"durable", "store", "last_utc", "last_restore_utc", "warning",
+                      "research_db_carried_in_a_row"}                       # no target on /healthz
     assert c.get("/api/snapshot").status_code == 401                                     # details need the code
     d = c.get("/api/snapshot", headers={"X-Access-Code": CODE}).json()
     assert d["durable"] is False and d["warning"].startswith("MẪU KHÔNG BỀN") and d["last_snapshot"] is None
