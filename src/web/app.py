@@ -50,6 +50,41 @@ VERSION = "web-16"
 HOME_LIMIT = {"opportunity": 60, "watch": 60, "nodata": 40, "excluded": 40}
 
 
+class _Abandoned(Exception):
+    """The daemon-thread call was still running when its wait ended. Not a TimeoutError: the function itself
+    may raise that (a store call), and the two must stay distinct."""
+
+
+async def _in_daemon_thread(fn, timeout: float | None):
+    """Run fn on a daemon thread. A timeout abandons the thread; it is not the default executor, so loop
+    shutdown does not wait out a hung store call."""
+    if timeout is None:
+        return await asyncio.to_thread(fn)
+    loop = asyncio.get_running_loop()
+    box: dict = {}
+    done = asyncio.Event()
+
+    def work():
+        try:
+            box["v"] = fn()
+        except BaseException as e:
+            box["e"] = e
+        finally:
+            try:
+                loop.call_soon_threadsafe(done.set)
+            except RuntimeError:
+                pass
+
+    threading.Thread(target=work, daemon=True).start()
+    try:
+        await asyncio.wait_for(done.wait(), max(float(timeout), 0.0))
+    except asyncio.TimeoutError:
+        raise _Abandoned from None
+    if "e" in box:
+        raise box["e"]
+    return box.get("v")
+
+
 def client_ip(request: Request) -> str:
     fwd = request.headers.get("x-forwarded-for", "")
     return fwd.split(",")[0].strip() if fwd else (request.client.host if request.client else "?")
@@ -114,35 +149,13 @@ def create_app(engine: ScannerEngine | None = None, start_scanner: bool = True,
             print(f"[history] save failed: {type(e).__name__}", flush=True)
 
     async def _await_bounded(fn, timeout: float | None):
-        """Run fn in a daemon thread. A store error keeps its own type; only running past `timeout` becomes a
-        deadline (SnapshotError). Not the default executor: a call we stop waiting for must not block loop
-        shutdown (asyncio joins that pool), or a slow store would hold SIGTERM for the whole HTTP timeout."""
+        """Like _in_daemon_thread, but a timeout is a snapshot deadline (SnapshotError), not a bare TimeoutError,
+        so a store TimeoutError keeps its own type."""
         from core.snapshot import SnapshotError
-        if timeout is None:
-            return await asyncio.to_thread(fn)
-        loop = asyncio.get_running_loop()
-        box: dict = {}
-        done = asyncio.Event()
-
-        def work():
-            try:
-                box["v"] = fn()
-            except BaseException as e:
-                box["e"] = e
-            finally:
-                try:                               # the loop may already be closed if we abandoned this call
-                    loop.call_soon_threadsafe(done.set)
-                except RuntimeError:
-                    pass
-
-        threading.Thread(target=work, daemon=True).start()
         try:
-            await asyncio.wait_for(done.wait(), max(timeout, 0.0))
-        except asyncio.TimeoutError:
+            return await _in_daemon_thread(fn, timeout)
+        except _Abandoned:
             raise SnapshotError(f"deadline: not finished in {timeout}s") from None
-        if "e" in box:
-            raise box["e"]
-        return box.get("v")
 
     async def _snapshot_now(reason: str, slow_timeout_s: float | None = None,
                             deadline_s: float | None = None) -> None:
@@ -364,12 +377,24 @@ def create_app(engine: ScannerEngine | None = None, start_scanner: bool = True,
 
     async def _lease_loop(lease) -> None:
         from core import lease as L
+        loop = asyncio.get_running_loop()
+        next_renew = loop.time() + L.LEASE_RENEW_S          # first renew after one period, as before
         while True:
-            await asyncio.sleep(L.LEASE_RENEW_S)
+            delay = min(L.LEASE_FENCE_CHECK_S, max(0.0, next_renew - loop.time()))
+            if delay > 0:
+                await asyncio.sleep(delay)
+            if lease.fenced():                         # also while a renew is hung: don't wait out another period
+                _fence(f"lease not renewed for > {L.fence_after_s():.0f}s (TTL - renew - I/O timeout): "
+                       "self-fenced — another instance may take it soon", "FENCED")
+                return
+            if loop.time() + 1e-3 < next_renew:
+                continue
+            next_renew = loop.time() + L.LEASE_RENEW_S
             try:                                       # a hung store call is abandoned after LEASE_IO_TIMEOUT_S
-                ok = await asyncio.wait_for(asyncio.to_thread(lease.renew), L.LEASE_IO_TIMEOUT_S)
+                ok = await _in_daemon_thread(lease.renew, L.LEASE_IO_TIMEOUT_S)
             except Exception as e:                     # store error / hang: transient, unless it lasts too long
-                print(f"[lease] renew failed: {type(e).__name__}", flush=True)
+                name = "TimeoutError" if isinstance(e, _Abandoned) else type(e).__name__
+                print(f"[lease] renew failed: {name}", flush=True)
                 if lease.fenced():
                     _fence(f"lease not renewed for > {L.fence_after_s():.0f}s (TTL - renew - I/O timeout): "
                            "self-fenced — another instance may take it soon", "FENCED")
@@ -441,8 +466,10 @@ def create_app(engine: ScannerEngine | None = None, start_scanner: bool = True,
         def shut_left() -> float:
             return SHUTDOWN_TOTAL_S - (time.monotonic() - t_shut)
 
+        lease_task = state.get("lease_task")
         for t in state["aux"]:
-            t.cancel()
+            if t is not lease_task:                    # keep renewing through the final snapshot
+                t.cancel()
         try:
             if state["bot_task"]:
                 state["bot_stop"].set()
