@@ -46,5 +46,6 @@ class GapTracker:
 
 
 def overlaps(row: dict, gaps: list[dict], now: float) -> bool:
+    """Strict overlap: a trade that closed exactly when a gap began (or opened when it ended) was fully managed."""
     start, end = row.get("entry_ts") or 0.0, row.get("exit_ts") or now
-    return any(start <= g["end"] and end >= g["start"] for g in gaps)
+    return any(start < g["end"] and end > g["start"] for g in gaps)

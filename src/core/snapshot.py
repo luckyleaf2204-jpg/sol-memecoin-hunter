@@ -25,6 +25,8 @@ from pathlib import Path
 
 FILES = ("paper_bot.json", "sample_epoch.json", "truth_ledger.json", "trading.json", "research.db")
 MANIFEST = "manifest.json"
+PROBE = "probe.json"
+NOT_DURABLE = "MẪU KHÔNG BỀN - sẽ mất khi restart"
 SNAPSHOT_EVERY_S = float(os.environ.get("SNAPSHOT_EVERY_S", "3600") or 3600)
 
 
@@ -78,6 +80,42 @@ def store_from_env():
     return None
 
 
+def target_of(store) -> str:
+    """Where snapshots go, safe to log / show: a directory path, or scheme://host/path of the HTTP store — never the
+    token, user info or query string."""
+    if store is None:
+        return "-"
+    if store.kind == "dir":
+        return str(store.root)
+    from urllib.parse import urlsplit
+    u = urlsplit(store.url)
+    return f"{u.scheme}://{u.hostname or ''}{f':{u.port}' if u.port else ''}{u.path}"
+
+
+def durability_check(store, data_dir: Path) -> dict:
+    """Start-up check: is there a durable store and can it be written AND read back?"""
+    import secrets
+    if store is None:
+        return {"durable": False, "store": "NOT CONFIGURED", "target": "-", "warning": NOT_DURABLE,
+                "reason": "SNAPSHOT_DIR / SNAPSHOT_URL not set"}
+    out = {"durable": False, "store": store.kind, "target": target_of(store)}
+    if store.kind == "dir":
+        try:
+            Path(store.root).resolve().relative_to(Path(data_dir).resolve())
+            return {**out, "warning": NOT_DURABLE, "reason": "SNAPSHOT_DIR is inside DATA_DIR (same ephemeral disk)"}
+        except ValueError:
+            pass
+    nonce = secrets.token_hex(8).encode()
+    try:
+        store.put(PROBE, nonce)
+        ok = store.get(PROBE) == nonce
+    except Exception as e:                                  # the message may carry a URL: report the type only
+        return {**out, "warning": NOT_DURABLE, "reason": f"write test failed ({type(e).__name__})"}
+    if not ok:
+        return {**out, "warning": NOT_DURABLE, "reason": "write test failed (read-back differs)"}
+    return {**out, "durable": True, "reason": "write + read-back OK"}
+
+
 def _read(path: Path) -> bytes:
     """A consistent copy: SQLite through its online backup API (WAL safe), other files as they are."""
     if path.suffix == ".db":
@@ -95,16 +133,20 @@ def _read(path: Path) -> bytes:
 
 
 def snapshot(data_dir: Path, store, commit: str = "", now: float | None = None) -> dict:
-    now = now or time.time()
+    t0 = time.time()
+    now = now or t0
     files = {}
     for name in FILES:
         p = Path(data_dir) / name
         if not p.exists():
             continue
         raw = _read(p)
-        store.put(name + ".gz", gzip.compress(raw, 6))
-        files[name] = {"sha256": hashlib.sha256(raw).hexdigest(), "size": len(raw)}
-    man = {"ts": now, "commit": commit, "files": files}
+        gz = gzip.compress(raw, 6)
+        store.put(name + ".gz", gz)
+        files[name] = {"sha256": hashlib.sha256(raw).hexdigest(), "size": len(raw), "size_gz": len(gz)}
+    man = {"ts": now, "commit": commit, "files": files, "bytes_raw": sum(f["size"] for f in files.values()),
+           "bytes_gz": sum(f["size_gz"] for f in files.values()), "duration_s": round(time.time() - t0, 2),
+           "target": target_of(store), "store": store.kind}
     store.put(MANIFEST, json.dumps(man).encode())
     return man
 
@@ -113,7 +155,7 @@ def restore(data_dir: Path, store) -> dict:
     """Restore the files that are MISSING locally from the latest snapshot (checksum verified)."""
     raw = store.get(MANIFEST)
     if raw is None:
-        return {"restored": [], "skipped": [], "snapshot_ts": None, "status": "NO SNAPSHOT"}
+        return {"restored": [], "skipped": [], "snapshot_ts": None, "status": "NO SNAPSHOT", "at": time.time()}
     man = json.loads(raw)
     restored, skipped = [], []
     for name, meta in man.get("files", {}).items():
@@ -134,4 +176,8 @@ def restore(data_dir: Path, store) -> dict:
         tmp.replace(dst)
         restored.append(name)
     return {"restored": restored, "skipped": skipped, "snapshot_ts": man.get("ts"), "commit": man.get("commit"),
-            "status": "RESTORED" if restored else "NOTHING TO RESTORE"}
+            "status": "RESTORED" if restored else "NOTHING TO RESTORE", "at": time.time()}
+
+
+def fmt_bytes(n: int | None) -> str:
+    return "-" if n is None else f"{n / 1e6:.1f} MB" if n >= 1e5 else f"{n / 1e3:.1f} kB"

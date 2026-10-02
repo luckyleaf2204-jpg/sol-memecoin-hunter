@@ -28,6 +28,7 @@ from fastapi.staticfiles import StaticFiles
 from analytics.narratives import aggregate_narratives
 from api.serialize import card, view
 from core.config import DATA_DIR, DB_PATH, Settings, env
+from core.snapshot import NOT_DURABLE, fmt_bytes
 from database.db import Database
 from i18n import load as load_lang, set_language, t
 from scanner.engine import ScannerEngine
@@ -86,12 +87,19 @@ class Guard:
         return True
 
 
+def _utc(t: float | None) -> str | None:
+    return time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(t)) if t else None
+
+
 def create_app(engine: ScannerEngine | None = None, start_scanner: bool = True,
                access_code: str | None = None, bot: PaperBot | None = None) -> FastAPI:
     set_language("vi")
     guard = Guard(access_code if access_code is not None else env("APP_ACCESS_CODE"))
     state: dict = {"engine": engine, "task": None, "started_at": time.time(), "bot": bot, "bot_task": None,
-                   "bot_stop": None, "snapshot": {"store": "NOT CONFIGURED", "last_ts": None, "restore": None},
+                   "bot_stop": None,
+                   "snapshot": {"store": "NOT CONFIGURED", "durable": False, "target": "-",
+                                "reason": "SNAPSHOT_DIR / SNAPSHOT_URL not set", "warning": NOT_DURABLE,
+                                "last_ts": None, "last": None, "last_error": None, "restore": None},
                    "aux": []}
 
     async def _snapshot_now(reason: str) -> None:
@@ -104,9 +112,16 @@ def create_app(engine: ScannerEngine | None = None, start_scanner: bool = True,
             if state["bot"] is not None:
                 state["bot"].persist()
             man = await asyncio.to_thread(snapshot, DATA_DIR, store, git_commit())
-            state["snapshot"]["last_ts"] = man["ts"]
-            print(f"[snapshot] {reason}: {', '.join(man['files'])} -> {store.kind} store", flush=True)
-        except Exception as e:                             # never break trading for a backup
+            state["snapshot"].update(last_ts=man["ts"], last_error=None, last={
+                "reason": reason,
+                "files": {k: {"size": v["size"], "size_gz": v["size_gz"]} for k, v in man["files"].items()},
+                "bytes_raw": man["bytes_raw"], "bytes_gz": man["bytes_gz"], "duration_s": man["duration_s"],
+                "target": man["target"], "store": man["store"]})
+            print(f"[snapshot] {reason} OK {_utc(man['ts'])}: {len(man['files'])} files, "
+                  f"{fmt_bytes(man['bytes_gz'])} gz ({fmt_bytes(man['bytes_raw'])} raw) -> {man['store']} "
+                  f"{man['target']} in {man['duration_s']} s", flush=True)
+        except Exception as e:                             # never break trading for a backup (type only: no URL)
+            state["snapshot"]["last_error"] = {"ts": time.time(), "reason": reason, "error": type(e).__name__}
             print(f"[snapshot] {reason} FAILED: {type(e).__name__}", flush=True)
 
     async def _snapshot_loop() -> None:
@@ -120,20 +135,25 @@ def create_app(engine: ScannerEngine | None = None, start_scanner: bool = True,
     @contextlib.asynccontextmanager
     async def lifespan(app: FastAPI):
         if start_scanner and state["bot"] is None:     # restore the sample BEFORE anything opens the files
-            from core.snapshot import restore, store_from_env
+            from core.snapshot import durability_check, restore, store_from_env
             store = store_from_env()
             state["snapshot_store"] = store
+            chk = await asyncio.to_thread(durability_check, store, DATA_DIR)
+            state["snapshot"].update(store=chk["store"], durable=chk["durable"], target=chk["target"],
+                                     reason=chk["reason"], warning=chk.get("warning"))
+            if chk["durable"]:
+                print(f"[durability] DURABLE: {chk['store']} {chk['target']} ({chk['reason']})", flush=True)
+            else:
+                print(f"[durability] {NOT_DURABLE}: {chk['reason']}", flush=True)
             if store is not None:
-                state["snapshot"]["store"] = store.kind
                 try:
                     res = await asyncio.to_thread(restore, DATA_DIR, store)
                 except Exception as e:
-                    res = {"status": f"RESTORE FAILED: {type(e).__name__}", "restored": []}
+                    res = {"status": f"RESTORE FAILED: {type(e).__name__}", "restored": [], "at": time.time()}
                 state["snapshot"]["restore"] = res
-                print(f"[snapshot] restore: {res['status']} {', '.join(res.get('restored', []))}", flush=True)
-            else:
-                print("[snapshot] NOT CONFIGURED (SNAPSHOT_DIR / SNAPSHOT_URL): the sample restarts with the "
-                      "container", flush=True)
+                frm = f" from snapshot {_utc(res['snapshot_ts'])}" if res.get("snapshot_ts") else ""
+                print(f"[snapshot] restore {res['status']}: {', '.join(res.get('restored', [])) or '-'}{frm}",
+                      flush=True)
         if state["engine"] is None:
             state["engine"] = ScannerEngine(Settings.load(), Database(DB_PATH), on_log=lambda m: print(m, flush=True))
         if state["bot"] is None:                         # PAPER trading bot: reads scanner results only
@@ -220,8 +240,11 @@ def create_app(engine: ScannerEngine | None = None, start_scanner: bool = True,
         from core.version import git_commit
         bot = state.get("bot")
         out = {"ok": True, "commit": git_commit()}
-        out["snapshot"] = {"store": state["snapshot"]["store"], "last_utc": time.strftime(
-            "%Y-%m-%dT%H:%M:%SZ", time.gmtime(state["snapshot"]["last_ts"])) if state["snapshot"]["last_ts"] else None}
+        sn = state["snapshot"]
+        out["snapshot"] = {"durable": sn["durable"], "store": sn["store"], "last_utc": _utc(sn["last_ts"]),
+                           "last_restore_utc": _utc((sn.get("restore") or {}).get("at"))}
+        if not sn["durable"]:
+            out["snapshot"]["warning"] = sn.get("warning") or NOT_DURABLE
         if bot is not None:
             out["params"] = bot.cfg.sample_id()
             ep = bot.sample_epoch
@@ -230,6 +253,19 @@ def create_app(engine: ScannerEngine | None = None, start_scanner: bool = True,
         return out
 
     # ------------------------------------------------------------------ API
+    @app.get("/api/snapshot")
+    async def snapshot_status():
+        """Durability of the paper sample (access code required): store, target (no token), last snapshot with
+        sizes, last error, last restore."""
+        sn = state["snapshot"]
+        rs = sn.get("restore") or {}
+        return {"durable": sn["durable"], "warning": None if sn["durable"] else (sn.get("warning") or NOT_DURABLE),
+                "store": sn["store"], "target": sn["target"], "check": sn["reason"],
+                "last_snapshot": {**sn["last"], "at_utc": _utc(sn["last_ts"])} if sn.get("last") else None,
+                "last_error": sn.get("last_error"),
+                "last_restore": {"status": rs.get("status"), "at_utc": _utc(rs.get("at")), "files": rs.get("restored"),
+                                 "from_snapshot_utc": _utc(rs.get("snapshot_ts"))} if rs else None}
+
     @app.get("/api/auth")
     async def auth():
         return {"ok": True}

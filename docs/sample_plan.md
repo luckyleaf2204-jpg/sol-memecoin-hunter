@@ -37,6 +37,46 @@ The durable place must be configured by the owner in the Render dashboard (no se
 Until one is set, `/healthz` shows `"snapshot": {"store": "NOT CONFIGURED"}` and the sample report warns that the
 sample restarts with the container. `SNAPSHOT_EVERY_S` changes the interval (default 3600).
 
+### Start-up durability check and status
+
+* At start-up the app writes a probe file to the store and reads it back. No store, a failed write / read-back, or
+  `SNAPSHOT_DIR` inside `DATA_DIR` (same ephemeral disk) -> **"MẪU KHÔNG BỀN - sẽ mất khi restart"** on `/healthz`
+  (`snapshot.warning`), as the FIRST warning of the sample report, and in the log (`[durability] ...`).
+* Log lines: `[durability] DURABLE: http https://host/prefix (write + read-back OK)`,
+  `[snapshot] hourly OK 2026-..Z: 5 files, 12.3 MB gz (80.1 MB raw) -> http https://host/prefix in 4.2 s`,
+  `[snapshot] restore RESTORED: paper_bot.json, ... from snapshot 2026-..Z`.
+* `GET /api/snapshot` (access code): durable, store, target (no credentials), last snapshot (time, per-file sizes,
+  total raw / gz, duration), last error, last restore (time, files, which snapshot). `/healthz` only shows
+  durable, store, last snapshot / restore times and the warning.
+
+### SNAPSHOT_URL: least-privilege token, never in logs or commits
+
+* Use a **dedicated** bucket (or a dedicated prefix) only for these snapshots. The token must allow exactly
+  `GET` and `PUT` of objects under that prefix — no list, no delete, no other bucket, no account / admin scope.
+  Never reuse an account-wide key.
+* Put `SNAPSHOT_URL` and `SNAPSHOT_TOKEN` **only** in the Render Dashboard -> service -> Environment (as secret
+  values). Never in `render.yaml`, `.env` files that are committed, chat, issues or screenshots.
+* The app sends the token only as an `Authorization: Bearer` header. It never prints it: logs and `/api/snapshot`
+  show `scheme://host/path` only (user info and query strings are stripped), and errors are reported by exception
+  type only (`tests/test_durability_check.py` checks this). Do not put a secret in the URL query string.
+* Rotate the token if it was ever exposed: create a new one, update the Render variable, revoke the old one.
+* Example store: a Cloudflare R2 bucket behind a tiny Worker that checks the bearer token and allows only GET/PUT
+  under one prefix:
+
+```js
+export default {
+  async fetch(req, env) {
+    if (req.headers.get("Authorization") !== `Bearer ${env.SNAPSHOT_TOKEN}`) return new Response("no", { status: 401 });
+    const key = "hunter/" + new URL(req.url).pathname.split("/").pop();      // one flat prefix, no traversal
+    if (req.method === "PUT") { await env.BUCKET.put(key, req.body); return new Response("ok"); }
+    if (req.method === "GET") { const o = await env.BUCKET.get(key); return o ? new Response(o.body) : new Response("", { status: 404 }); }
+    return new Response("method", { status: 405 });
+  },
+};
+```
+
+  Then `SNAPSHOT_URL=https://<worker>.workers.dev/hunter` and `SNAPSHOT_TOKEN=<the Worker secret>`.
+
 ## 1c. GAP flags (trading/gaps.py)
 
 A gap is any period > 5 min in which the bot could not manage positions: the loop paused (spin-down / sleep), the
@@ -50,6 +90,17 @@ A Render free web service spins down after 15 minutes without inbound traffic, w
 paper bot (a gap every quiet quarter of an hour). While the service is on the free plan the app pings its own
 public `/healthz` (RENDER_EXTERNAL_URL, through Render's edge) every 10 minutes. One always-on service fits the
 free monthly instance hours. On a paid plan (no spin-down) set `KEEPALIVE=0`: it is not needed.
+
+## 1e. Free instance hours (Render free plan)
+
+* Render gives **750 free instance hours per workspace per month**; when they run out, Render **suspends all free
+  web services of the workspace until the next month** (render.com/docs/free).
+* With keep-alive this service runs 24/7: 720 h in a 30-day month (30 h spare), **744 h in a 31-day month
+  (6 h spare)**. A second always-on free service in the same workspace would exhaust the hours around day 16.
+* Watch it: Render Dashboard -> Billing -> **Monthly Included Usage** (authoritative); estimate with
+  `python tools/free_hours.py [--services N]`. If the remaining hours get close to 0 before month end, either stop
+  other free services, set `KEEPALIVE=0` (the service will then sleep and the sample gets gaps) or move to a paid
+  instance (which can also mount a persistent disk).
 
 ## 2. No parameter change while counting
 

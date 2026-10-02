@@ -1166,6 +1166,7 @@ class PaperBot:
 
     def _after_sell(self, p, st, ex, reason: str, frac: float, now: float) -> None:
         self.book.reduce(p, ex, now, reason)
+        self.book.heartbeat = max(self.book.heartbeat or 0.0, now)   # alive at the sell: gaps start after it
         tr = self.cs_shadow.get(p.mint)
         if tr is not None and ex.status == "FILLED" and ex.tokens:
             from trading.truth_price import new_exit_event
@@ -1453,11 +1454,14 @@ class PaperBot:
         now = now or time.time()
         r = report(self.book.journal, self.sample_epoch, self.cfg.cost_stress_pct, self.cfg.starting_balance,
                    gaps=self.gap_tracker.all_gaps(now), now=now)
+        from core.snapshot import NOT_DURABLE
         snap = self.snapshot_status or {}
-        r["durability"] = {"store": snap.get("store", "NOT CONFIGURED"), "last_snapshot_ts": snap.get("last_ts")}
-        if r["durability"]["store"] == "NOT CONFIGURED":
-            r["warnings"].append("no durable snapshot store (SNAPSHOT_DIR / SNAPSHOT_URL): the sample restarts "
-                                 "with the container (deploy, restart)")
+        durable = bool(snap.get("durable"))
+        r["durability"] = {"durable": durable, "store": snap.get("store", "NOT CONFIGURED"),
+                           "reason": snap.get("reason", "SNAPSHOT_DIR / SNAPSHOT_URL not set"),
+                           "last_snapshot_ts": snap.get("last_ts")}
+        if not durable:
+            r["warnings"].insert(0, f"{NOT_DURABLE} ({r['durability']['reason']})")
         return r
 
     def sample_summary_line(self, now: float | None = None) -> str:
