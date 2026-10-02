@@ -170,3 +170,42 @@ def test_server_without_store_blocks_entries_and_says_so(tmp_path, monkeypatch):
     app = _app(tmp_path, "b")
     with TestClient(app) as c:
         assert "entries" not in c.get("/healthz").json() and app.state.hunter["bot"].entry_block is None
+
+
+# ---------------------------------------------------------------- B5: gate evaluation never blocks the tick
+def test_slow_gate_evaluation_runs_beside_the_tick(monkeypatch):
+    import asyncio
+
+    import research.gate_eval as GE
+    import trading.bot as B
+    from test_v12 import opened
+    monkeypatch.setattr(B, "TICK_S", 0.02)
+    b, st, p = opened()
+
+    class Rec:
+        path = "unused.db"
+
+        async def run_followups(self):
+            return None
+    b.recorder = Rec()
+    b._rec = lambda *a, **k: None
+    seen = {}
+
+    def slow_eval(path, seed, since):
+        seen["ticks_at_start"] = b.ticks
+        time.sleep(0.5)                                            # a big research.db
+        seen["ticks_at_end"] = b.ticks
+        return {"n_blocked": 0, "n_entered": 0}
+    monkeypatch.setattr(GE, "evaluate", slow_eval)
+    stop = asyncio.Event()
+
+    async def scenario():
+        task = asyncio.create_task(b.run(stop))
+        for _ in range(100):
+            await asyncio.sleep(0.02)
+            if b.gate_eval_cache:
+                break
+        stop.set()
+        await task
+    asyncio.run(scenario())
+    assert seen["ticks_at_end"] - seen["ticks_at_start"] >= 10 and b.gate_eval_cache["n_blocked"] == 0

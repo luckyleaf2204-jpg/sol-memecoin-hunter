@@ -75,6 +75,7 @@ class PaperBot:
         self.entry_block_seen: set[str] = set()   # tokens that would have been bought meanwhile (counted)
         self.gate_eval_cache: dict | None = None  # blocked vs entered vs matched baseline (research.gate_eval)
         self._last_gate_eval = 0.0
+        self._gate_eval_task: asyncio.Task | None = None
         self._exec_task: asyncio.Task | None = None   # sells + buys run beside the tick, never block it
         self._selling = False
         self.pending: dict[str, dict] = {}     # CONFIRM mode: BUYs waiting for the owner's approval (id -> order)
@@ -1645,12 +1646,9 @@ class PaperBot:
                 self._expire_pending(time.time())
                 if (self.sell_intents or self.intents) and (self._exec_task is None or self._exec_task.done()):
                     self._exec_task = asyncio.create_task(self._execution_round())   # never blocks the next tick
-                if self.recorder is not None and time.time() - self._last_gate_eval >= GATE_EVAL_EVERY_S:
-                    self._last_gate_eval = time.time()
-                    try:
-                        await self.refresh_gate_eval()
-                    except Exception as e:                # research never breaks trading
-                        self.log("INFO", f"gate evaluation error: {type(e).__name__}: {e}")
+                if self.recorder is not None and time.time() - self._last_gate_eval >= GATE_EVAL_EVERY_S                         and (self._gate_eval_task is None or self._gate_eval_task.done()):
+                    self._last_gate_eval = time.time()            # its own task + thread: never awaited here
+                    self._gate_eval_task = asyncio.create_task(self._gate_eval_safe())
                 if self.recorder is not None and time.time() - self._last_followup >= 30:
                     self._last_followup = time.time()
                     await self.recorder.run_followups()
@@ -1684,6 +1682,13 @@ class PaperBot:
                 await asyncio.wait_for(self._exec_task, 10)
             except Exception:
                 pass
+
+    async def _gate_eval_safe(self) -> None:
+        try:
+            await self.refresh_gate_eval()
+        except Exception as e:                           # research never breaks trading
+            print(f"[gate_eval] error: {type(e).__name__}: {e}", flush=True)
+            self.log("INFO", f"gate evaluation error: {type(e).__name__}: {e}")
 
     async def refresh_gate_eval(self) -> dict:
         """Forward returns of gate-BLOCKED vs ENTERED tokens vs an age / liquidity matched baseline, for this sample
