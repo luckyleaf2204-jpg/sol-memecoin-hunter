@@ -36,8 +36,10 @@ DURABILITY_RETRY_S = 60.0            # start-up probe failed on a store error: r
 SHUTDOWN_DEADLINE_S = 80.0           # at SIGTERM the WHOLE snapshot() gets this long, from its first line
 SHUTDOWN_SLOW_TIMEOUT_S = 60.0       # at SIGTERM: research.db gets this long, else the previous copy is kept
 HOURLY_SLOW_TIMEOUT_S = 60.0         # hourly: same — a slow research.db is carried, it does not fail the snapshot
+PUBLISH_RESERVE_S = 10.0             # inside the deadline: the two manifest puts keep at least this long
 SHUTDOWN_TOTAL_S = 105.0             # bot stop <= 10 + snapshot <= 80 + lease release <= 15; engine stop uses the slack
-# (render.yaml maxShutdownDelaySeconds 120. 10 + 80 + 15 = 105 < 110 even when every store call is slow.)
+# (render.yaml maxShutdownDelaySeconds 120. 10 + 80 + 15 = 105 < 110 even when every store call is slow.
+#  The publish reserve is carved out of the 80s, not added on top.)
 SNAPSHOT_EVERY_S = float(os.environ.get("SNAPSHOT_EVERY_S", "3600") or 3600)
 
 
@@ -275,6 +277,8 @@ def snapshot(data_dir: Path, store, commit: str = "", now: float | None = None,
     reads, every file upload and the two final manifest writes. A CRITICAL file (book / epoch / lock / config) not
     written in time aborts the generation (SnapshotError: the previous verified generation stays the restore point,
     never a mix of an old book and a new epoch); any other file not written in time keeps its previous verified copy.
+    When the deadline is at least PUBLISH_RESERVE_S, a SLOW file's cap is min(slow_timeout, remaining - reserve) so
+    the two manifest puts still have that reserve. Shorter deadlines (unit tests) keep the previous 1s publish grace.
     The manifest is not switched when the budget runs out, so a late critical file cannot publish a mixed generation.
     With slow_timeout_s set (hourly and shutdown), a non-critical file that errors is carried the same way, so one
     slow research.db cannot fail the generation."""
@@ -325,9 +329,15 @@ def snapshot(data_dir: Path, store, commit: str = "", now: float | None = None,
         if not p.exists():
             continue
         ts = time.time()
+        cap = None
+        if name in SLOW and slow_timeout_s is not None:
+            cap = float(slow_timeout_s)
+            if end is not None and deadline_s is not None and float(deadline_s) >= PUBLISH_RESERVE_S:
+                rem = end - time.time()
+                cap = min(cap, max(0.0, rem - PUBLISH_RESERVE_S))   # leave the manifest puts their reserve
         try:
             files[name] = _run(lambda p=p, name=name: _put_verified(store, slot, name, _read(p), gen, protected),
-                               slow_timeout_s if (name in SLOW and slow_timeout_s is not None) else None)
+                               cap)
         except TimeoutError:
             if name in CRITICAL:
                 raise SnapshotError(f"deadline: {name} not written in {deadline_s}s — generation {gen} discarded, "
@@ -355,8 +365,11 @@ def snapshot(data_dir: Path, store, commit: str = "", now: float | None = None,
         store.put(_gen_manifest_name(slot), payload)   # this generation's own manifest (fallback)
         store.put(MANIFEST, payload)                   # the switch: one object write
 
+    # A deadline long enough to hold the reserve spends that reserve on the two puts (no extra second past
+    # the deadline). A shorter deadline keeps the 1s grace so a carried slow file can still publish.
+    publish_grace = 0.0 if (deadline_s is not None and float(deadline_s) >= PUBLISH_RESERVE_S) else 1.0
     try:
-        _run(_publish, grace=1.0)
+        _run(_publish, grace=publish_grace)
     except TimeoutError:
         raise SnapshotError(f"deadline: manifest not switched in {deadline_s}s — generation {gen} discarded, "
                             f"generation {prev.get('gen')} stays the restore point") from None

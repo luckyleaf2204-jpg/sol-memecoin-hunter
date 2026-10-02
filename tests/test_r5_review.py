@@ -81,6 +81,43 @@ def test_deadline_covers_the_manifest_writes(tmp_path):
     assert time.time() - t0 < 0.8                             # old code waits out both manifest puts (~2s)
 
 
+class _BudgetStore(S.LocalStore):
+    """Critical-file puts, research.db, and manifest puts each sleep their own delay."""
+
+    def __init__(self, root):
+        super().__init__(root)
+        self.critical = self.db = self.manifest = 0.0
+
+    def put(self, name, data):
+        if "research.db" in name:
+            time.sleep(self.db)
+        elif str(name).startswith("manifest"):
+            time.sleep(self.manifest)
+        elif str(name).endswith(".gz"):
+            time.sleep(self.critical)
+        super().put(name, data)
+
+
+def test_slow_file_leaves_the_publish_reserve(tmp_path, monkeypatch):
+    """Critical uploads take most of the deadline. research.db must leave PUBLISH_RESERVE_S for the two
+    manifest puts — the old 1s grace is not enough, and the whole shutdown stays under ~110s."""
+    assert S.PUBLISH_RESERVE_S >= 10
+    assert S.SHUTDOWN_DEADLINE_S >= S.PUBLISH_RESERVE_S
+    assert S.SHUTDOWN_TOTAL_S < 110
+    assert 10 + S.SHUTDOWN_DEADLINE_S + L.LEASE_RELEASE_DEADLINE_S <= S.SHUTDOWN_TOTAL_S + 1e-9
+    monkeypatch.setattr(S, "PUBLISH_RESERVE_S", 1.5)
+    d, store = tmp_path / "d", _BudgetStore(tmp_path / "store")
+    _files(d, 1)
+    first = S.snapshot(d, store, now=1.0)
+    _files(d, 2)
+    store.critical, store.db, store.manifest = 1.0, 30.0, 0.55   # two critical files, then a DB that would eat the tail
+    m = S.snapshot(d, store, now=2.0, slow_timeout_s=60.0, deadline_s=4.0)
+    assert m["gen"] == first["gen"] + 1
+    assert m["files"]["research.db"]["carried_from"] == first["gen"]
+    assert m["files"]["paper_bot.json"]["sha256"] != first["files"]["paper_bot.json"]["sha256"]
+    assert json.loads(store.get(S.MANIFEST))["gen"] == m["gen"]
+
+
 def test_release_is_bounded_when_every_store_call_is_slow(tmp_path):
     store = SlowCalls(tmp_path / "store")
     a = L.Lease(store, "A", settle_s=0)
