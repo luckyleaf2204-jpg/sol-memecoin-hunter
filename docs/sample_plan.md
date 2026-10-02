@@ -158,6 +158,8 @@ includes 0. Gate and replay reports mark groups below 30 as INSUFFICIENT.
   cut and the in-sample n (refused below 30 or when a lock already exists). The holdout then opens only with
   `--holdout-lock lock.json`, the SAME parameter hash and >= 30 holdout candidates; otherwise it stays closed
   (and the pooled "all" view is hidden too, since it would leak the holdout).
+  The hash covers horizon, split, seed, min n, engine, the parameter fingerprint and STRATEGY_VERSION — not
+  the git commit, so a docs-only commit does not close the holdout; a strategy bump does.
 * Exit A/B variants follow the same rule: choose the variant on in-sample trades, confirm once on the holdout.
 
 ## 6. Reports

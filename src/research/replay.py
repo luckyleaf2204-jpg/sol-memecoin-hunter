@@ -18,8 +18,9 @@ Walk-forward: the cut is a time point (60 % of all candidates in time order, bef
 cut; holdout = from max(cut, last in-sample decision + EMBARGO) with EMBARGO = the horizon, so no in-sample outcome
 window reaches into the holdout (decisions in between are dropped and counted).
 The test is frozen by a hash of every choice — horizon, split, filters, seed, min n, engine, the strategy's
-parameter fingerprint (sample_id) and the code commit — written with the lock time; the holdout opens only with the
-same hash and >= min n candidates.
+parameter fingerprint (sample_id) and STRATEGY_VERSION — written with the lock time; the holdout opens only with the
+same hash and >= min n candidates. The git commit is NOT hashed: a docs-only commit must not close the holdout, and
+every code change that touches the strategy bumps STRATEGY_VERSION anyway.
 """
 from __future__ import annotations
 
@@ -138,18 +139,19 @@ def compare(db: sqlite3.Connection, rows: list[dict], exclude: set[str], h_s: in
 
 
 def frozen_params(horizon: str, split: float, seed: int, min_n: int = MIN_N,
-                  engine: str | None = ENGINE, sample_id: str | None = None, commit: str | None = None) -> dict:
+                  engine: str | None = ENGINE, sample_id: str | None = None,
+                  strategy_version: str | None = None) -> dict:
     """Everything that defines the test. Chosen on the in-sample part BEFORE the holdout is looked at."""
     import hashlib
     import json
     if sample_id is None:
         from trading.config import production_config
         sample_id = production_config().sample_id()
-    if commit is None:
-        from core.version import git_commit
-        commit = git_commit()
+    if strategy_version is None:
+        from trading.sample_epoch import STRATEGY_VERSION
+        strategy_version = STRATEGY_VERSION
     p = {"horizon": horizon, "split": split, "population": "entered (gate passed, filled)", "seed": seed, "min_n": min_n,
-         "engine": engine, "sample_id": sample_id, "commit": commit, "embargo_s": horizon_s(horizon),
+         "engine": engine, "sample_id": sample_id, "strategy_version": strategy_version, "embargo_s": horizon_s(horizon),
          "tp_pct": TP_LEVEL, "sl_pct": SL_LEVEL, "baseline": "age/liquidity-matched random tokens, bootstrap"}
     p["hash"] = hashlib.sha256(json.dumps(p, sort_keys=True).encode()).hexdigest()[:10]
     return p
@@ -175,7 +177,7 @@ def _parts(cand: list[dict], t_cut: float, embargo_s: float):
 
 def lock_holdout(db_path: str, lock_path: str, horizon: str = "1h", split: float = 0.6, seed: int = 7,
                  now: float | None = None, min_n: int = MIN_N, engine: str | None = ENGINE,
-                 sample_id: str | None = None, commit: str | None = None) -> dict:
+                 sample_id: str | None = None, strategy_version: str | None = None) -> dict:
     """Freeze the test on the in-sample part: write the parameter hash, the lock time, the time cut and the embargo.
     Refused when the in-sample part has fewer than min_n candidates or a lock already exists."""
     import json
@@ -183,7 +185,7 @@ def lock_holdout(db_path: str, lock_path: str, horizon: str = "1h", split: float
     if Path(lock_path).exists():
         return {"status": "REFUSED", "reason": "a holdout lock already exists (one lock per holdout)",
                 "lock": json.loads(Path(lock_path).read_text(encoding="utf-8"))}
-    params = frozen_params(horizon, split, seed, min_n, engine, sample_id, commit)
+    params = frozen_params(horizon, split, seed, min_n, engine, sample_id, strategy_version)
     db = sqlite3.connect(db_path)
     try:
         cand, info = load(db, horizon, engine)
@@ -220,9 +222,9 @@ def _info(info: dict) -> dict:
 
 def replay(db_path: str, horizon: str = "1h", split: float = 0.6, seed: int = 7,
            holdout_lock: str | None = None, min_n: int = MIN_N, engine: str | None = ENGINE,
-           sample_id: str | None = None, commit: str | None = None) -> dict:
+           sample_id: str | None = None, strategy_version: str | None = None) -> dict:
     import json
-    params = frozen_params(horizon, split, seed, min_n, engine, sample_id, commit)
+    params = frozen_params(horizon, split, seed, min_n, engine, sample_id, strategy_version)
     db = sqlite3.connect(db_path)
     try:
         cand, info = load(db, horizon, engine)
@@ -235,7 +237,7 @@ def replay(db_path: str, horizon: str = "1h", split: float = 0.6, seed: int = 7,
         exclude, h = {r["ca"] for r in cand} | {r["ca"] for r in blocked}, horizon_s(horizon)
         out = {"horizon": horizon, "levels": "TP +30 % / SL -15 % (dataset)",
                "selection": _info(info), "frozen_params": params, "holdout_lock": lock,
-               "protocol": "parameters (incl. sample_id, commit, min_n, engine) fixed on the in-sample part and locked "
+               "protocol": "parameters (incl. sample_id, strategy_version, min_n, engine) fixed on the in-sample part and locked "
                            "(hash + time); holdout = after cut + embargo (= horizon), opened only with the same hash "
                            f"and n >= {min_n}",
                "break_even_tp_share": round(BREAK_EVEN_TP_SHARE, 4),

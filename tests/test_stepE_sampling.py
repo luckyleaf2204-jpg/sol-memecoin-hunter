@@ -105,36 +105,36 @@ def test_holdout_lock_records_hash_and_time_and_refuses_bad_openings(tmp_path):
     closed = replay(db, HZ, holdout_lock=lock)
     assert closed["walk_forward"]["out_of_sample"]["status"] == "REFUSED" and "NOT LOCKED" in closed["verdict"]
     assert closed["all"] is None                                        # no pooled peek at the holdout
-    res = lock_holdout(db, lock, HZ, now=12345.0, commit="c1")
+    res = lock_holdout(db, lock, HZ, now=12345.0, strategy_version="v1")
     assert res["status"] == "LOCKED" and res["lock"]["locked_at"] == 12345.0 and res["lock"]["n_in_sample"] == 48
     assert len(res["lock"]["params_hash"]) == 10 and "out_of_sample" not in res and res["lock"]["embargo_s"] == 60
-    assert lock_holdout(db, lock, HZ, commit="c1")["status"] == "REFUSED"          # one lock per holdout
-    opened = replay(db, HZ, holdout_lock=lock, commit="c1")
+    assert lock_holdout(db, lock, HZ, strategy_version="v1")["status"] == "REFUSED"          # one lock per holdout
+    opened = replay(db, HZ, holdout_lock=lock, strategy_version="v1")
     assert opened["walk_forward"]["out_of_sample"]["candidates"]["n"] == 32 and opened["holdout_lock"]["locked_at"] == 12345.0
-    for kw in ({"commit": "c2"}, {"commit": "c1", "sample_id": "other"}, {"commit": "c1", "min_n": 20},
-               {"commit": "c1", "seed": 8}):
+    for kw in ({"strategy_version": "v2"}, {"strategy_version": "v1", "sample_id": "other"}, {"strategy_version": "v1", "min_n": 20},
+               {"strategy_version": "v1", "seed": 8}):
         changed = replay(db, HZ, holdout_lock=lock, **kw)                 # any frozen choice differs from the hash
         assert "PARAMETERS CHANGED" in changed["verdict"] and changed["all"] is None, kw
-    assert "PARAMETERS CHANGED" in replay(db, "30m", holdout_lock=lock, commit="c1")["verdict"]
+    assert "PARAMETERS CHANGED" in replay(db, "30m", holdout_lock=lock, strategy_version="v1")["verdict"]
 
 
 def test_holdout_stays_closed_below_threshold(tmp_path):
     db, lock = str(tmp_path / "r.db"), str(tmp_path / "lock.json")
     make_db(tmp_path / "r.db", ["tp30", "sl15"] * 30, ["sl15"] * 20)        # 60: 36 in / 24 holdout
-    assert lock_holdout(db, lock, HZ, commit="c")["status"] == "LOCKED"
-    r = replay(db, HZ, holdout_lock=lock, commit="c")
+    assert lock_holdout(db, lock, HZ, strategy_version="v")["status"] == "LOCKED"
+    r = replay(db, HZ, holdout_lock=lock, strategy_version="v")
     assert "holdout n = 24 < 30" in r["verdict"] and r["walk_forward"]["out_of_sample"]["status"] == "REFUSED"
 
 
 def test_frozen_params_hash_depends_on_every_choice():
     from research.replay import frozen_params
     f = lambda **kw: frozen_params(**{"horizon": "1h", "split": 0.6, "seed": 7,  # noqa: E731
-                                      "sample_id": "s", "commit": "c", **kw})["hash"]
+                                      "sample_id": "s", "strategy_version": "v", **kw})["hash"]
     variants = [f(), f(horizon="30m"), f(split=0.5), f(seed=8), f(min_n=20), f(engine="old"),
-                f(sample_id="s2"), f(commit="c2")]
+                f(sample_id="s2"), f(strategy_version="v2")]
     assert len(set(variants)) == len(variants) and f() == variants[0]
     from trading.config import production_config
-    assert frozen_params("1h", 0.6, 7, commit="c")["sample_id"] == production_config().sample_id()
+    assert frozen_params("1h", 0.6, 7, strategy_version="v")["sample_id"] == production_config().sample_id()
 
 
 def test_sample_plan_doc_states_the_thresholds():
