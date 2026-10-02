@@ -119,10 +119,11 @@ def create_app(engine: ScannerEngine | None = None, start_scanner: bool = True,
         if store is None or state.get("halted") or state.get("role") not in (None, "ACTIVE"):
             return
         lease = state.get("lease")
-        if lease is not None and not await asyncio.to_thread(lease.held):
-            print(f"[snapshot] {reason} SKIPPED: this instance does not hold the lease ({lease.status})", flush=True)
-            return
         try:
+            if lease is not None and not await asyncio.to_thread(lease.held):   # a store error here is logged too
+                print(f"[snapshot] {reason} SKIPPED: this instance does not hold the lease ({lease.status})",
+                      flush=True)
+                return
             if state["bot"] is not None:
                 state["bot"].persist()
             _save_price_history()
@@ -140,12 +141,17 @@ def create_app(engine: ScannerEngine | None = None, start_scanner: bool = True,
             print(f"[snapshot] {reason} FAILED: {type(e).__name__}", flush=True)
 
     async def _snapshot_loop() -> None:
-        from core.snapshot import SNAPSHOT_EVERY_S
+        """Never dies silently: any error of one round is logged and the loop goes on."""
+        from core import snapshot as snap
         while True:
-            await asyncio.sleep(SNAPSHOT_EVERY_S)
-            await _snapshot_now("hourly")
-            if state["bot"] is not None:
-                print("[sample] " + state["bot"].sample_summary_line(), flush=True)
+            await asyncio.sleep(snap.SNAPSHOT_EVERY_S)
+            try:
+                await _snapshot_now("hourly")
+                if state["bot"] is not None:
+                    print("[sample] " + state["bot"].sample_summary_line(), flush=True)
+            except Exception as e:
+                state["snapshot"]["last_error"] = {"ts": time.time(), "reason": "hourly loop", "error": type(e).__name__}
+                print(f"[snapshot] hourly loop error: {type(e).__name__} (loop continues)", flush=True)
 
     async def _restore(store) -> None:
         from core.snapshot import restore
@@ -322,22 +328,28 @@ def create_app(engine: ScannerEngine | None = None, start_scanner: bool = True,
         yield
         for t in state["aux"]:
             t.cancel()
-        if state["bot_task"]:
-            state["bot_stop"].set()
-            with contextlib.suppress(Exception):
-                await asyncio.wait_for(state["bot_task"], 10)
-            if state.get("snapshot_store") is None:
-                _save_price_history()                      # local restart without a store still keeps it
-            await _snapshot_now("shutdown")                # SIGTERM before a deploy / restart: last snapshot ...
-        if state.get("lease") is not None and state.get("role") == "ACTIVE":
-            with contextlib.suppress(Exception):
-                await asyncio.to_thread(state["lease"].release)   # ... THEN hand the lease to the new instance
-                print("[lease] released after the final snapshot", flush=True)
-        eng = state["engine"]
-        if state["task"]:
-            eng.stop()
-            with contextlib.suppress(Exception):
-                await asyncio.wait_for(state["task"], 15)
+        try:
+            if state["bot_task"]:
+                state["bot_stop"].set()
+                with contextlib.suppress(Exception):
+                    await asyncio.wait_for(state["bot_task"], 10)
+                if state.get("snapshot_store") is None:
+                    _save_price_history()                  # local restart without a store still keeps it
+                await _snapshot_now("shutdown")            # SIGTERM before a deploy / restart: last snapshot ...
+        except Exception as e:                             # nothing here may skip the release / engine stop
+            print(f"[shutdown] snapshot step error: {type(e).__name__}", flush=True)
+        finally:
+            if state.get("lease") is not None and state.get("role") == "ACTIVE":
+                try:
+                    await asyncio.to_thread(state["lease"].release)   # ... THEN hand the lease over
+                    print("[lease] released after the final snapshot", flush=True)
+                except Exception as e:
+                    print(f"[lease] release failed: {type(e).__name__} (it expires by itself)", flush=True)
+            eng = state["engine"]
+            if state["task"]:
+                eng.stop()
+                with contextlib.suppress(Exception):
+                    await asyncio.wait_for(state["task"], 15)
 
     app = FastAPI(title="SOL Memecoin Hunter", docs_url=None, redoc_url=None, openapi_url=None, lifespan=lifespan)
     app.state.hunter = state
