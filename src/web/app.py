@@ -318,13 +318,13 @@ def create_app(engine: ScannerEngine | None = None, start_scanner: bool = True,
         from core import lease as L
         while True:
             await asyncio.sleep(L.LEASE_RENEW_S)
-            try:
-                ok = await asyncio.to_thread(lease.renew)
-            except Exception as e:                     # store unreachable: transient, unless it lasts beyond the TTL
+            try:                                       # a hung store call is abandoned after LEASE_IO_TIMEOUT_S
+                ok = await asyncio.wait_for(asyncio.to_thread(lease.renew), L.LEASE_IO_TIMEOUT_S)
+            except Exception as e:                     # store error / hang: transient, unless it lasts too long
                 print(f"[lease] renew failed: {type(e).__name__}", flush=True)
-                if lease.fenced(L.LEASE_TTL_S):
-                    _fence(f"lease not renewed for > {L.LEASE_TTL_S:.0f}s (store errors): self-fenced — another "
-                           "instance may hold it now", "FENCED")
+                if lease.fenced():
+                    _fence(f"lease not renewed for > {L.fence_after_s():.0f}s (TTL - renew - I/O timeout): "
+                           "self-fenced — another instance may take it soon", "FENCED")
                     return
                 continue
             if not ok:
@@ -397,6 +397,10 @@ def create_app(engine: ScannerEngine | None = None, start_scanner: bool = True,
         except Exception as e:                             # nothing here may skip the release / engine stop
             print(f"[shutdown] snapshot step error: {type(e).__name__}", flush=True)
         finally:
+            if state.get("lease_task") is not None:        # stop the renew loop before releasing
+                state["lease_task"].cancel()
+                with contextlib.suppress(BaseException):
+                    await state["lease_task"]
             if state.get("lease") is not None and state.get("role") == "ACTIVE":
                 try:
                     await asyncio.to_thread(state["lease"].release)   # ... THEN hand the lease over

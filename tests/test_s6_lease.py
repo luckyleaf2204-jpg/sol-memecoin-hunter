@@ -234,3 +234,69 @@ def test_lease_is_renewed_during_a_slow_restore(tmp_path, monkeypatch, two_insta
     with TestClient(app):
         assert app.state.hunter["role"] == "ACTIVE"
     assert renewals and renewals[0] > 0
+
+
+# ---------------------------------------------------------------- C7: fence early, also when renew hangs; no late renew
+def test_fence_happens_before_the_lease_can_expire(tmp_path):
+    store, clk = S.LocalStore(tmp_path / "store"), Clock()
+    a = L.Lease(store, "A", clock=clk, settle_s=0)
+    assert a.acquire()
+    margin = L.LEASE_TTL_S - L.LEASE_RENEW_S - L.LEASE_IO_TIMEOUT_S
+    clk.t += margin + 1
+    assert a.fenced() and clk.t - a.last_ok < L.LEASE_TTL_S           # fenced while the lease is still valid
+
+
+def test_a_hung_renew_still_self_fences(tmp_path, monkeypatch, two_instances):
+    import threading
+    d = tmp_path / "d"
+    d.mkdir()
+    monkeypatch.setattr(webapp, "DATA_DIR", d)
+    gate = threading.Event()
+
+    class Hanging(S.LocalStore):
+        hang = False
+
+        def get(self, name):
+            if self.hang and name == L.LEASE:
+                gate.wait(10)                                         # the store call never answers
+            return super().get(name)
+    store = Hanging(two_instances)
+    monkeypatch.setattr(S, "store_from_env", lambda: store)
+    monkeypatch.setattr(L, "LEASE_RENEW_S", 0.05)
+    monkeypatch.setattr(L, "LEASE_IO_TIMEOUT_S", 0.1)
+    monkeypatch.setattr(L, "LEASE_TTL_S", 1.2)
+    app = _app(tmp_path, "a")
+    try:
+        with TestClient(app):
+            st = app.state.hunter
+            store.hang = True
+            assert _wait(lambda: st.get("role") == "FENCED", 4)       # without waiting for the hung call
+            assert st["bot_stop"].is_set()
+            gate.set()
+    finally:
+        gate.set()
+
+
+def test_release_waits_for_an_in_flight_renew_and_wins(tmp_path):
+    import threading
+
+    class SlowPut(S.LocalStore):
+        delay = 0.0
+
+        def put(self, name, data):
+            if name == L.LEASE and self.delay:
+                time.sleep(self.delay)
+            super().put(name, data)
+    store = SlowPut(tmp_path / "store")
+    a = L.Lease(store, "A", settle_s=0)
+    assert a.acquire()
+    store.delay = 0.3
+    t = threading.Thread(target=a.renew)
+    t.start()
+    time.sleep(0.05)                                                  # renew is writing
+    store.delay = 0.0
+    a.release()
+    t.join()
+    d = json.loads(store.get(L.LEASE))
+    assert d["released"] is True                                      # the late renew did not overwrite it
+    assert a.renew() is False                                         # and no renew after the release

@@ -22,6 +22,7 @@ import json
 import os
 import secrets
 import socket
+import threading
 import time
 
 LEASE = "instance_lease.json"
@@ -29,6 +30,12 @@ LEASE_TTL_S = 180.0
 LEASE_RENEW_S = 60.0
 LEASE_POLL_S = 10.0
 ACQUIRE_SETTLE_S = 2.0
+LEASE_IO_TIMEOUT_S = 20.0       # one lease read / write may hang at most this long (the caller stops waiting)
+
+
+def fence_after_s() -> float:
+    """Self-fence BEFORE the lease can expire for others: TTL - one renew period - one hung I/O."""
+    return max(LEASE_TTL_S - LEASE_RENEW_S - LEASE_IO_TIMEOUT_S, 1.0)
 
 
 def instance_id() -> str:
@@ -43,6 +50,8 @@ class Lease:
         self.clock, self.sleep = clock, sleep
         self.status = "NOT ACQUIRED"
         self.last_ok: float | None = None             # last successful acquire / renew (self-fencing clock)
+        self._io = threading.Lock()                    # renew and release never interleave
+        self._closing = False                          # set by release(): a late renew must not write any more
 
     def read(self) -> dict | None:
         raw = self.store.get(LEASE)
@@ -86,6 +95,14 @@ class Lease:
         """True = still ours (renewed). False ONLY when another instance holds it (or we released it): that is the
         one case to stop. A missing (404) or unreadable lease is rewritten as ours (nobody else holds a valid one);
         a store error RAISES — the caller treats it as transient and self-fences after the TTL (see app)."""
+        with self._io:
+            if self._closing:                          # released: never write again, just say who has it
+                d = self.read()
+                self.status = f"LOST to {d['owner']}" if d and d["owner"] != self.owner else "RELEASED"
+                return False
+            return self._renew()
+
+    def _renew(self) -> bool:
         d = self.read()
         if d is not None and (d["owner"] != self.owner or d.get("released")):
             self.status = f"LOST to {d['owner']}" if d["owner"] != self.owner else "LOST (released)"
@@ -96,15 +113,24 @@ class Lease:
         self.last_ok = now
         return True
 
-    def fenced(self, ttl: float | None = None) -> bool:
-        """No successful renew for longer than the TTL: another instance may legitimately hold the lease now."""
-        return self.last_ok is not None and self.clock() - self.last_ok > (ttl or self.ttl)
+    def fenced(self, after_s: float | None = None) -> bool:
+        """No successful renew for `after_s` (default fence_after_s(): TTL - renew period - one hung I/O): stop before
+        another instance could legitimately take the lease."""
+        return self.last_ok is not None and self.clock() - self.last_ok > (after_s if after_s is not None
+                                                                           else fence_after_s())
 
-    def release(self) -> None:
-        d = self.read()
-        if d and d["owner"] == self.owner:
-            self._write(self.clock(), d.get("acquired_at", self.clock()), released=True)
-            self.status = "RELEASED"
+    def release(self, wait_s: float | None = None) -> None:
+        """Stop renewing FIRST (a renew in flight finishes or is abandoned), then write the release."""
+        self._closing = True
+        got = self._io.acquire(timeout=LEASE_IO_TIMEOUT_S if wait_s is None else wait_s)
+        try:
+            d = self.read()
+            if d and d["owner"] == self.owner:
+                self._write(self.clock(), d.get("acquired_at", self.clock()), released=True)
+                self.status = "RELEASED"
+        finally:
+            if got:
+                self._io.release()
 
     def as_dict(self) -> dict:
         return {"owner": self.owner, "status": self.status}
