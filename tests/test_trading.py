@@ -184,7 +184,7 @@ def test_price_impact_and_fees_by_route():
     ex.rng.random = lambda: 0.99
     amm = ex.buy(good_state(), 40, 150.0)
     assert amm.status == "FILLED" and amm.route == "PumpSwap AMM via Jupiter"
-    assert amm.fee_usd == pytest.approx(40 * 0.003) and amm.network_fee_usd == pytest.approx(0.00011 * 150)
+    assert amm.fee_usd == pytest.approx(40 * 0.003) and amm.network_fee_usd == pytest.approx((0.00011 + 0.005) * 150)   # + priority fee
     assert amm.fill_price > amm.ref_price and amm.tokens == pytest.approx((40 - amm.fee_usd) / amm.fill_price)
     curve = good_state(dex="pumpfun")
     c = ex.buy(curve, 40, 150.0)

@@ -47,13 +47,17 @@ class Eng:
 
 
 class FakeJupiter:
-    def __init__(self, impact="0.004", fail=False):
-        self.calls, self.impact, self.fail = [], impact, fail
+    def __init__(self, impact="0.004", fail=False, sell_price=0.0002):
+        self.calls, self.impact, self.fail, self.sell_price = [], impact, fail, sell_price
 
     async def quote(self, input_mint, output_mint, amount_raw, slippage_bps):
         self.calls.append((input_mint, output_mint, amount_raw))
         if self.fail:
             return None
+        if output_mint == WSOL:                     # SELL token -> SOL at `sell_price` USD/token (SOL 150, 6 decimals)
+            out = int(amount_raw / 1e6 * self.sell_price / 150 * 1e9 * 0.997)
+            return {"inputMint": input_mint, "outputMint": output_mint, "outAmount": str(out),
+                    "priceImpactPct": self.impact, "routePlan": [{"swapInfo": {"label": "Pump.fun Amm"}}]}
         # ~ price 0.0002 USD/token at SOL 150: tokens = lamports/1e9 * 150 / 0.0002 (6 decimals)
         out = int(amount_raw / 1e9 * 150 / 0.0002 * 1e6 * 0.997)
         return {"inputMint": input_mint, "outputMint": output_mint, "outAmount": str(out), "priceImpactPct": self.impact,
@@ -151,6 +155,7 @@ def test_liquidity_collapse_sells_even_when_jupiter_is_down():
     b.jupiter = FakeJupiter(fail=True)
     st.liquidity_intel = LiquidityIntel(state="SHOCK")
     run(b)
+    asyncio.run(b.execute_sells())                               # no quote -> HAIRCUT fill, never skipped
     assert not b.book.positions and b.book.closed[0].exit_reason == "liquidity_collapse"
     sell = next(a for a in b.activity if a.kind == "SELL")
     assert "WHY:" in sell.text and "NET P&L" in sell.text

@@ -194,6 +194,7 @@ def test_fast_sl_flag_and_pre_entry_snapshots():
     st.market.price_usd = p.entry_price * 0.5                    # crash -> production stop loss
     st.stamps["market"].updated_at = time.time() + 1             # observed AFTER the fill (V1.2: a pre-entry print
     b.tick(time.time() + 8)                                      # never triggers the stop; was clock-resolution luck)
+    asyncio.run(b.execute_sells(time.time() + 8))
     assert fx.get("fast_sl_flag") is True and "stop_loss" in fx["fast_sl_reason"]
     assert b.fill_log[-1]["fill_vs_ref_pct"] is not None
 

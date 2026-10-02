@@ -50,6 +50,8 @@ class PaperBot:
         self.book = PaperBook.load(state_path, self.cfg.starting_balance) if state_path else PaperBook(self.cfg.starting_balance)
         self.exec = PaperExecutor(self.cfg.seed, self.cfg.max_slippage_pct, self.cfg.latency_slippage_model)
         self.exec.empirical = self._empirical_slip
+        self._apply_cost_model()
+        self.book.cost_levels = tuple(self.cfg.cost_stress_pct)
         self.risk = RiskEngine(self.cfg)
         self.modules = {k: ModuleState(k) for k in MODULES}
         self.activity: deque[Activity] = deque(maxlen=400)
@@ -142,6 +144,14 @@ class PaperBot:
         stamp = st.stamps.get("market") if st is not None else None
         return stamp is not None and stamp.updated_at >= p.opened_at
 
+    def _apply_cost_model(self) -> None:
+        """Copy the cost-model settings (priority fee, dump-tail slippage) from the config to the executor."""
+        c = self.cfg
+        self.exec.priority_fee_sol = c.priority_fee_sol
+        self.exec.dump_tail_threshold_pct = c.dump_tail_threshold_pct
+        self.exec.dump_tail_scale = c.dump_tail_scale
+        self.exec.dump_tail_cap = c.dump_tail_cap_pct / 100
+
     def _sol(self):
         return getattr(self.engine, "sol_price", None)
 
@@ -196,10 +206,19 @@ class PaperBot:
                     self.log("INFO", f"exit signal {reason} but no validated price — waiting", st, now=now)
                     continue
                 tokens = p.tokens * frac
-                if self.jupiter is not None and reason not in HARD:
-                    self.sell_intents.setdefault(p.mint, {"frac": frac, "reason": reason, "mark": mark, "ts": now})
-                    continue                            # filled on a real Jupiter quote in execute_intents()
-                ex = self.exec.sell(st, tokens, mark, self._sol(), reason, now, force=reason in HARD)
+                hard = reason in HARD
+                if self.jupiter is not None:
+                    it = {"frac": frac, "reason": reason, "mark": mark, "ts": now, "hard": hard}
+                    if hard:                            # protective exit replaces any pending TP / momentum intent
+                        self.sell_intents[p.mint] = it
+                    else:
+                        self.sell_intents.setdefault(p.mint, it)
+                    continue                            # filled on a real Jupiter SELL quote in execute_sells()
+                if hard:                                # no Jupiter client at all: never filled near the mark
+                    ex = self.exec.sell_haircut(st, tokens, mark, self._sol(), reason,
+                                                self.cfg.hard_exit_no_quote_haircut_pct / 100, now)
+                else:
+                    ex = self.exec.sell(st, tokens, mark, self._sol(), reason, now)
                 self._after_sell(p, st, ex, reason, frac, now)
             self._set("fills", RUN if self.book.executions and now - self.book.executions[-1].ts < 60 else READY,
                       f"{len(self.book.executions)} executions · {self.book.failed} failed",
@@ -1145,8 +1164,11 @@ class PaperBot:
             self.log("FAILED", f"SELL {reason}: {ex.reason}", st, now=now)
 
     async def execute_sells(self, now: float | None = None) -> None:
-        """Non-protective exits (TP, trailing, momentum, volume, time): fresh Jupiter quote right before the fill;
-        no quote -> liquidity-model fill (an exit is never skipped); impact above the limit -> retry next tick."""
+        """Every exit: fresh Jupiter SELL quote right before the fill.
+        HARD / SL exits (stop loss, risk, liquidity, whale, holder, identity): filled on the quote whatever its impact;
+        no quote -> HAIRCUT fill (reference x (1 - hard_exit_no_quote_haircut_pct)), never near the DexScreener mark.
+        Non-protective exits (TP, trailing, momentum, volume, time): no quote -> liquidity-model fill (an exit is never
+        skipped); impact above the limit -> retry next tick."""
         from trading.jupiter import WSOL, price_impact
         now = now or time.time()
         states = {s.mint: s for s in (self.engine.published or [])}
@@ -1156,8 +1178,16 @@ class PaperBot:
             if p is None or st is None:
                 continue
             tokens, reason, sol = p.tokens * it["frac"], it["reason"], self._sol()
-            q = await self.jupiter.quote(mint, WSOL, int(tokens * 10 ** (st.info.decimals or 6)),
-                                         int(self.cfg.max_slippage_pct * 100)) if sol else None
+            q = await self._sell_quote(mint, int(tokens * 10 ** (st.info.decimals or 6))) if sol else None
+            if it.get("hard"):
+                if q is not None:
+                    ex = self.exec.sell_from_quote(st, tokens, q, sol, reason, now)
+                    ex.ref_price = it["mark"]           # validated mark (post-entry print or the fill), not a raw print
+                else:
+                    ex = self.exec.sell_haircut(st, tokens, it["mark"], sol, reason,
+                                                self.cfg.hard_exit_no_quote_haircut_pct / 100, now)
+                self._after_sell(p, st, ex, reason, it["frac"], now)
+                continue
             if q is not None:
                 imp = price_impact(q)
                 if imp is not None and 100 * imp > self.cfg.max_slippage_pct:
@@ -1188,6 +1218,15 @@ class PaperBot:
         for oid, o in list(self.pending.items()):
             if now > o["expires"]:
                 self.pending.pop(oid, None)
+
+    async def _sell_quote(self, mint: str, amount_raw: int) -> dict | None:
+        """Jupiter SELL quote (token -> SOL) or None. Classified client when available, else the plain one."""
+        from trading.jupiter import WSOL
+        slip = int(self.cfg.max_slippage_pct * 100)
+        if hasattr(self.jupiter, "quote_result"):
+            r = await self.jupiter.quote_result(mint, WSOL, amount_raw, slip)
+            return r.quote if r.ok else None
+        return await self.jupiter.quote(mint, WSOL, amount_raw, slip)
 
     async def _buy_quote(self, mint: str, lamports: int):
         """Classified Jupiter quote (trading.jupiter.QuoteResult); a quote-only client is wrapped."""

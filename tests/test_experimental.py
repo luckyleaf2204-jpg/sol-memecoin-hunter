@@ -206,9 +206,10 @@ def buy_route(b):
     return [e for e in b.book.executions if e.side == "BUY"][-1].route
 
 
-def run_exp(st, jup, tmp_path=None):
+def run_exp(st, jup, tmp_path=None, simulated=False):
     b = bot([st], jup)
     b.cfg.experimental = True
+    b.cfg.paper_fill_without_quote = simulated             # opt-in (default OFF since step 1)
     if tmp_path is not None:
         b.recorder = DatasetRecorder(tmp_path / "r.db")
     t0 = time.time()
@@ -227,9 +228,17 @@ def test_candidate_quote_ok_paper_buy(tmp_path):
     assert row[6] == 1 and row[7] == 0
 
 
+def test_no_route_is_not_filled_by_default():
+    """Step 1: paper_fill_without_quote is OFF by default — a NO_ROUTE candidate is not bought on the model."""
+    st = hot(age_s=60)
+    b, _ = run_exp(st, ScriptedJupiter([J.NO_ROUTE]))
+    assert b.cfg.paper_fill_without_quote is False and not b.book.positions
+    assert not any(e.side == "BUY" and e.status == "FILLED" for e in b.book.executions)
+
+
 def test_no_route_keeps_candidate_and_fills_simulated(tmp_path):
     st = hot(age_s=60)
-    b, _ = run_exp(st, ScriptedJupiter([J.NO_ROUTE]), tmp_path)
+    b, _ = run_exp(st, ScriptedJupiter([J.NO_ROUTE]), tmp_path, simulated=True)
     p = b.book.positions[st.mint]
     assert "SIMULATED" in buy_route(b) and p.setup.endswith("+noquote")
     assert any("SIMULATED FILL" in a.text for a in b.activity)
@@ -249,7 +258,7 @@ def test_429_retries_then_buys_on_real_quote():
 
 def test_timeout_then_5xx_past_window_is_simulated_not_dropped():
     st = hot(age_s=60)
-    b, t0 = run_exp(st, ScriptedJupiter([J.TIMEOUT, J.API_ERROR]))
+    b, t0 = run_exp(st, ScriptedJupiter([J.TIMEOUT, J.API_ERROR]), simulated=True)
     asyncio.run(b.execute_intents(t0 + 61))
     assert st.mint in b.book.positions and "SIMULATED" in buy_route(b)
 
@@ -258,6 +267,7 @@ def test_simulated_fill_still_respects_risk_engine():
     st = hot(age_s=60)
     b = bot([st], ScriptedJupiter([J.NO_ROUTE]))
     b.cfg.experimental = True
+    b.cfg.paper_fill_without_quote = True
     b.set_kill(True)
     b.tick()
     asyncio.run(b.execute_intents())

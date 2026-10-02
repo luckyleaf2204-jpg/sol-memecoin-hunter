@@ -114,7 +114,12 @@ def test_stop_loss_never_waits_for_jupiter():
     st.market.price_usd *= 0.7
     st.stamps["market"].updated_at = time.time()
     b.tick()
+    assert b.sell_intents[st.mint]["hard"] is True                 # same loop iteration: execute_sells()
+    asyncio.run(b.execute_sells())                                  # Jupiter down -> HAIRCUT fill, no waiting
     assert not b.sell_intents and not b.book.positions and b.book.closed[0].exit_reason == "stop_loss"
+    sell = [e for e in b.book.executions if e.side == "SELL"][-1]
+    assert sell.fill_price == pytest.approx(st.market.price_usd * (1 - b.cfg.hard_exit_no_quote_haircut_pct / 100))
+    assert sell.model.startswith("PAPER haircut")
 
 
 def test_no_averaging_down_no_martingale():
@@ -132,7 +137,9 @@ def test_profit_analytics_by_setup_and_small_sample_flag():
     st, b, p = _held()
     st.market.price_usd *= 0.7
     st.stamps["market"].updated_at = time.time()
+    b.jupiter.sell_price = st.market.price_usd
     b.tick()
+    asyncio.run(b.execute_sells())
     s = b.book.stats()
     assert s["closed"] == 1 and s["expectancy"] == pytest.approx(s["avg_loss"]) and s["sample_note"] == "insufficient"
     setup = s["by_setup"][0]
@@ -233,7 +240,7 @@ def test_exit_engine_mapping_uses_exit_thresholds():
     e = exit_status(p, st, b.cfg)
     assert e["liquidity"]["state"] == "hit" and e["risk"]["state"] == "hit"
     d = bot_status(b, b.engine)
-    assert d["version"] == "web-12" and d["positions"][0]["exit_state"].startswith("EXIT")
+    assert d["version"] == "web-13" and d["positions"][0]["exit_state"].startswith("EXIT")
     rows = {r["key"]: r for r in d["exit_engine"]}
     assert rows["liquidity"]["hit"] == 1 and rows["take_profit"]["watching"] == 1
 
@@ -245,4 +252,4 @@ def test_bot_page_has_the_seven_areas_and_route_alias():
         assert f'id="{area}"' in js, area
     assert '"#/" + h.slice(1)' in js                                  # "#bot" works like "#/bot"
     html = (STATIC / "index.html").read_text(encoding="utf-8")
-    assert "app.js?v=web-12" in html and "styles.css?v=web-12" in html  # cache-busting on deploy
+    assert "app.js?v=web-13" in html and "styles.css?v=web-13" in html  # cache-busting on deploy

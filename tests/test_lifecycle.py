@@ -276,7 +276,7 @@ def test_first_pump_is_not_chased():
 def test_quote_fail_and_slippage_still_apply(tmp_path):
     st = post_tok()
     b = run_bot(st, ScriptedJupiter([J.NO_ROUTE]), history(SECOND_WAVE))
-    assert "SIMULATED" in [e for e in b.book.executions if e.side == "BUY"][-1].route   # existing paper policy
+    assert not b.book.positions                                  # step 1: no simulated fill by default
     st2 = post_tok()
     b2 = bot([st2], ScriptedJupiter([J.OK]))
     b2.cfg.experimental, b2.cfg.lifecycle = True, True

@@ -6,7 +6,9 @@ Every fill is simulated on the token's current VALIDATED market data:
                   buy  avg price = P × (1 + x / R)          sell avg price = P / (1 + v / R)
   slippage      adverse, seeded RNG: 0–0.5 % base + volatility term (|5m price change| × 5 %, max 2 %)
   fees          route fee (curve 1.25 %, PumpSwap 0.30 %, Raydium 0.25 %, other 0.30 %) +
-                network/priority fee 0.00011 SOL (USD via the scanner's SOL price, else $0.02)
+                network fee 0.00011 SOL + priority fee / Jito tip (config priority_fee_sol, default 0.005 SOL) per tx
+  dump tail     SELL while the token is dumping (5m change <= threshold): extra exponential slippage (capped)
+  haircut       HARD / SL exit without a Jupiter SELL quote: reference price x (1 - haircut), never "near the mark"
   latency       400–1500 ms (seeded)
   failure       seeded: 3 % (+3 % on curve, + price impact); a failed tx still pays the network fee;
                 impact + slippage above the configured tolerance -> FAILED (slippage exceeded), fee paid
@@ -23,6 +25,8 @@ ROUTE_FEE = {"pumpfun": 0.0125, "pumpswap": 0.0030, "raydium": 0.0025}
 DEFAULT_FEE = 0.0030
 NETWORK_FEE_SOL = 0.00011
 FALLBACK_NETWORK_USD = 0.02
+FALLBACK_SOL_USD = 150.0          # only to value the priority fee when the scanner has no SOL price yet
+HAIRCUT_MODEL = "PAPER haircut fill (no Jupiter SELL quote)"
 
 
 def route_of(st: TokenState) -> tuple[str, float]:
@@ -77,9 +81,25 @@ class PaperExecutor(ExecutionInterface):
         self.empirical_label = "EMPIRICAL"          # set by the bot's provider (e.g. EMPIRICAL_P90)
         self.empirical = None                       # callable(st) -> fraction | None, installed by the bot
         self.last_model_used = "CURRENT"
+        # cost model (the bot copies these from TradingConfig)
+        self.priority_fee_sol = 0.005               # priority fee / Jito tip per transaction
+        self.dump_tail_threshold_pct = -20.0
+        self.dump_tail_scale = 0.10
+        self.dump_tail_cap = 0.25
 
     def network_fee(self, sol_price: float | None) -> float:
-        return NETWORK_FEE_SOL * sol_price if sol_price else FALLBACK_NETWORK_USD
+        """Per transaction (filled or failed): base network fee + priority fee / Jito tip."""
+        if sol_price:
+            return (NETWORK_FEE_SOL + self.priority_fee_sol) * sol_price
+        return FALLBACK_NETWORK_USD + self.priority_fee_sol * FALLBACK_SOL_USD
+
+    def dump_tail(self, st: TokenState) -> float:
+        """Long-tail SELL slippage while the token is dumping: exponential draw with mean scale x |5m change|,
+        capped. 0 (and no random draw) when the 5m change is unknown or above the threshold."""
+        pc5 = st.market.price_change_5m if st.market else None
+        if pc5 is None or pc5 > self.dump_tail_threshold_pct:
+            return 0.0
+        return min(self.dump_tail_cap, self.dump_tail_scale * abs(pc5) / 100 * self.rng.expovariate(1.0))
 
     def estimate(self, st: TokenState, usd: float) -> dict:
         """Pre-trade estimate used by the Risk Engine (no randomness)."""
@@ -192,7 +212,7 @@ class PaperExecutor(ExecutionInterface):
             usd_out = 0.0
         if not ref or imp is None or usd_out <= 0 or tokens <= 0:
             return Execution(**base, status="REJECTED", reason=f"{reason}: Jupiter quote unusable")
-        slip = self._slip(st)
+        slip = min(0.99, self._slip(st) + self.dump_tail(st))
         if self._fail(st, imp):
             return Execution(**base, status="FAILED", network_fee_usd=net_fee, price_impact_pct=100 * imp,
                              slippage_pct=100 * slip, reason=f"{reason}: transaction failed (simulated)")
@@ -200,6 +220,18 @@ class PaperExecutor(ExecutionInterface):
         return Execution(**base, status="FILLED", usd_in=proceeds, tokens=tokens, fill_price=proceeds / tokens,
                          price_impact_pct=100 * imp, slippage_pct=100 * slip, fee_usd=0.0, network_fee_usd=net_fee,
                          model="PAPER on a real Jupiter quote (no transaction sent)")
+
+    def sell_haircut(self, st: TokenState, tokens: float, ref_price: float, sol_price: float | None, reason: str,
+                     haircut: float, now: float | None = None) -> Execution:
+        """HARD / SL exit with NO executable Jupiter SELL quote: never filled near the reference (DexScreener) price —
+        filled at ref x (1 - haircut). An exit is never skipped; the network + priority fee is still paid."""
+        now = now or time.time()
+        fill = ref_price * (1 - haircut)
+        return Execution(ts=now, mint=st.mint, symbol=st.info.symbol, side="SELL", route=f"HAIRCUT {100 * haircut:.0f}% "
+                         "(no Jupiter SELL quote)", ref_price=ref_price, latency_ms=0, reason=reason, status="FILLED",
+                         usd_in=tokens * fill, tokens=tokens, fill_price=fill, price_impact_pct=0.0,
+                         slippage_pct=100 * haircut, fee_usd=0.0, network_fee_usd=self.network_fee(sol_price),
+                         model=HAIRCUT_MODEL)
 
     def sell(self, st: TokenState, tokens: float, price: float, sol_price: float | None, reason: str,
              now: float | None = None, force: bool = False) -> Execution:
@@ -214,7 +246,7 @@ class PaperExecutor(ExecutionInterface):
         if imp is None:
             imp = 0.05                                    # liquidity unknown: assume a harsh 5 % impact
         imp = imp / (1 + imp)
-        slip = self._slip(st)
+        slip = min(0.99, self._slip(st) + self.dump_tail(st))
         base = dict(ts=now, mint=st.mint, symbol=st.info.symbol, side="SELL", route=route, ref_price=price,
                     latency_ms=latency, reason=reason, price_impact_pct=100 * imp, slippage_pct=100 * slip)
         if not force and imp + slip > self.max_slippage:

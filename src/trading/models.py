@@ -118,6 +118,21 @@ class Position:
     entry_lifecycle: str | None = None     # NEW | PRE_MIGRATION | POST_MIGRATION (lifecycle engine)
     entry_setup: str | None = None         # NEW | PRE_MIGRATION | SECOND_WAVE
     entry_setup_score: float | None = None
+    # cost-free price move (step 1: P&L at fixed round-trip costs): mid prices backed out of every fill
+    entry_mid: float | None = None
+    exit_mid_value: float = 0.0            # sum(tokens sold x mid at that sell)
+
+    @property
+    def noquote(self) -> bool:
+        """Opened on a SIMULATED fill (no executable Jupiter route): never part of the main P&L."""
+        return "+noquote" in (self.setup or "")
+
+    @property
+    def gross_move_pct(self) -> float | None:
+        """Closed trade's price move before any modelled cost (impact, latency, fees): mid in vs mid out."""
+        if self.status != "CLOSED" or not self.entry_mid or not self.initial_tokens:
+            return None
+        return 100 * (self.exit_mid_value / (self.initial_tokens * self.entry_mid) - 1)
 
     @property
     def mfe_pct(self) -> float | None:

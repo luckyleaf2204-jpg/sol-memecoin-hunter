@@ -249,6 +249,7 @@ def test_bot_exit_shadow_records_old_and_truth():
     b.recorder = type("R", (), {"__getattr__": lambda self, n: (lambda *a: rows.setdefault(n, []).append(a))})()
     st.liquidity_intel = LiquidityIntel(state="SHOCK")
     b.tick()                                                             # production liquidity_collapse
+    asyncio.run(b.execute_sells())                              # HARD exit: filled on a Jupiter SELL quote
     b.jupiter = TruthJupiter(sell_price=p.entry_price * 0.95)
     asyncio.run(b.common_source_round(time.time() + 1))
     ex = rows["truth_exit"][-1][0]
@@ -292,6 +293,7 @@ def test_research_tables_are_written(tmp_path):
     b._rec("truth_epoch", tr.pair_changes[-1])
     st.liquidity_intel = LiquidityIntel(state="SHOCK")
     b.tick()
+    asyncio.run(b.execute_sells())                              # HARD exit: filled on a Jupiter SELL quote
     db = sqlite3.connect(tmp_path / "r.db")
     n = {t: db.execute(f"select count(*) from {t}").fetchone()[0] for t in
          ("truth_price_snapshots", "price_source_comparison", "migration_price_epochs", "trade_price_truth",

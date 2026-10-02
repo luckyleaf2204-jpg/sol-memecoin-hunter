@@ -101,8 +101,9 @@ def test_bot_production_exit_gets_exact_size_truth_quote_requote_and_ledger_reco
     j = TruthJupiter(sell_price=p.entry_price * 0.9, slot=4242)
     b.jupiter = j
     st.stamps["market"].updated_at = time.time() + 1
-    st.market.price_usd = p.entry_price * 0.7                     # production (DexScreener) stop loss: legacy -30 %
+    st.market.price_usd = p.entry_price * 0.7                     # production (DexScreener) stop loss
     b.tick()
+    asyncio.run(b.execute_sells())                              # HARD exit: filled on a Jupiter SELL quote
     tr = b.cs_shadow[MINT]
     ev = tr.exit_events[0]
     assert MINT not in b.book.positions and ev["status"] == "PENDING" and ev["tokens"] == pytest.approx(p.initial_tokens)
@@ -114,8 +115,10 @@ def test_bot_production_exit_gets_exact_size_truth_quote_requote_and_ledger_reco
     asyncio.run(b.common_source_round(now + 2.5))
     assert ev["requote_status"] == VALID and ev["exit_latency_pct"] == pytest.approx(0, abs=1e-6)
     rec = b.truth_ledger.trades[-1]
-    assert rec["valid"] and rec["truth_pnl_pct"] == pytest.approx(100 * (p.initial_tokens * p.entry_price * 0.9 / p.cost_usd - 1), abs=0.1)
-    assert rec["legacy_pnl_pct"] < rec["truth_pnl_pct"] and rec["legacy_exit_source"] == "liquidity_model_at_dexscreener_mark"
+    fee = b.exec.network_fee(150.0)                               # network + priority fee of the exit tx
+    assert rec["valid"] and rec["truth_pnl_pct"] == pytest.approx(
+        100 * ((p.initial_tokens * p.entry_price * 0.9 - fee) / p.cost_usd - 1), abs=0.1)
+    assert rec["legacy_pnl_pct"] < rec["truth_pnl_pct"] and rec["legacy_exit_source"] == "jupiter_sell_quote"   # step 1
     assert json.loads((tmp_path / "truth_ledger.json").read_text())["trades"][0]["trade_id"] == rec["trade_id"]
     panel = b.truth_panel()
     assert panel["status"]["common_source_n"] == 1 and panel["status"]["status"] == "NOT VALIDATED YET"
@@ -136,6 +139,7 @@ def test_partial_tp1_and_final_exit_are_both_quoted_at_their_sizes():
     from core.models import LiquidityIntel
     st.liquidity_intel = LiquidityIntel(state="SHOCK")
     b.tick()
+    asyncio.run(b.execute_sells())                              # HARD exit: filled on a Jupiter SELL quote
     assert len(tr.exit_events) == 2 and tr.exit_events[1]["tokens"] == pytest.approx(p.initial_tokens - half)
     now = time.time() + 1
     asyncio.run(b.common_source_round(now))
@@ -158,6 +162,7 @@ def test_failed_exit_quote_leaves_trade_out_of_common_source():
     st.stamps["market"].updated_at = time.time() + 1
     st.market.price_usd = p.entry_price * 0.7
     b.tick()
+    asyncio.run(b.execute_sells())                              # HARD exit: filled on a Jupiter SELL quote
     asyncio.run(b.common_source_round(time.time() + 1))
     rec = b.truth_ledger.trades[-1]
     assert not rec["valid"] and rec["truth_pnl_pct"] is None and "exit quote NO_ROUTE" in rec["invalid_reasons"]

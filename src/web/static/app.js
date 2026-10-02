@@ -938,6 +938,8 @@ async function renderBot(silent) {
       ${kpi(t("web.bot.fees") + " + slip", esc(money(s.fees + s.network_fees + s.slippage_cost)), "", esc(s.failed_trades) + " failed")}
       ${kpi(t("web.bot.trades"), esc(s.closed), "", s.sample_note === "insufficient" ? esc(t("web.bot.sample_short")) : "")}
     </div>
+    ${s.cost_stress && s.cost_stress.n ? `<div class="meta">P&L at round-trip cost ${Object.entries(s.cost_stress.levels).map(([k, v]) => `${esc(k)}: ${esc(v.mean_pct)}%/trade (${esc(money(v.total_usd, true))})`).join(" · ")} · gross move ${esc(s.cost_stress.gross_move_mean_pct)}% · modelled cost ${esc(s.cost_stress.modelled_cost_mean_pct)}% · n=${esc(s.cost_stress.n)}</div>` : ""}
+    ${s.noquote && (s.noquote.closed || s.noquote.open) ? `<div class="meta">NO_ROUTE / simulated fills excluded from P&L: ${esc(s.noquote.closed)} closed · ${esc(s.noquote.open)} open · ${esc(money(s.noquote.net, true))}</div>` : ""}
     ${pend ? `<h3><span>⏳ ${esc(t("web.bot.pending"))}</span><span>${esc(d.pending.length)}</span></h3>${pend}` : ""}
   </section>
 

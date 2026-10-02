@@ -158,6 +158,7 @@ def test_stop_reference_ignores_print_fetched_before_the_fill():
     assert MINT in b.book.positions and p.stale and p.low_price is None   # no SL, no MAE from a pre-entry print
     st.stamps["market"].updated_at = time.time() + 1            # a print fetched after the fill
     b.tick()
+    asyncio.run(b.execute_sells())                              # HARD exit: filled on a Jupiter SELL quote
     assert b.book.closed and b.book.closed[0].exit_reason == "stop_loss"
 
 
@@ -179,9 +180,11 @@ def test_exit_reference_and_mfe_mae_use_post_entry_marks():
     assert b.provenance[MINT]["marks"][-1]["post_entry"] is True
     st.market.price_usd = p.entry_price * 0.80
     st.stamps["market"].updated_at = time.time() + 2
+    b.jupiter.sell_price = p.entry_price * 0.80
     b.tick()
+    asyncio.run(b.execute_sells())                              # HARD exit: filled on a Jupiter SELL quote
     pv = b.provenance[MINT]
-    assert pv["exit"]["reason"] == "stop_loss" and pv["exit"]["exit_fill_source"] == "liquidity_model_at_dexscreener_mark"
+    assert pv["exit"]["reason"] == "stop_loss" and pv["exit"]["exit_fill_source"] == "jupiter_sell_quote"  # step 1
     assert pv["exit"]["exit_market"]["price"] == pytest.approx(p.entry_price * 0.80)
     assert pv["exit"]["path"]["mae_pct"] == pytest.approx(-20.0, abs=0.01)
 
@@ -192,6 +195,7 @@ def test_non_price_hard_exit_is_not_delayed_and_valued_at_fill_without_post_entr
     st.market.price_usd = p.entry_price * 0.5                   # pre-entry print: must not value the exit
     st.liquidity_intel = LiquidityIntel(state="SHOCK")
     b.tick()
+    asyncio.run(b.execute_sells())                              # HARD exit: filled on a Jupiter SELL quote
     c = b.book.closed[0]
     assert c.exit_reason == "liquidity_collapse"
     sell = [e for e in b.book.executions if e.side == "SELL"][-1]
@@ -203,6 +207,7 @@ def test_pnl_reconciles_with_cash():
     st.stamps["market"].updated_at = time.time() + 1
     st.market.price_usd = p.entry_price * 0.8
     b.tick()
+    asyncio.run(b.execute_sells())                              # HARD exit: filled on a Jupiter SELL quote
     c = b.book.closed[0]
     sell = [e for e in b.book.executions if e.side == "SELL"][-1]
     assert c.realized_usd == pytest.approx(sell.usd_in - sell.network_fee_usd)
@@ -303,6 +308,7 @@ def test_provenance_exit_is_recorded_on_the_final_close_after_partial_tp1():
     from core.models import LiquidityIntel
     st.liquidity_intel = LiquidityIntel(state="SHOCK")
     b.tick()
+    asyncio.run(b.execute_sells())                              # HARD exit: filled on a Jupiter SELL quote
     pv = b.provenance[MINT]
     assert MINT not in b.book.positions and pv["exit"]["reason"] == "liquidity_collapse"
     assert pv["exit"]["realized_pnl_pct"] is not None

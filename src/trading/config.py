@@ -46,10 +46,17 @@ class TradingConfig:
     cooldown_min: float = 30.0               # no re-entry on the same CA after an exit
     # EXECUTION model
     seed: int = 7
+    hard_exit_no_quote_haircut_pct: float = 30.0   # HARD / SL exit without a Jupiter SELL quote: ref price x (1 - this)
+    priority_fee_sol: float = 0.005          # priority fee / Jito tip per transaction (buy, sell, failed attempts)
+    dump_tail_threshold_pct: float = -20.0   # SELL while the 5m price change is at or below this -> long-tail slippage
+    dump_tail_scale: float = 0.10            # mean extra SELL slippage = scale x |5m change| (exponential draw)
+    dump_tail_cap_pct: float = 25.0          # cap of that extra slippage
+    cost_stress_pct: tuple = (5.0, 7.0, 10.0)   # report P&L at these round-trip costs (gross move - cost)
     # EXPERIMENTAL engine (Implementation Spec Part 3): soft EarlyScore + age thresholds + prior risk decide TRADE;
     # the OLD engine still runs on every token for A/B. Off by default (tests / library); the server turns it on.
     experimental: bool = False
-    paper_fill_without_quote: bool = True    # experimental PAPER: a candidate whose quote fails is filled on the model
+    paper_fill_without_quote: bool = False   # experimental PAPER: fill a NO_ROUTE / no-quote candidate on the model
+                                             # (off: such fills are not executable; if on they stay out of the main P&L)
     # PAPER execution calibration (max_slippage_pct unchanged): CURRENT | CONSERVATIVE | EMPIRICAL
     latency_slippage_model: str = "CURRENT"    # AUTO: <50 samples CURRENT · >=50 P90 · >=100 P75 if stable
     latency_probe: bool = False              # (server: on) re-quote after the latency window to measure real drift (quotes only)
