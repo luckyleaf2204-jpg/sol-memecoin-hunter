@@ -13,9 +13,9 @@ import json
 import time
 from pathlib import Path
 
-STRATEGY_VERSION = "s9-stale-timeout"   # B6: a position without a validated price for STALE_TIMEOUT_S (600 s) is
-# closed ("stale_timeout", protective: Jupiter quote, else haircut); a protective exit of a token that left the feed is
-# closed at the haircut instead of being dropped. (previous: s8-protective-exits, never deployed)
+STRATEGY_VERSION = "s10-http-sell-priority"   # B8: SELL quotes take the next HTTP slot; the budget counts real
+# HTTP attempts (BUDGET, not RATE_LIMITED); Jupiter 401 / 403 / 408 are transient (retried, no longer a haircut).
+# (previous: s9-stale-timeout, never deployed)
 MIN_SAMPLE_COMMIT = "148af2c"            # the server must run this commit or a descendant
 LEGACY = "LEGACY"
 

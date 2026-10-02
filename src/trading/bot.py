@@ -522,11 +522,7 @@ class PaperBot:
         q_ts = time.time()
         await asyncio.sleep(self._probe_rng.uniform(0.4, 1.5))
         from trading.jupiter import WSOL, route_label
-        try:
-            r = await self.jupiter.quote_result(WSOL, mint, lamports, int(self.cfg.max_slippage_pct * 100),
-                                                attempts=1, budget_s=3.0)
-        except TypeError:
-            r = await self.jupiter.quote_result(WSOL, mint, lamports, int(self.cfg.max_slippage_pct * 100))
+        r = await self._jq(WSOL, mint, lamports, "probe", attempts=1, budget_s=3.0)
         if not r.ok:
             return None
         try:
@@ -872,7 +868,7 @@ class PaperBot:
                 tr.last_quote = now
                 continue
             t_req = time.time()
-            r = await self.jupiter.quote_result(mint, WSOL, int(size * 10 ** dec), int(self.cfg.max_slippage_pct * 100))
+            r = await self._jq(mint, WSOL, int(size * 10 ** dec), "truth")
             t_resp = time.time()
             self.truth_quotes.append(now)
             tr.last_quote = now
@@ -917,7 +913,7 @@ class PaperBot:
         from trading.jupiter import WSOL
         from trading.truth_price import snapshot_from_quote
         t_req = time.time()
-        r = await self.jupiter.quote_result(mint, WSOL, int(tokens * 10 ** dec), int(self.cfg.max_slippage_pct * 100))
+        r = await self._jq(mint, WSOL, int(tokens * 10 ** dec), "truth")
         t_resp = time.time()
         self.truth_quotes.append(now)
         snap = snapshot_from_quote(r, mint=mint, tokens=tokens, sol_price=self._sol(), t_req=t_req, t_resp=t_resp)
@@ -1416,35 +1412,52 @@ class PaperBot:
                 self.pending.pop(oid, None)
 
     def _quota(self, kind: str) -> bool:
-        """Bot-wide Jupiter budget (trading.quote_budget): SELL first, then buy / truth / probe."""
-        return self.quote_budget is None or self.quote_budget.take(kind, sells_pending=bool(self.sell_intents))
+        """Bot-wide Jupiter budget (trading.quote_budget): SELL first, then buy / truth / probe. Only a gate: the
+        Jupiter client counts its real HTTP attempts (a client without a budget hook is counted here, once)."""
+        if self.quote_budget is None:
+            return True
+        if not self.quote_budget.allow(kind, sells_pending=bool(self.sell_intents)):
+            return False
+        if getattr(self.jupiter, "budget", None) is not self.quote_budget:
+            self.quote_budget.record(kind)
+        return True
+
+    async def _jq(self, input_mint: str, output_mint: str, amount_raw: int, kind: str, **kw):
+        """quote_result with the extras the client understands (kind / priority / attempts / budget_s)."""
+        import inspect
+        fn = self.jupiter.quote_result
+        try:
+            ps = inspect.signature(fn).parameters
+            anykw = any(p.kind == p.VAR_KEYWORD for p in ps.values())
+        except (TypeError, ValueError):
+            ps, anykw = {}, False
+        extra = {"kind": kind, "priority": kind == "sell", **kw}
+        extra = {k: v for k, v in extra.items() if anykw or k in ps}
+        return await fn(input_mint, output_mint, amount_raw, int(self.cfg.max_slippage_pct * 100), **extra)
 
     async def _sell_quote(self, mint: str, amount_raw: int, sol: float | None = None):
         """Classified Jupiter SELL quote (token -> SOL) as a trading.jupiter.QuoteResult. A quote-only client is
         wrapped like _buy_quote (None -> API_ERROR, transient). No SOL price -> API_ERROR (cannot value the fill)."""
-        from trading.jupiter import API_ERROR, OK, RATE_LIMITED, WSOL, QuoteResult
+        from trading.jupiter import API_ERROR, BUDGET, OK, WSOL, QuoteResult
         if not sol:
             return QuoteResult(API_ERROR, detail="no SOL price", attempts=0)
         if not self._quota("sell"):
-            return QuoteResult(RATE_LIMITED, detail="bot quote budget (50/min) used up", attempts=0)
+            return QuoteResult(BUDGET, detail="bot quote budget (50/min) used up", attempts=0)
         slip = int(self.cfg.max_slippage_pct * 100)
         if hasattr(self.jupiter, "quote_result"):
-            try:
-                return await self.jupiter.quote_result(mint, WSOL, amount_raw, slip, attempts=SELL_QUOTE_ATTEMPTS,
-                                                       budget_s=SELL_QUOTE_BUDGET_S)
-            except TypeError:                           # a client without the time budget arguments
-                return await self.jupiter.quote_result(mint, WSOL, amount_raw, slip)
+            return await self._jq(mint, WSOL, amount_raw, "sell", attempts=SELL_QUOTE_ATTEMPTS,
+                                  budget_s=SELL_QUOTE_BUDGET_S)
         q = await self.jupiter.quote(mint, WSOL, amount_raw, slip)
         return QuoteResult(OK, quote=q, http=200, attempts=1) if q else QuoteResult(API_ERROR, detail="no quote", attempts=1)
 
     async def _buy_quote(self, mint: str, lamports: int):
         """Classified Jupiter quote (trading.jupiter.QuoteResult); a quote-only client is wrapped."""
-        from trading.jupiter import API_ERROR, OK, RATE_LIMITED, WSOL, QuoteResult
+        from trading.jupiter import API_ERROR, BUDGET, OK, WSOL, QuoteResult
         if not self._quota("buy"):
-            return QuoteResult(RATE_LIMITED, detail="bot quote budget: SELL quotes first", attempts=0)
+            return QuoteResult(BUDGET, detail="bot quote budget: SELL quotes first", attempts=0)
         slip = int(self.cfg.max_slippage_pct * 100)
         if hasattr(self.jupiter, "quote_result"):
-            return await self.jupiter.quote_result(WSOL, mint, lamports, slip)
+            return await self._jq(WSOL, mint, lamports, "buy")
         q = await self.jupiter.quote(WSOL, mint, lamports, slip)
         return QuoteResult(OK, quote=q, http=200, attempts=1) if q else QuoteResult(API_ERROR, detail="no quote", attempts=1)
 

@@ -114,6 +114,7 @@ class HttpClient:
         self._base_interval: dict[str, float] = {}
         self._last: dict[str, float] = {}
         self._locks: dict[str, asyncio.Lock] = {}
+        self._prio_waiting: dict[str, int] = {}     # priority (SELL) requests waiting for a slot, per host
 
     def set_rate(self, host: str, per_minute: float) -> None:
         self._base_interval[host] = self._min_interval[host] = 60.0 / per_minute
@@ -133,16 +134,30 @@ class HttpClient:
         iv = self._min_interval.get(host)
         return round(60.0 / iv, 1) if iv else None
 
-    async def _throttle(self, host: str) -> None:
+    async def _throttle(self, host: str, priority: bool = False) -> None:
+        """One request slot per `interval` per host. A priority request (a SELL quote) takes the next free slot
+        before any waiting normal request: normal requests step aside while a priority one is waiting. Nobody
+        sleeps while holding the lock, so a priority request never queues behind a sleeping BUY / truth / probe."""
         interval = self._min_interval.get(host)
         if not interval:
             return
         lock = self._locks.setdefault(host, asyncio.Lock())
-        async with lock:
-            wait = self._last.get(host, 0) + interval - time.monotonic()
-            if wait > 0:
-                await asyncio.sleep(wait)
-            self._last[host] = time.monotonic()
+        if priority:
+            self._prio_waiting[host] = self._prio_waiting.get(host, 0) + 1
+        try:
+            while True:
+                async with lock:
+                    if priority or not self._prio_waiting.get(host):
+                        wait = self._last.get(host, 0) + interval - time.monotonic()
+                        if wait <= 0:
+                            self._last[host] = time.monotonic()
+                            return
+                    else:
+                        wait = 0.02                      # a SELL is waiting: let it have the slot
+                await asyncio.sleep(min(max(wait, 0.005), 0.05))
+        finally:
+            if priority:
+                self._prio_waiting[host] -= 1
 
     async def request_json(self, method: str, url: str, *, source: str, params=None,
                            json=None, headers=None, retries: int = 2, timeout: float | None = None,
@@ -192,13 +207,14 @@ class HttpClient:
         self.health.trip(source)
         return None
 
-    async def request_once(self, method: str, url: str, *, source: str, params=None, timeout: float | None = None):
+    async def request_once(self, method: str, url: str, *, source: str, params=None, timeout: float | None = None,
+                           priority: bool = False):
         """ONE attempt that keeps the details callers need to classify a failure (the caller owns retries).
         Returns (http_status | None, json | None, error, retry_after_s | None); error is "timeout", "network: ...",
         "invalid JSON" or "" ; 4xx bodies are returned too (their error codes matter)."""
         host = urlparse(url).netloc
         endpoint = safe_endpoint(url)
-        await self._throttle(host)
+        await self._throttle(host, priority)
         t0 = time.monotonic()
         try:
             r = await self._client.request(method, url, params=params,

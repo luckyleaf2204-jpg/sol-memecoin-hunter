@@ -3,7 +3,8 @@
   sell                  always allowed while the minute has room (up to the full PER_MIN)
   buy / truth / probe   only below PER_MIN - SELL_RESERVE, and never while a SELL intent is waiting
 
-A refused SELL / BUY comes back as a transient RATE_LIMITED quote result (retried by the bot's own backoff); a
+Counted per real HTTP call (JupiterQuotes.record on every attempt). A refused SELL / BUY comes back as a transient
+BUDGET quote result (not RATE_LIMITED: Jupiter did not answer 429) (retried by the bot's own backoff); a
 refused truth / probe quote is simply skipped. Without a budget object (unit tests, backtests) nothing is limited."""
 from __future__ import annotations
 
@@ -25,14 +26,23 @@ class QuoteBudget:
             self.calls.popleft()
         return len(self.calls)
 
-    def take(self, kind: str, now: float | None = None, sells_pending: bool = False) -> bool:
+    def allow(self, kind: str, sells_pending: bool = False, now: float | None = None) -> bool:
+        """May a quote of this kind be sent now? (does not count it)"""
         now = time.time() if now is None else now
         used = self.used(now)
         ok = used < self.per_min if kind == "sell" else (not sells_pending and used < self.per_min - self.sell_reserve)
-        if ok:
-            self.calls.append((now, kind))
-        else:
+        if not ok:
             self.refused[kind] = self.refused.get(kind, 0) + 1
+        return ok
+
+    def record(self, kind: str, now: float | None = None) -> None:
+        """One real HTTP call (the Jupiter client calls this for every attempt, retries included)."""
+        self.calls.append((time.time() if now is None else now, kind))
+
+    def take(self, kind: str, now: float | None = None, sells_pending: bool = False) -> bool:
+        ok = self.allow(kind, sells_pending, now)
+        if ok:
+            self.record(kind, now)
         return ok
 
     def as_dict(self, now: float | None = None) -> dict:

@@ -26,7 +26,9 @@ WSOL = "So11111111111111111111111111111111111111112"
 
 OK, NO_ROUTE, INVALID = "OK", "NO_ROUTE", "INVALID"
 RATE_LIMITED, TIMEOUT, API_ERROR, COOLDOWN = "RATE_LIMITED", "TIMEOUT", "API_ERROR", "COOLDOWN"
-TRANSIENT = {RATE_LIMITED, TIMEOUT, API_ERROR, COOLDOWN}
+BUDGET = "BUDGET"              # the bot's own quote budget said "not now" (no HTTP call made) — not a Jupiter 429
+TRANSIENT = {RATE_LIMITED, TIMEOUT, API_ERROR, COOLDOWN, BUDGET}
+TRANSIENT_HTTP = {401: API_ERROR, 403: API_ERROR, 408: TIMEOUT}   # auth / gateway / request timeout: not the token
 NO_ROUTE_CODES = {"TOKEN_NOT_TRADABLE", "COULD_NOT_FIND_ANY_ROUTE", "NO_ROUTES_FOUND", "ROUTE_NOT_FOUND",
                   "NO_ROUTE_FOUND", "MARKET_NOT_FOUND"}
 BACKOFF_S = (0.5, 1.0, 2.0)
@@ -59,13 +61,16 @@ class JupiterQuotes:
         self.http = http
         self.base = base.rstrip("/")
         http.set_rate("lite-api.jup.ag", 50)
+        self.budget = None                         # trading.quote_budget.QuoteBudget: counts every HTTP attempt
+        self.sells_pending = lambda: False         # set by the bot: retries of non-SELL quotes yield to SELLs
 
     async def quote(self, input_mint: str, output_mint: str, amount_raw: int, slippage_bps: int) -> dict | None:
         """Quote or None (any failure). Kept for callers that only need the route (SELL path)."""
         return (await self.quote_result(input_mint, output_mint, amount_raw, slippage_bps)).quote
 
     async def quote_result(self, input_mint: str, output_mint: str, amount_raw: int, slippage_bps: int,
-                           attempts: int = 3, budget_s: float = 8.0) -> QuoteResult:
+                           attempts: int = 3, budget_s: float = 8.0, kind: str = "other",
+                           priority: bool = False) -> QuoteResult:
         if amount_raw <= 0:
             return QuoteResult(INVALID, detail="amount <= 0")
         params = {"inputMint": input_mint, "outputMint": output_mint, "amount": int(amount_raw),
@@ -83,8 +88,13 @@ class JupiterQuotes:
                     break
                 await asyncio.sleep(cool)
                 continue
+            if self.budget is not None:            # every real HTTP attempt is counted (retries too)
+                if i > 0 and not self.budget.allow(kind, self.sells_pending()):
+                    res = QuoteResult(BUDGET, detail="quote budget: retry skipped", attempts=i)
+                    break
+                self.budget.record(kind)
             status, data, err, retry_after = await self.http.request_once(
-                "GET", f"{self.base}/quote", source=SOURCE, params=params, timeout=min(5.0, left))
+                "GET", f"{self.base}/quote", source=SOURCE, params=params, timeout=min(5.0, left), priority=priority)
             res = classify(status, data, err, input_mint, output_mint, int(amount_raw))
             res.attempts = i + 1
             if not res.transient:
@@ -92,7 +102,7 @@ class JupiterQuotes:
             delay = min(retry_after if retry_after is not None else BACKOFF_S[min(i, len(BACKOFF_S) - 1)], 3.0)
             if i + 1 < attempts and end - time.monotonic() > delay + 0.3:
                 await asyncio.sleep(delay)
-        if res.transient and res.status != COOLDOWN:
+        if res.transient and res.status not in (COOLDOWN, BUDGET):
             self.http.health.trip(SOURCE)                # every attempt failed: the circuit breaker counts it
         return res
 
@@ -105,6 +115,8 @@ def classify(status: int | None, data, err: str, input_mint: str, output_mint: s
         return QuoteResult(RATE_LIMITED, http=429, code=code)
     if status >= 500:
         return QuoteResult(API_ERROR, http=status, code=code)
+    if status in TRANSIENT_HTTP:
+        return QuoteResult(TRANSIENT_HTTP[status], http=status, code=code)
     if status != 200:
         msg = str(data.get("error") or "")[:120] if isinstance(data, dict) else ""
         low = msg.lower()

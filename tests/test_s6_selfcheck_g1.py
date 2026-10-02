@@ -194,7 +194,7 @@ def test_exhausted_budget_sell_still_gets_quotes_buy_truth_probe_wait():
     for _ in range(40):
         assert b.quote_budget.take("buy")                        # buys / truth used everything they may use
     qr = asyncio.run(b._buy_quote(MB, 10 ** 8))
-    assert qr.status == J.RATE_LIMITED and qr.transient          # BUY: transient -> its own retry window
+    assert qr.status == J.BUDGET and qr.transient          # BUY: transient -> its own retry window
     assert asyncio.run(b._latency_probe(st, MINT, 1000, {"outAmount": "1"})) is None
     _signal(b, st, p, 0.8)
     asyncio.run(b.execute_sells())
@@ -208,7 +208,7 @@ def test_pending_sell_blocks_buy_quotes_even_with_room():
     b.quote_budget = QuoteBudget()
     _signal(b, st, p, 0.8)
     asyncio.run(b.execute_sells())                               # SELL retrying
-    assert asyncio.run(b._buy_quote(MB, 10 ** 8)).status == J.RATE_LIMITED
+    assert asyncio.run(b._buy_quote(MB, 10 ** 8)).status == J.BUDGET
     assert asyncio.run(b.common_source_round(time.time() + 2)) == 0
 
 
