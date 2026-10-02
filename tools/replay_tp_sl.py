@@ -1,6 +1,6 @@
 """TP-before-SL replay of Trade Candidates vs a random-token baseline, walk-forward 60/40 (read-only).
 
-usage: python tools/replay_tp_sl.py --db data/research.db [--horizon 1h] [--split 0.6] [--bought-only] [--out r.json]
+usage: python tools/replay_tp_sl.py --db data/research.db [--horizon 1h] [--split 0.6] [--out r.json]
 """
 import argparse
 import json
@@ -17,7 +17,6 @@ def main():
     ap.add_argument("--db", required=True)
     ap.add_argument("--horizon", default="1h", help="forward_returns horizon: 30s 1m 2m 5m 10m 30m 1h 6h 24h")
     ap.add_argument("--split", type=float, default=0.6)
-    ap.add_argument("--bought-only", action="store_true")
     ap.add_argument("--seed", type=int, default=7)
     ap.add_argument("--holdout-lock", default="", help="JSON lock file: parameter hash + lock time + time cut")
     ap.add_argument("--lock-holdout", action="store_true", help="freeze the parameters on the in-sample part")
@@ -28,11 +27,11 @@ def main():
     if a.lock_holdout:
         if not a.holdout_lock:
             sys.exit("--lock-holdout needs --holdout-lock PATH")
-        res = lock_holdout(a.db, a.holdout_lock, a.horizon, a.split, a.bought_only, a.seed, min_n=a.min_n,
+        res = lock_holdout(a.db, a.holdout_lock, a.horizon, a.split, a.seed, min_n=a.min_n,
                            engine=None if a.engine == "any" else a.engine)
         print(f"HOLDOUT {res['status']}" + (f": {res['reason']}" if res.get("reason") else ""))
     else:
-        res = replay(a.db, a.horizon, a.split, a.bought_only, a.seed, a.holdout_lock or None, a.min_n,
+        res = replay(a.db, a.horizon, a.split, a.seed, a.holdout_lock or None, a.min_n,
                      None if a.engine == "any" else a.engine)
         print(f"REPLAY n_in_sample={res['n_in_sample']} n_holdout={res['n_holdout']} · {res['verdict']}")
     text = json.dumps(res, indent=1)

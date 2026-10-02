@@ -125,10 +125,7 @@ def test_replay_edge_vs_random_and_walk_forward(tmp_path):
     assert oos["n"] == 16 and oos["tp_first_rate"] == pytest.approx(6 / 16)      # time order: the last 16
     assert oos["tp_share"] == pytest.approx(6 / 16) and res["break_even_tp_share"] == pytest.approx(1 / 3, abs=1e-4)
     assert res["verdict"].startswith("out-of-sample TP share beats random")    # 37.5 % > 33.3 % and >> random
-    other = tmp_path / "bought_only"                  # its own lock: a different frozen parameter set
-    other.mkdir()
-    only = _locked(other, tmp_path / "r.db", min_n=5, bought_only=True)
-    assert only["all"]["candidates"]["n"] == 20
+    assert res["selection"]["entered"] == 40 and res["selection"]["excluded_entered"] == 0
 
 
 def test_volatility_alone_is_not_an_edge(tmp_path):

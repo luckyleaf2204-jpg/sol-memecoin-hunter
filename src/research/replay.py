@@ -1,10 +1,11 @@
 """Replay on research.db: do Trade Candidates of the PRODUCTION strategy hit TP before SL more often than comparable
 random tokens? (read-only; nothing here feeds trading)
 
-Candidates: forward_returns anchor 'candidate' (price at the first candidate time, TP +30 % / SL -15 % first hit
-inside the horizon), joined to the candidates table. Only candidates of the gated LIFECYCLE engine count (the
-production entry engine; the no-chasing gate runs before a candidate is recorded) — other / unknown engines are
-excluded and counted.
+Trades: only decisions that were ACTUALLY ENTERED (research.db gate_events kind 'entered', i.e. passed the no-chasing
+gate and filled), anchored at that moment (forward_returns anchor 'entered': TP +30 % / SL -15 % first hit inside the
+horizon) — not at the first sighting of a candidate episode. Only the gated LIFECYCLE engine counts (events with a
+lifecycle stage); others are excluded and counted. Tokens stopped by the gate (anchor 'gate_blocked') are reported
+as a separate group, never mixed in.
 
 Baseline: for each candidate, up to 3 random OTHER tokens in the same age bucket and liquidity bucket, chosen from
 token snapshots taken at or before the decision (research.gate_eval, no look-ahead); their outcome is the same TP /
@@ -27,7 +28,6 @@ import sqlite3
 from pathlib import Path
 
 TP_LEVEL, SL_LEVEL = 30.0, 15.0
-EPISODE_S = 300.0                    # research.dataset.CANDIDATE_GAP_S: one candidate episode
 BREAK_EVEN_TP_SHARE = SL_LEVEL / (TP_LEVEL + SL_LEVEL)
 MIN_N = 30                           # per part: below this the holdout is not opened (docs/sample_plan.md)
 ENGINE = "lifecycle"                 # the production entry engine (trading.config.production_config)
@@ -45,27 +45,37 @@ def _rows(db: sqlite3.Connection, anchor: str, horizon: str) -> list[dict]:
              "mae": r[7]} for r in db.execute(q, (anchor, horizon))]
 
 
-def load(db: sqlite3.Connection, horizon: str = "1h", engine: str | None = ENGINE) -> tuple[list[dict], dict]:
-    cand = _rows(db, "candidate", horizon)
-    eps: dict[str, list] = {}
+def _events(db: sqlite3.Connection, kind: str) -> dict[str, tuple]:
+    """First gate event of this kind per token: (ts, age_s, liquidity_usd, lifecycle stage)."""
     try:
-        cols = {r[1] for r in db.execute("PRAGMA table_info(candidates)")}
-        eng = "engine" if "engine" in cols else "NULL"               # older databases: no engine column
-        for ca, ts, bought, e in db.execute(f"SELECT ca, ts, bought, {eng} FROM candidates"):
-            eps.setdefault(ca, []).append((ts or 0.0, bool(bought), e))
+        q = ("SELECT ca, MIN(ts), age_s, liquidity_usd, lifecycle FROM gate_events WHERE kind=? GROUP BY ca")
+        return {ca: (ts, age, liq, lc) for ca, ts, age, liq, lc in db.execute(q, (kind,))}
     except sqlite3.OperationalError:
-        pass
-    for r in cand:
-        # NO LOOK-AHEAD: "bought" only from the episode of this decision (its candidate row, ts within
-        # EPISODE_S of the anchor) — never from a later episode of the same token
-        same = [e for e in eps.get(r["ca"], []) if r["ts"] - 1 <= e[0] <= r["ts"] + EPISODE_S]
-        r["bought"] = any(b for _, b, _ in same)
-        r["engine"] = next((e for _, _, e in same if e), None)
-        snap = db.execute("SELECT age_sec, liq_usd FROM token_snapshots WHERE ca=? AND ts<=? ORDER BY ts DESC LIMIT 1",
-                          (r["ca"], r["ts"])).fetchone()
-        r["age_s"], r["liq"] = (snap[0], snap[1]) if snap else (None, None)
-    kept = [r for r in cand if engine is None or r["engine"] == engine]
-    return kept, {"engine": engine, "excluded_other_engine": len(cand) - len(kept), "all_candidates": len(cand)}
+        return {}
+
+
+def _group(db: sqlite3.Connection, anchor: str, kind: str, horizon: str, engine: str | None) -> tuple[list, int]:
+    ev = _events(db, kind)
+    rows, excluded = [], 0
+    for r in _rows(db, anchor, horizon):
+        e = ev.get(r["ca"])
+        if e is None:
+            excluded += 1                                 # no gate event: cannot attribute it to an engine
+            continue
+        r["age_s"], r["liq"], r["lifecycle"] = e[1], e[2], e[3]
+        if engine == ENGINE and not e[3]:
+            excluded += 1                                 # not a lifecycle-engine decision
+            continue
+        rows.append(r)
+    return rows, excluded
+
+
+def load(db: sqlite3.Connection, horizon: str = "1h", engine: str | None = ENGINE) -> tuple[list[dict], dict]:
+    """Entered trades (the strategy) + gate-blocked tokens (reported apart), with age / liquidity at the decision."""
+    entered, ex_e = _group(db, "entered", "entered", horizon, engine)
+    blocked, ex_b = _group(db, "gate_blocked", "blocked", horizon, engine)
+    return entered, {"engine": engine, "entered": len(entered), "excluded_entered": ex_e,
+                     "gate_blocked": blocked, "excluded_blocked": ex_b}
 
 
 def _share(rows) -> float | None:
@@ -127,7 +137,7 @@ def compare(db: sqlite3.Connection, rows: list[dict], exclude: set[str], h_s: in
             "baseline": "same age / liquidity bucket, chosen from snapshots at or before each decision"}
 
 
-def frozen_params(horizon: str, split: float, bought_only: bool, seed: int, min_n: int = MIN_N,
+def frozen_params(horizon: str, split: float, seed: int, min_n: int = MIN_N,
                   engine: str | None = ENGINE, sample_id: str | None = None, commit: str | None = None) -> dict:
     """Everything that defines the test. Chosen on the in-sample part BEFORE the holdout is looked at."""
     import hashlib
@@ -138,7 +148,7 @@ def frozen_params(horizon: str, split: float, bought_only: bool, seed: int, min_
     if commit is None:
         from core.version import git_commit
         commit = git_commit()
-    p = {"horizon": horizon, "split": split, "bought_only": bought_only, "seed": seed, "min_n": min_n,
+    p = {"horizon": horizon, "split": split, "population": "entered (gate passed, filled)", "seed": seed, "min_n": min_n,
          "engine": engine, "sample_id": sample_id, "commit": commit, "embargo_s": horizon_s(horizon),
          "tp_pct": TP_LEVEL, "sl_pct": SL_LEVEL, "baseline": "age/liquidity-matched random tokens, bootstrap"}
     p["hash"] = hashlib.sha256(json.dumps(p, sort_keys=True).encode()).hexdigest()[:10]
@@ -152,10 +162,10 @@ def _cut(cand: list[dict], split: float) -> float:
     return ts[k] if k < len(ts) else float("inf")
 
 
-def _parts(cand: list[dict], t_cut: float, embargo_s: float, bought_only: bool):
+def _parts(cand: list[dict], t_cut: float, embargo_s: float):
     """Embargo: the holdout starts only once the outcome window of the LAST in-sample decision has closed
     (start = max(cut, last in-sample ts + horizon)), so no in-sample outcome overlaps the holdout."""
-    rows = sorted((r for r in cand if r["bought"] or not bought_only), key=lambda r: r["ts"])
+    rows = sorted(cand, key=lambda r: r["ts"])
     ins = [r for r in rows if r["ts"] < t_cut]
     start = max(t_cut, (ins[-1]["ts"] + embargo_s) if ins else t_cut)
     oos = [r for r in rows if r["ts"] >= start]
@@ -163,8 +173,8 @@ def _parts(cand: list[dict], t_cut: float, embargo_s: float, bought_only: bool):
     return ins, oos, embargoed
 
 
-def lock_holdout(db_path: str, lock_path: str, horizon: str = "1h", split: float = 0.6, bought_only: bool = False,
-                 seed: int = 7, now: float | None = None, min_n: int = MIN_N, engine: str | None = ENGINE,
+def lock_holdout(db_path: str, lock_path: str, horizon: str = "1h", split: float = 0.6, seed: int = 7,
+                 now: float | None = None, min_n: int = MIN_N, engine: str | None = ENGINE,
                  sample_id: str | None = None, commit: str | None = None) -> dict:
     """Freeze the test on the in-sample part: write the parameter hash, the lock time, the time cut and the embargo.
     Refused when the in-sample part has fewer than min_n candidates or a lock already exists."""
@@ -173,19 +183,19 @@ def lock_holdout(db_path: str, lock_path: str, horizon: str = "1h", split: float
     if Path(lock_path).exists():
         return {"status": "REFUSED", "reason": "a holdout lock already exists (one lock per holdout)",
                 "lock": json.loads(Path(lock_path).read_text(encoding="utf-8"))}
-    params = frozen_params(horizon, split, bought_only, seed, min_n, engine, sample_id, commit)
+    params = frozen_params(horizon, split, seed, min_n, engine, sample_id, commit)
     db = sqlite3.connect(db_path)
     try:
         cand, info = load(db, horizon, engine)
         t_cut = _cut(cand, split)
-        ins, _, _ = _parts(cand, t_cut, params["embargo_s"], bought_only)
+        ins, _, _ = _parts(cand, t_cut, params["embargo_s"])
         if len(ins) < min_n:
             return {"status": "REFUSED", "reason": f"in-sample n = {len(ins)} < {min_n}: nothing to freeze yet"}
         lock = {"params_hash": params["hash"], "params": params, "locked_at": now or time.time(), "t_cut": t_cut,
                 "embargo_s": params["embargo_s"], "n_in_sample": len(ins)}
         from core.snapshot import write_atomic
         write_atomic(lock_path, json.dumps(lock, indent=1).encode("utf-8"))
-        return {"status": "LOCKED", "lock": lock, "selection": info,
+        return {"status": "LOCKED", "lock": lock, "selection": _info(info),
                 "in_sample": compare(db, ins, {r["ca"] for r in cand}, horizon_s(horizon), seed)}
     finally:
         db.close()
@@ -204,22 +214,27 @@ def _open_holdout(lock_path: str | None, params: dict, n_oos: int, min_n: int) -
     return lock, None
 
 
-def replay(db_path: str, horizon: str = "1h", split: float = 0.6, bought_only: bool = False, seed: int = 7,
+def _info(info: dict) -> dict:
+    return {k: (len(v) if k == "gate_blocked" else v) for k, v in info.items()}
+
+
+def replay(db_path: str, horizon: str = "1h", split: float = 0.6, seed: int = 7,
            holdout_lock: str | None = None, min_n: int = MIN_N, engine: str | None = ENGINE,
            sample_id: str | None = None, commit: str | None = None) -> dict:
     import json
-    params = frozen_params(horizon, split, bought_only, seed, min_n, engine, sample_id, commit)
+    params = frozen_params(horizon, split, seed, min_n, engine, sample_id, commit)
     db = sqlite3.connect(db_path)
     try:
         cand, info = load(db, horizon, engine)
         t_cut = _cut(cand, split)
         if holdout_lock and Path(holdout_lock).exists():
             t_cut = json.loads(Path(holdout_lock).read_text(encoding="utf-8")).get("t_cut", t_cut)   # the locked cut
-        ins, oos, emb = _parts(cand, t_cut, params["embargo_s"], bought_only)
+        ins, oos, emb = _parts(cand, t_cut, params["embargo_s"])
         lock, refused = _open_holdout(holdout_lock, params, len(oos), min_n)
-        exclude, h = {r["ca"] for r in cand}, horizon_s(horizon)
-        out = {"horizon": horizon, "levels": "TP +30 % / SL -15 % (dataset)", "bought_only": bought_only,
-               "selection": info, "frozen_params": params, "holdout_lock": lock,
+        blocked = info["gate_blocked"]
+        exclude, h = {r["ca"] for r in cand} | {r["ca"] for r in blocked}, horizon_s(horizon)
+        out = {"horizon": horizon, "levels": "TP +30 % / SL -15 % (dataset)",
+               "selection": _info(info), "frozen_params": params, "holdout_lock": lock,
                "protocol": "parameters (incl. sample_id, commit, min_n, engine) fixed on the in-sample part and locked "
                            "(hash + time); holdout = after cut + embargo (= horizon), opened only with the same hash "
                            f"and n >= {min_n}",
@@ -228,6 +243,10 @@ def replay(db_path: str, horizon: str = "1h", split: float = 0.6, bought_only: b
                               "after 5 / 7 / 10 % round-trip cost (trading/sample_report.py).",
                "n_in_sample": len(ins), "n_holdout": len(oos), "n_embargoed": len(emb)}
         wf = {"split": split, "embargo_s": params["embargo_s"], "in_sample": compare(db, ins, exclude, h, seed)}
+        # the gate-blocked group, reported apart (never mixed in); limited to the in-sample window while closed
+        bl = blocked if not refused else [r for r in blocked if r["ts"] < t_cut]
+        out["gate_blocked"] = {"window": "all" if not refused else "in-sample window only (holdout closed)",
+                               **compare(db, bl, exclude, h, seed)}
         if refused:
             wf["out_of_sample"] = {"status": "REFUSED", "reason": refused}
             out["all"] = None                             # the pooled view would leak the holdout
