@@ -21,6 +21,12 @@ ASSUMPTIONS = ["identity VERIFIED (not stored in snapshots)", "mint & freeze aut
                "data feeds healthy", "PRE-EARLY not replayable"]
 
 
+APPROXIMATION = ("APPROXIMATE: no Jupiter quotes in a backtest — entries and exits are both filled on the liquidity "
+                 "model (constant-product impact on stored liquidity + simulated latency slippage + route fee + "
+                 "network / priority fee). Live paper fills use real Jupiter quotes and a 30 % haircut without one, so "
+                 "live results can be materially worse.")
+
+
 class _Engine:
     def __init__(self):
         self.published: list[TokenState] = []
@@ -91,6 +97,7 @@ def backtest(rows: list[dict], cfg: TradingConfig | None = None, allow_legacy: b
     eng = _Engine()
     eng.history = _History()
     bot = PaperBot(eng, cfg)
+    bot.exit_fallback = "model"               # entries AND exits on the same liquidity model (no Jupiter quotes)
     by_ts: dict[float, list[dict]] = defaultdict(list)
     for r in rows:
         if r.get("dq_status") is None:          # legacy V1 rows: excluded (as in the scanner backtest)
@@ -104,7 +111,7 @@ def backtest(rows: list[dict], cfg: TradingConfig | None = None, allow_legacy: b
         eng.published = list(latest.values())
         bot.tick(now=ts)
     s = bot.book.stats(max(by_ts) if by_ts else None)
-    return {"stats": s, "assumptions": ASSUMPTIONS, "frames": len(by_ts), "config": {
+    return {"stats": s, "assumptions": ASSUMPTIONS, "frames": len(by_ts), "approximation": APPROXIMATION, "config": {
                 "sample_id": cfg.sample_id(), "lifecycle": cfg.lifecycle, "entry_location_gate": cfg.entry_location_gate,
                 "legacy": not (cfg.lifecycle and cfg.entry_location_gate)},
             "trades": [{"symbol": p.symbol, "mint": p.mint, "opened": p.opened_at, "closed": p.closed_at,

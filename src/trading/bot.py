@@ -76,6 +76,7 @@ class PaperBot:
         self.quote_block: dict[str, float] = {}  # mint -> until: Jupiter confirmed NO route (no re-quote spam)
         self.quote_stats: dict[str, int] = {}    # Jupiter BUY-quote outcomes by status
         self.sell_quote_stats: dict[str, int] = {}  # Jupiter SELL-quote outcomes by status
+        self.exit_fallback = "haircut"         # no Jupiter client: "haircut" (live paper) | "model" (backtest only)
         self.snapshot_status: dict | None = None   # set by the web app: durable store of the sample (core.snapshot)
         from trading.gaps import GapTracker
         self.gap_tracker = GapTracker(self.book)
@@ -230,9 +231,11 @@ class PaperBot:
                     elif cur is None:
                         self.sell_intents[p.mint] = it
                     continue                            # filled on a real Jupiter SELL quote in execute_sells()
-                # no Jupiter client at all: no executable quote -> haircut for EVERY exit, never near the mark
-                ex = self.exec.sell_haircut(st, tokens, mark, self._sol(), reason,
-                                            self.cfg.hard_exit_no_quote_haircut_pct / 100, now)
+                if self.exit_fallback == "model":       # backtest: the same liquidity model as its entries
+                    ex = self.exec.sell(st, tokens, mark, self._sol(), reason, now, force=hard)
+                else:                                   # live paper without a Jupiter client: never near the mark
+                    ex = self.exec.sell_haircut(st, tokens, mark, self._sol(), reason,
+                                                self.cfg.hard_exit_no_quote_haircut_pct / 100, now)
                 self._after_sell(p, st, ex, reason, frac, now)
             self._set("fills", RUN if self.book.executions and now - self.book.executions[-1].ts < 60 else READY,
                       f"{len(self.book.executions)} executions · {self.book.failed} failed",

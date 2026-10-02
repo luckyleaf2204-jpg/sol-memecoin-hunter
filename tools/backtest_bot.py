@@ -26,3 +26,4 @@ print(f"frames {res['frames']} · executions {res['executions']} · closed {len(
 for t in res["trades"]:
     print(f"  {t['symbol']:<12} net {t['net']:+9.2f}  exit {t['exit']}")
 print("ASSUMPTIONS:", "; ".join(res["assumptions"]))
+print(res["approximation"])
