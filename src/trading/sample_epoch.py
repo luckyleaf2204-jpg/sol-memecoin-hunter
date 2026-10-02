@@ -13,9 +13,9 @@ import json
 import time
 from pathlib import Path
 
-STRATEGY_VERSION = "s5-gate300-cooldown-haircut"   # fixes 1-8: gate blocks UNKNOWN / < 300 s history / falling
-# PULLBACK, 5-min cooldown after a FAILED buy, haircut for every exit without a quote, haircut in gross, failed sells
-# recorded, trading.json cannot override defaults (previous: s4-148af2c)
+STRATEGY_VERSION = "s6-sellretry-sw180"   # G1-G8: sells retry transient quote errors (haircut only on NO_ROUTE /
+# INVALID or a HARD exit after 60 s), SECOND_WAVE blocked on a new low < 180 s, buy cooldown survives restarts,
+# price history survives a quick restart (previous: s5-gate300-cooldown-haircut, fixes 1-8)
 MIN_SAMPLE_COMMIT = "148af2c"            # the server must run this commit or a descendant
 LEGACY = "LEGACY"
 
