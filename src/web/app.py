@@ -563,20 +563,21 @@ def create_app(engine: ScannerEngine | None = None, start_scanner: bool = True,
     @app.get("/healthz")
     async def healthz():
         """Public liveness + which code and parameters are running (no secret, no paper data).
-        Any import or call error degrades the payload; the route itself still answers."""
+        Any import or call error degrades the payload; the route itself still answers.
+        ok is decided before those calls, so a broken import cannot report ok while halted or retrying."""
         out = {"ok": True, "role": state.get("role") or "ACTIVE"}
+        if state["snapshot"].get("probe_retrying"):
+            out["ok"] = False                              # store unreachable at start-up: retrying
+            out["durability"] = "probe failed on a store error — retrying"
+        if state.get("halted"):
+            out["ok"] = False                              # a halted server is not healthy
+            out["halted"] = state["halted"]
         try:
             from core.version import git_commit
             bot = state.get("bot")
             out["commit"] = git_commit()
             if state.get("lease") is not None:
                 out["lease"] = state["lease"].as_dict()
-            if state["snapshot"].get("probe_retrying"):
-                out["ok"] = False                          # store unreachable at start-up: retrying
-                out["durability"] = "probe failed on a store error — retrying"
-            if state.get("halted"):
-                out["ok"] = False                          # a halted server is not healthy
-                out["halted"] = state["halted"]
             sn = state["snapshot"]
             out["snapshot"] = {"durable": sn["durable"], "store": sn["store"], "last_utc": _utc(sn["last_ts"]),
                                "last_restore_utc": _utc((sn.get("restore") or {}).get("at")),

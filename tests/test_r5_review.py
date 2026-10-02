@@ -539,6 +539,30 @@ def test_stale_s_forgets_mints_with_no_open_position():
     assert "not-a-position" not in b.stale_s and MINT not in b.stale_s
 
 
+def test_healthz_ok_is_computed_before_calls_that_can_fail(monkeypatch):
+    """A broken git_commit import must not leave ok true while the instance is halted or the probe is retrying."""
+    import sys
+
+    from test_v12 import opened
+    b, _, _ = opened()
+    app = webapp.create_app(engine=b.engine, start_scanner=False, access_code="c0de", bot=b)
+    app.state.hunter["halted"] = "activate after STANDBY failed (RuntimeError)"
+    app.state.hunter["role"] = "ACTIVATE FAILED"
+    monkeypatch.setitem(sys.modules, "core.version", None)
+    with TestClient(app) as c:
+        body = c.get("/healthz").json()
+        assert body["ok"] is False and body["role"] == "ACTIVATE FAILED"
+        assert "activate after STANDBY failed" in body["halted"]
+        assert "health_error" in body
+    b2, _, _ = opened()
+    app2 = webapp.create_app(engine=b2.engine, start_scanner=False, access_code="c0de", bot=b2)
+    app2.state.hunter["snapshot"]["probe_retrying"] = True
+    with TestClient(app2) as c:
+        body = c.get("/healthz").json()
+        assert body["ok"] is False
+        assert "retrying" in body["durability"]
+
+
 def test_healthz_survives_any_call_or_import_error(monkeypatch):
     import sys
 
