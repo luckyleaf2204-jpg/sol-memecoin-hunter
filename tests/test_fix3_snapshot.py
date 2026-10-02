@@ -73,14 +73,17 @@ def test_restore_is_all_or_nothing(tmp_path):
     assert json.loads((fresh / "holdout_lock.json").read_text())["params_hash"] == "abc"
 
 
-def test_local_data_present_restores_nothing(tmp_path):
+def test_complete_local_data_restores_nothing_partial_local_data_halts(tmp_path):
     d, store = _data(tmp_path / "data"), S.LocalStore(tmp_path / "store")
     S.snapshot(d, store)
+    r = S.restore(d, store)                               # warm restart: all files there, local is newer
+    assert r["status"].startswith("LOCAL DATA PRESENT") and r["restored"] == []
     live = tmp_path / "live"
     live.mkdir()
     (live / "sample_epoch.json").write_text("{\"started_at\": 99}", encoding="utf-8")
-    r = S.restore(live, store)
-    assert r["status"].startswith("LOCAL DATA PRESENT") and not (live / "paper_bot.json").exists()
+    with pytest.raises(S.SnapshotError, match="partial local data"):
+        S.restore(live, store)
+    assert not (live / "paper_bot.json").exists()
 
 
 def test_write_atomic(tmp_path):
@@ -106,7 +109,7 @@ def test_server_stops_the_bot_when_the_restore_fails(tmp_path, monkeypatch):
     app = webapp.create_app(engine=eng, start_scanner=True, access_code="c0de")
     with TestClient(app) as c:
         h = c.get("/healthz").json()
-        assert "restore failed" in h["halted"] and "checksum mismatch for paper_bot.json" in h["halted"]
+        assert h["ok"] is False and "restore failed" in h["halted"] and "checksum mismatch for paper_bot.json" in h["halted"]
         d = c.get("/api/snapshot", headers={"X-Access-Code": "c0de"}).json()
         assert d["halted"] and d["last_restore"]["status"].startswith("RESTORE FAILED")
     assert not (data / "paper_bot.json").exists() and not (data / "sample_epoch.json").exists()

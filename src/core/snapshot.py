@@ -151,9 +151,29 @@ def _obj(slot: int, name: str) -> str:
     return f"gen-{slot}--{name}.gz"                  # flat object names (no "/"): any simple key-value store works
 
 
+def _gen_manifest_name(slot: int) -> str:
+    return f"manifest-gen-{slot}.json"
+
+
+def _parse(raw: bytes, what: str) -> dict:
+    try:
+        man = json.loads(raw)
+    except ValueError as e:
+        raise SnapshotError(f"{what} is corrupt (not JSON)") from e
+    if not isinstance(man, dict) or not isinstance(man.get("files"), dict) or "gen" not in man:
+        raise SnapshotError(f"{what} is corrupt (missing gen / files)")
+    return man
+
+
 def _manifest(store) -> dict | None:
+    """The current manifest for writing the next generation (an unreadable one restarts the numbering)."""
     raw = store.get(MANIFEST)
-    return json.loads(raw) if raw is not None else None
+    if raw is None:
+        return None
+    try:
+        return _parse(raw, MANIFEST)
+    except SnapshotError:
+        return None
 
 
 def snapshot(data_dir: Path, store, commit: str = "", now: float | None = None) -> dict:
@@ -162,8 +182,15 @@ def snapshot(data_dir: Path, store, commit: str = "", now: float | None = None) 
     the restore point (the manifest still points to it)."""
     t0 = time.time()
     now = now or t0
-    prev = _manifest(store)
-    gen = (prev or {}).get("gen", 0) + 1
+    gens = [(_manifest(store) or {}).get("gen", 0)]
+    for slot in range(GENERATIONS):                    # an unreadable main manifest must not reuse a live slot
+        raw = store.get(_gen_manifest_name(slot))
+        if raw is not None:
+            try:
+                gens.append(_parse(raw, "generation manifest")["gen"])
+            except SnapshotError:
+                pass
+    gen = max(gens) + 1
     slot = gen % GENERATIONS
     files = {}
     for name in FILES:
@@ -181,41 +208,79 @@ def snapshot(data_dir: Path, store, commit: str = "", now: float | None = None) 
     man = {"gen": gen, "slot": slot, "ts": now, "commit": commit, "files": files,
            "bytes_raw": sum(f["size"] for f in files.values()), "bytes_gz": sum(f["size_gz"] for f in files.values()),
            "duration_s": round(time.time() - t0, 2), "target": target_of(store), "store": store.kind}
+    store.put(_gen_manifest_name(slot), json.dumps(man).encode())   # this generation's own manifest (fallback)
     store.put(MANIFEST, json.dumps(man).encode())   # the switch: one object write
     return man
 
 
-def restore(data_dir: Path, store) -> dict:
-    """ALL-OR-NOTHING restore of the manifest's generation: every file is downloaded and checksum-verified into a
-    staging directory first; only if all are good are they moved into DATA_DIR. If any sample file already exists
-    locally nothing is restored (no mixing of two states). Any failure raises SnapshotError and writes nothing."""
-    man = _manifest(store)
-    if man is None:
-        return {"restored": [], "skipped": [], "snapshot_ts": None, "gen": None, "status": "NO SNAPSHOT", "at": time.time()}
-    data_dir = Path(data_dir)
-    present = [n for n in man.get("files", {}) if (data_dir / n).exists()]
-    if present:
-        return {"restored": [], "skipped": list(man["files"]), "snapshot_ts": man.get("ts"), "gen": man.get("gen"),
-                "status": "LOCAL DATA PRESENT (not restored)", "at": time.time()}
-    data_dir.mkdir(parents=True, exist_ok=True)
-    staging = Path(tempfile.mkdtemp(prefix=".restore-", dir=data_dir))
-    try:
-        for name, meta in man["files"].items():
-            blob = store.get(meta.get("object") or name + ".gz")
-            if blob is None:
-                raise SnapshotError(f"missing object for {name} (generation {man.get('gen')})")
+def _stage(store, man: dict, staging: Path) -> None:
+    """Download + verify every file of one generation into `staging` (raises SnapshotError on any problem)."""
+    for name, meta in man["files"].items():
+        blob = store.get(meta.get("object") or name + ".gz")
+        if blob is None:
+            raise SnapshotError(f"missing object for {name} (generation {man.get('gen')})")
+        try:
             data = gzip.decompress(blob)
-            if hashlib.sha256(data).hexdigest() != meta["sha256"]:
-                raise SnapshotError(f"checksum mismatch for {name} (generation {man.get('gen')})")
-            (staging / name).write_bytes(data)
-        for name in man["files"]:                     # all verified: move them in
-            os.replace(staging / name, data_dir / name)
-    finally:
-        for f in staging.glob("*"):
-            f.unlink(missing_ok=True)
-        staging.rmdir()
-    return {"restored": list(man["files"]), "skipped": [], "snapshot_ts": man.get("ts"), "gen": man.get("gen"),
-            "commit": man.get("commit"), "status": "RESTORED", "at": time.time()}
+        except (OSError, EOFError) as e:
+            raise SnapshotError(f"unreadable object for {name} (generation {man.get('gen')})") from e
+        if hashlib.sha256(data).hexdigest() != meta.get("sha256"):
+            raise SnapshotError(f"checksum mismatch for {name} (generation {man.get('gen')})")
+        (staging / name).write_bytes(data)
+
+
+def restore(data_dir: Path, store) -> dict:
+    """ALL-OR-NOTHING restore. Raises SnapshotError (-> the server HALTS) when:
+      * the manifest is corrupt,
+      * the data directory holds only SOME of the snapshot's files (leftovers of a broken state),
+      * no generation verifies.
+    If all of the snapshot's files are already present the local data is newer: nothing is restored. If the current
+    generation is corrupt the restore falls back to the newest older generation that verifies (and says so)."""
+    raw = store.get(MANIFEST)
+    if raw is None:
+        return {"restored": [], "skipped": [], "snapshot_ts": None, "gen": None, "status": "NO SNAPSHOT", "at": time.time()}
+    man = _parse(raw, MANIFEST)
+    data_dir = Path(data_dir)
+    names = list(man["files"])
+    present = [n for n in names if (data_dir / n).exists()]
+    if present and len(present) == len(names):
+        return {"restored": [], "skipped": names, "snapshot_ts": man.get("ts"), "gen": man.get("gen"),
+                "status": "LOCAL DATA PRESENT (not restored)", "at": time.time()}
+    if present:
+        raise SnapshotError(f"partial local data: {', '.join(present)} present but "
+                            f"{', '.join(n for n in names if n not in present)} missing — not mixing two states")
+    candidates = [man]
+    for slot in range(GENERATIONS):                    # older generations, newest first
+        rawg = store.get(_gen_manifest_name(slot))
+        if rawg is None:
+            continue
+        try:
+            g = _parse(rawg, _gen_manifest_name(slot))
+        except SnapshotError:
+            continue
+        if g["gen"] < man["gen"]:
+            candidates.append(g)
+    candidates = [candidates[0]] + sorted(candidates[1:], key=lambda g: -g["gen"])
+    data_dir.mkdir(parents=True, exist_ok=True)
+    errors = []
+    for g in candidates:
+        staging = Path(tempfile.mkdtemp(prefix=".restore-", dir=data_dir))
+        try:
+            _stage(store, g, staging)
+            for name in g["files"]:                     # all verified: move them in
+                os.replace(staging / name, data_dir / name)
+        except SnapshotError as e:
+            errors.append(str(e))
+            continue
+        finally:
+            for f in staging.glob("*"):
+                f.unlink(missing_ok=True)
+            staging.rmdir()
+        fell_back = g is not candidates[0]
+        return {"restored": list(g["files"]), "skipped": [], "snapshot_ts": g.get("ts"), "gen": g.get("gen"),
+                "commit": g.get("commit"), "errors": errors, "fell_back_from": man["gen"] if fell_back else None,
+                "status": f"RESTORED (fell back to generation {g['gen']}: generation {man['gen']} corrupt)"
+                if fell_back else "RESTORED", "at": time.time()}
+    raise SnapshotError("no generation verifies: " + " | ".join(errors))
 
 
 def fmt_bytes(n: int | None) -> str:

@@ -57,10 +57,13 @@ def test_restore_never_overwrites_local_files_and_checks_integrity(tmp_path):
     live = tmp_path / "live"
     live.mkdir()
     (live / "paper_bot.json").write_text("{\"cash\": 1}", encoding="utf-8")
-    res = S.restore(live, store)
-    assert "paper_bot.json" in res["skipped"] and (live / "paper_bot.json").read_text() == "{\"cash\": 1}"
-    obj = json.loads(store.get(S.MANIFEST))["files"]["truth_ledger.json"]["object"]
+    with pytest.raises(S.SnapshotError):                 # a leftover file: halt, never mix two states (G5)
+        S.restore(live, store)
+    assert (live / "paper_bot.json").read_text() == "{\"cash\": 1}" and len(list(live.iterdir())) == 1
+    man = json.loads(store.get(S.MANIFEST))
+    obj = man["files"]["truth_ledger.json"]["object"]
     store.put(obj, gzip.compress(b"tampered"))
+    store.put(f"manifest-gen-{man['slot']}.json", store.get(S.MANIFEST))   # only one generation exists
     other = tmp_path / "other"
     other.mkdir()
     with pytest.raises(S.SnapshotError):                 # checksum mismatch: nothing silently restored

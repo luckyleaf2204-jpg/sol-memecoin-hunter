@@ -252,6 +252,7 @@ def create_app(engine: ScannerEngine | None = None, start_scanner: bool = True,
         bot = state.get("bot")
         out = {"ok": True, "commit": git_commit()}
         if state.get("halted"):
+            out["ok"] = False                              # a halted server is not healthy
             out["halted"] = state["halted"]
         sn = state["snapshot"]
         out["snapshot"] = {"durable": sn["durable"], "store": sn["store"], "last_utc": _utc(sn["last_ts"]),
