@@ -82,8 +82,10 @@ def cmd_backtest(column: str) -> None:
 
 def cmd_web(host: str, port: int) -> None:
     import uvicorn
+    # Drain open HTTP connections before the lifespan shutdown. That drain is outside the 105s
+    # snapshot budget. 5s here + 105s of lifespan = 110s, inside Render's maxShutdownDelaySeconds 120.
     uvicorn.run("web.app:app", host=host, port=port, proxy_headers=True, forwarded_allow_ips="*",
-                log_level="info")
+                log_level="info", timeout_graceful_shutdown=5)
 
 
 def main() -> None:

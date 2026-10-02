@@ -20,7 +20,9 @@ import json
 import os
 import sqlite3
 import tempfile
+import threading
 import time
+import weakref
 from pathlib import Path
 
 FILES = ("paper_bot.json", "sample_epoch.json", "holdout_lock.json", "trading.json", "truth_ledger.json",
@@ -33,9 +35,13 @@ PROBE = "probe.json"
 NOT_DURABLE = "MẪU KHÔNG BỀN - sẽ mất khi restart"
 SNAPSHOT_FAIL_BLOCK_N = 3            # this many failed snapshots in a row -> no new entries until one succeeds
 DURABILITY_RETRY_S = 60.0            # start-up probe failed on a store error: retry this often
-SHUTDOWN_DEADLINE_S = 80.0           # at SIGTERM the whole snapshot gets this long (maxShutdownDelaySeconds 120)
+SHUTDOWN_DEADLINE_S = 80.0           # at SIGTERM the WHOLE snapshot() gets this long, from its first line
 SHUTDOWN_SLOW_TIMEOUT_S = 60.0       # at SIGTERM: research.db gets this long, else the previous copy is kept
-# (render.yaml maxShutdownDelaySeconds 120: bot stop <= 10 s + book files + this + lease release fit inside it)
+HOURLY_SLOW_TIMEOUT_S = 60.0         # hourly: same — a slow research.db is carried, it does not fail the snapshot
+PUBLISH_RESERVE_S = 10.0             # inside the deadline: the two manifest puts keep at least this long
+SHUTDOWN_TOTAL_S = 105.0             # bot stop <= 10 + snapshot <= 80 + lease release <= 15; engine stop uses the slack
+# (render.yaml maxShutdownDelaySeconds 120. 10 + 80 + 15 = 105 < 110 even when every store call is slow.
+#  The publish reserve is carved out of the 80s, not added on top.)
 SNAPSHOT_EVERY_S = float(os.environ.get("SNAPSHOT_EVERY_S", "3600") or 3600)
 
 
@@ -179,6 +185,39 @@ class SnapshotError(RuntimeError):
     pass
 
 
+class StaleSnapshot(SnapshotError):
+    """A newer snapshot has claimed the store. Writes from this one must not land."""
+
+
+# One snapshot() at a time. Shutdown waits only within its deadline, then refuses to race.
+_SNAP_LOCK = threading.Lock()
+# Held across a manifest put (check + write) so a late put cannot replace a newer manifest.
+# File uploads only take it for the epoch check: a slow research.db must not block the switch.
+_PUT_LOCK = threading.Lock()
+_EPOCH = 0
+_CLAIMED: weakref.WeakKeyDictionary = weakref.WeakKeyDictionary()
+
+
+def _current(epoch: int) -> None:
+    if epoch != _EPOCH:
+        raise StaleSnapshot("stale snapshot write skipped (a newer snapshot is in progress)")
+
+
+def _put_file(store, name: str, data: bytes, epoch: int) -> None:
+    """File objects are named by generation, and a later snapshot claims a higher generation, so this put does not
+    hold the lock across the upload (a slow research.db must not block the manifest switch)."""
+    with _PUT_LOCK:
+        _current(epoch)
+    store.put(name, data)
+
+
+def _put_manifest(store, name: str, data: bytes, epoch: int) -> None:
+    """The check and the manifest write share the lock, so a late put cannot land after a newer manifest."""
+    with _PUT_LOCK:
+        _current(epoch)
+        store.put(name, data)
+
+
 def _obj(slot: int, name: str) -> str:
     return f"gen-{slot}--{name}.gz"                  # flat object names (no "/"): any simple key-value store works
 
@@ -233,11 +272,12 @@ def _protected(store, slot: int) -> set[str]:
     return refs
 
 
-def _put_verified(store, slot: int, name: str, raw: bytes, gen: int, protected: set[str] = frozenset()) -> dict:
+def _put_verified(store, slot: int, name: str, raw: bytes, gen: int, protected: set[str] = frozenset(),
+                  epoch: int = 0) -> dict:
     gz = gzip.compress(raw, 6)
     sha = hashlib.sha256(raw).hexdigest()
     obj = _free_obj(slot, name, protected)
-    store.put(obj, gz)
+    _put_file(store, obj, gz, epoch)
     back = store.get(obj)
     if back is None or hashlib.sha256(gzip.decompress(back)).hexdigest() != sha:
         raise SnapshotError(f"verify failed for {name}: manifest not switched (generation {gen} discarded)")
@@ -269,36 +309,105 @@ def snapshot(data_dir: Path, store, commit: str = "", now: float | None = None,
     Files go in priority order (book, epoch, lock first; research.db last). With slow_timeout_s (shutdown), a SLOW
     file that is not written + verified in time keeps the previous generation's verified copy (`carried_from`), so
     the book is never lost waiting for the research DB. `steps` gives the seconds of every file.
-    deadline_s (shutdown): a total time budget. A CRITICAL file (book / epoch / lock / config) not written in time
-    aborts the generation (SnapshotError: the previous verified generation stays the restore point, never a mix of an
-    old book and a new epoch); any other file not written in time keeps its previous verified copy."""
+    deadline_s (shutdown): ONE budget for this whole call, measured from the start — manifest reads, the protected-object
+    reads, every file upload and the two final manifest writes. A CRITICAL file (book / epoch / lock / config) not
+    written in time aborts the generation (SnapshotError: the previous verified generation stays the restore point,
+    never a mix of an old book and a new epoch); any other file not written in time keeps its previous verified copy.
+    When the deadline is at least PUBLISH_RESERVE_S, a SLOW file's cap is min(slow_timeout, remaining - reserve) so
+    the two manifest puts still have that reserve. Shorter deadlines (unit tests) keep the previous 1s publish grace.
+    The manifest is not switched when the budget runs out, so a late critical file cannot publish a mixed generation.
+    With slow_timeout_s set (hourly and shutdown), an error is carried only for a SLOW file (research.db). Any other
+    file that errors fails the snapshot, so a stale truth_ledger.json or price_history.json is never published next
+    to a new book and epoch.
+    Overlapping calls (an hourly snapshot still running when shutdown starts one) take one lock. The later call
+    waits only within its deadline, then gives up rather than racing. Each put is tied to an epoch, so a write
+    that was already in flight cannot replace a newer manifest."""
+    global _EPOCH
     t0 = time.time()
     now = now or t0
-    prev = _manifest(store) or {}
-    gens = [prev.get("gen", 0)]
-    for slot in range(GENERATIONS):                    # an unreadable main manifest must not reuse a live slot
-        raw = store.get(_gen_manifest_name(slot))
-        if raw is not None:
-            try:
-                gens.append(_parse(raw, "generation manifest")["gen"])
-            except SnapshotError:
-                pass
-    gen = max(gens) + 1
-    slot = gen % GENERATIONS
+    _log_research_db(data_dir)
+    end = None if deadline_s is None else t0 + max(float(deadline_s), 0.0)
+    wait = None if end is None else max(0.0, end - time.time())
+    if not _SNAP_LOCK.acquire(timeout=-1 if wait is None else wait):
+        raise SnapshotError(f"deadline: another snapshot still running after {deadline_s}s — "
+                            f"this one will not overwrite it")
+    try:
+        put_wait = None if end is None else max(0.0, end - time.time())
+        if not _PUT_LOCK.acquire(timeout=-1 if put_wait is None else put_wait):
+            raise SnapshotError(f"deadline: another snapshot is still publishing after {deadline_s}s — "
+                                f"this one will not overwrite it")
+        try:
+            _EPOCH += 1
+            epoch = _EPOCH
+        finally:
+            _PUT_LOCK.release()
+        return _snapshot_locked(data_dir, store, commit, now, slow_timeout_s, deadline_s, t0, end, epoch)
+    finally:
+        _SNAP_LOCK.release()
+
+
+def _snapshot_locked(data_dir, store, commit: str, now: float, slow_timeout_s: float | None,
+                     deadline_s: float | None, t0: float, end: float | None, epoch: int) -> dict:
+
+    def _run(fn, cap: float | None = None, grace: float = 0.0):
+        """Run fn within the time still left in the deadline (and within cap, when given).
+        grace: when the budget is already spent, still wait this long — only for the manifest switch of a
+        generation whose files are already done, so a carried slow file does not throw away the book."""
+        limit = None if end is None else end - time.time()
+        if cap is not None:
+            limit = cap if limit is None else min(limit, cap)
+        if limit is not None and limit <= 0:
+            if grace <= 0:
+                raise TimeoutError
+            limit = grace
+        return _timed(fn, limit)
+
+    try:
+        prev = _run(lambda: _manifest(store) or {}) or {}
+        gens = [prev.get("gen", 0)]
+
+        def _older_gens():
+            found = []
+            for slot_i in range(GENERATIONS):         # an unreadable main manifest must not reuse a live slot
+                raw = store.get(_gen_manifest_name(slot_i))
+                if raw is None:
+                    continue
+                try:
+                    found.append(_parse(raw, "generation manifest")["gen"])
+                except SnapshotError:
+                    pass
+            return found
+
+        gens.extend(_run(_older_gens))
+        gen = max(gens) + 1
+        with _PUT_LOCK:
+            _current(epoch)                    # a newer snapshot claimed the store while we were reading
+            claimed = _CLAIMED.get(store, 0)   # the previous attempt may not have published, but its uploads can still finish
+            if gen <= claimed:
+                gen = claimed + 1
+            _CLAIMED[store] = gen
+        slot = gen % GENERATIONS
+        protected = _run(lambda: _protected(store, slot))
+    except TimeoutError:
+        raise SnapshotError(f"deadline: snapshot reads not finished in {deadline_s}s — generation discarded, "
+                            f"the previous generation stays the restore point") from None
     files, steps = {}, {}
-    protected = _protected(store, slot)
-    end = None if deadline_s is None else time.time() + deadline_s
     for name in FILES:
         p = Path(data_dir) / name
         if not p.exists():
             continue
         ts = time.time()
-        limit = None if end is None else end - ts
+        cap = None
         if name in SLOW and slow_timeout_s is not None:
-            limit = slow_timeout_s if limit is None else min(limit, slow_timeout_s)
+            cap = float(slow_timeout_s)
+            if end is not None and deadline_s is not None and float(deadline_s) >= PUBLISH_RESERVE_S:
+                rem = end - time.time()
+                cap = min(cap, max(0.0, rem - PUBLISH_RESERVE_S))   # leave the manifest puts their reserve
         try:
-            files[name] = _timed(lambda p=p, name=name: _put_verified(store, slot, name, _read(p), gen, protected),
-                                 limit)
+            files[name] = _run(
+                lambda p=p, name=name: _put_verified(store, slot, name, _read(p), gen, protected, epoch), cap)
+        except StaleSnapshot:
+            raise
         except TimeoutError:
             if name in CRITICAL:
                 raise SnapshotError(f"deadline: {name} not written in {deadline_s}s — generation {gen} discarded, "
@@ -308,13 +417,60 @@ def snapshot(data_dir: Path, store, commit: str = "", now: float | None = None,
                 files[name] = {**old, "carried_from": old.get("carried_from", prev.get("gen"))}
             steps[name + " (timeout, carried)" if old else name + " (timeout, omitted)"] = round(time.time() - ts, 2)
             continue
+        except Exception:
+            # Carry on error only for SLOW (research.db). truth_ledger.json is restored with the book and the
+            # epoch (not OPTIONAL); a stale ledger next to a new epoch is a mixed generation. price_history.json
+            # is OPTIONAL scanner state, not part of that pair — an error still fails the snapshot rather than
+            # publishing it stale. A deadline timeout above may still carry any non-critical file.
+            if name not in SLOW or slow_timeout_s is None:
+                raise
+            old = (prev.get("files") or {}).get(name)      # do not fail the generation, and do not overwrite it
+            if old is not None:
+                files[name] = {**old, "carried_from": old.get("carried_from", prev.get("gen"))}
+            steps[name + " (error, carried)" if old else name + " (error, omitted)"] = round(time.time() - ts, 2)
+            continue
         steps[name] = round(time.time() - ts, 2)
     man = {"gen": gen, "slot": slot, "ts": now, "commit": commit, "files": files, "steps": steps,
            "bytes_raw": sum(f["size"] for f in files.values()), "bytes_gz": sum(f["size_gz"] for f in files.values()),
            "duration_s": round(time.time() - t0, 2), "target": target_of(store), "store": store.kind}
-    store.put(_gen_manifest_name(slot), json.dumps(man).encode())   # this generation's own manifest (fallback)
-    store.put(MANIFEST, json.dumps(man).encode())   # the switch: one object write
+    payload = json.dumps(man).encode()
+
+    def _publish():
+        _put_manifest(store, _gen_manifest_name(slot), payload, epoch)   # this generation's own manifest
+        _put_manifest(store, MANIFEST, payload, epoch)                   # the switch: one object write
+
+    # A deadline long enough to hold the reserve spends that reserve on the two puts (no extra second past
+    # the deadline). A shorter deadline keeps the 1s grace so a carried slow file can still publish.
+    publish_grace = 0.0 if (deadline_s is not None and float(deadline_s) >= PUBLISH_RESERVE_S) else 1.0
+    try:
+        _run(_publish, grace=publish_grace)
+    except TimeoutError:
+        raise SnapshotError(f"deadline: manifest not switched in {deadline_s}s — generation {gen} discarded, "
+                            f"generation {prev.get('gen')} stays the restore point") from None
     return man
+
+
+def _log_research_db(data_dir) -> None:
+    p = Path(data_dir) / "research.db"
+    if p.exists():
+        print(f"[snapshot] research.db {p.stat().st_size} bytes", flush=True)
+    else:
+        print("[snapshot] research.db absent", flush=True)
+
+
+def blocks_entries(exc: BaseException) -> bool:
+    """A snapshot failure counts toward the no-new-orders rule unless the error names only a SLOW file
+    (research.db), which is carried instead of failing the generation. truth_ledger.json and price_history.json
+    are not carried on error, so a persistent failure of either must block new entries. A snapshot that lost the
+    race to a newer one is not a store failure."""
+    if isinstance(exc, StaleSnapshot):
+        return False
+    msg = str(exc)
+    if any(name in msg for name in CRITICAL):
+        return True
+    if any(name in msg for name in SLOW):
+        return False
+    return True
 
 
 def _stage(store, man: dict, staging: Path) -> None:

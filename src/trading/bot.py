@@ -280,11 +280,20 @@ class PaperBot:
                     ex = self.exec.sell_haircut(st, tokens, mark, self._sol(), reason,
                                                 self.cfg.hard_exit_no_quote_haircut_pct / 100, now)
                 self._after_sell(p, st, ex, reason, frac, now)
+            self._drop_closed_stale()
             self._set("fills", RUN if self.book.executions and now - self.book.executions[-1].ts < 60 else READY,
                       f"{len(self.book.executions)} executions · {self.book.failed} failed",
                       items=[_ex_dict(e) for e in self.book.executions[-30:]][::-1], now=now)
         except Exception as e:
+            self._drop_closed_stale()
             self._set("fills", ERROR, f"{type(e).__name__}: {e}", now=now)
+
+    def _drop_closed_stale(self) -> None:
+        """stale_s only tracks open positions; a closed mint must not keep accumulating."""
+        open_mints = set(self.book.positions)
+        for mint in list(self.stale_s):
+            if mint not in open_mints:
+                self.stale_s.pop(mint, None)
 
     def _entries(self, states: dict, now: float) -> None:
         # SCAN

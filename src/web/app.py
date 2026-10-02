@@ -17,6 +17,7 @@ import contextlib
 import hmac
 import os
 import re
+import threading
 import time
 from pathlib import Path
 
@@ -47,6 +48,41 @@ MAX_WATCH = 30
 LIST_KINDS = ("top", "new", "early", "whales", "dev", "social")
 VERSION = "web-16"
 HOME_LIMIT = {"opportunity": 60, "watch": 60, "nodata": 40, "excluded": 40}
+
+
+class _Abandoned(Exception):
+    """The daemon-thread call was still running when its wait ended. Not a TimeoutError: the function itself
+    may raise that (a store call), and the two must stay distinct."""
+
+
+async def _in_daemon_thread(fn, timeout: float | None):
+    """Run fn on a daemon thread. A timeout abandons the thread; it is not the default executor, so loop
+    shutdown does not wait out a hung store call."""
+    if timeout is None:
+        return await asyncio.to_thread(fn)
+    loop = asyncio.get_running_loop()
+    box: dict = {}
+    done = asyncio.Event()
+
+    def work():
+        try:
+            box["v"] = fn()
+        except BaseException as e:
+            box["e"] = e
+        finally:
+            try:
+                loop.call_soon_threadsafe(done.set)
+            except RuntimeError:
+                pass
+
+    threading.Thread(target=work, daemon=True).start()
+    try:
+        await asyncio.wait_for(done.wait(), max(float(timeout), 0.0))
+    except asyncio.TimeoutError:
+        raise _Abandoned from None
+    if "e" in box:
+        raise box["e"]
+    return box.get("v")
 
 
 def client_ip(request: Request) -> str:
@@ -112,24 +148,58 @@ def create_app(engine: ScannerEngine | None = None, start_scanner: bool = True,
         except Exception as e:                     # never block a snapshot / shutdown on this
             print(f"[history] save failed: {type(e).__name__}", flush=True)
 
+    async def _await_bounded(fn, timeout: float | None):
+        """Like _in_daemon_thread, but a timeout is a snapshot deadline (SnapshotError), not a bare TimeoutError,
+        so a store TimeoutError keeps its own type."""
+        from core.snapshot import SnapshotError
+        try:
+            return await _in_daemon_thread(fn, timeout)
+        except _Abandoned:
+            raise SnapshotError(f"deadline: not finished in {timeout}s") from None
+
     async def _snapshot_now(reason: str, slow_timeout_s: float | None = None,
                             deadline_s: float | None = None) -> None:
-        from core.snapshot import snapshot
+        from core.snapshot import SnapshotError, snapshot
         from core.version import git_commit
         store = state.get("snapshot_store")
         if store is None or state.get("halted") or state.get("role") not in (None, "ACTIVE"):
             return
         lease = state.get("lease")
+        t0 = time.monotonic()
+
+        def left() -> float | None:
+            return None if deadline_s is None else deadline_s - (time.monotonic() - t0)
+
         try:
-            if lease is not None and not await asyncio.to_thread(lease.held):   # a store error here is logged too
-                print(f"[snapshot] {reason} SKIPPED: this instance does not hold the lease ({lease.status})",
-                      flush=True)
-                return
+            if lease is not None:
+                timeout = left()
+                if timeout is not None and timeout <= 0:
+                    raise SnapshotError(f"deadline: lease check not finished in {deadline_s}s")
+                try:
+                    held_ok = await _await_bounded(lease.held, timeout)
+                except SnapshotError:
+                    raise SnapshotError(f"deadline: lease check not finished in {deadline_s}s") from None
+                if not held_ok:                              # a store error here is logged too
+                    print(f"[snapshot] {reason} SKIPPED: this instance does not hold the lease ({lease.status})",
+                          flush=True)
+                    return
             if state["bot"] is not None:
                 state["bot"].persist()
             _save_price_history()
-            man = await asyncio.to_thread(snapshot, DATA_DIR, store, git_commit(), None, slow_timeout_s, deadline_s)
+            rem = left()
+            if deadline_s is not None and (rem is None or rem <= 0):
+                raise SnapshotError(f"deadline: no time left for the snapshot ({deadline_s}s)")
+            man = await asyncio.to_thread(snapshot, DATA_DIR, store, git_commit(), None, slow_timeout_s, rem)
             state["snapshot"]["fails_in_a_row"] = 0
+            db_meta = (man.get("files") or {}).get("research.db") or {}
+            if db_meta.get("carried_from") is not None:
+                carried_n = int(state["snapshot"].get("research_db_carried_in_a_row") or 0) + 1
+                state["snapshot"]["research_db_carried_in_a_row"] = carried_n
+                if carried_n >= 3:
+                    print(f"[snapshot] WARNING: research.db carried {carried_n} snapshots in a row "
+                          f"(the research DB is not being refreshed)", flush=True)
+            else:
+                state["snapshot"]["research_db_carried_in_a_row"] = 0
             _update_entry_block()
             state["snapshot"].update(last_ts=man["ts"], last_error=None, last={
                 "reason": reason,
@@ -141,8 +211,10 @@ def create_app(engine: ScannerEngine | None = None, start_scanner: bool = True,
                   f"{man['target']} in {man['duration_s']} s · steps "
                   + ", ".join(f"{k} {v}s" for k, v in (man.get("steps") or {}).items()), flush=True)
         except Exception as e:                             # never break trading for a backup (type only: no URL)
+            from core.snapshot import blocks_entries
             state["snapshot"]["last_error"] = {"ts": time.time(), "reason": reason, "error": type(e).__name__}
-            state["snapshot"]["fails_in_a_row"] = state["snapshot"].get("fails_in_a_row", 0) + 1
+            if blocks_entries(e):                          # a slow / failed research.db does not count
+                state["snapshot"]["fails_in_a_row"] = state["snapshot"].get("fails_in_a_row", 0) + 1
             _update_entry_block()
             print(f"[snapshot] {reason} FAILED: {type(e).__name__}", flush=True)
 
@@ -152,7 +224,7 @@ def create_app(engine: ScannerEngine | None = None, start_scanner: bool = True,
         while True:
             await asyncio.sleep(snap.SNAPSHOT_EVERY_S)
             try:
-                await _snapshot_now("hourly")
+                await _snapshot_now("hourly", snap.HOURLY_SLOW_TIMEOUT_S)
                 if state["bot"] is not None:
                     print("[sample] " + state["bot"].sample_summary_line(), flush=True)
             except Exception as e:
@@ -303,7 +375,25 @@ def create_app(engine: ScannerEngine | None = None, start_scanner: bool = True,
                 continue
             if got:
                 print("[lease] acquired after STANDBY: restoring the previous instance's final snapshot", flush=True)
-                await _activate()
+                try:
+                    await _activate()
+                except Exception as e:                 # a failure here must be logged, not kill the task quietly
+                    print(f"[lease] activate after STANDBY failed: {type(e).__name__}", flush=True)
+                    why = f"activate after STANDBY failed ({type(e).__name__})"
+                    state["halted"] = why
+                    state["snapshot"]["halted"] = why
+                    state["role"] = "ACTIVATE FAILED"  # /healthz ok=false; shutdown will not treat this as ACTIVE
+                    task = state.get("lease_task")
+                    if task is not None and not task.done():
+                        task.cancel()                  # stop renewing, or the lease is held until TTL (180s)
+                        with contextlib.suppress(BaseException):
+                            await task
+                    if state.get("lease") is not None:
+                        try:
+                            await asyncio.to_thread(state["lease"].release)
+                        except Exception as rel:
+                            print(f"[lease] release after failed activate failed: {type(rel).__name__}",
+                                  flush=True)
                 return
 
     def _fence(why: str, role: str) -> None:
@@ -316,12 +406,24 @@ def create_app(engine: ScannerEngine | None = None, start_scanner: bool = True,
 
     async def _lease_loop(lease) -> None:
         from core import lease as L
+        loop = asyncio.get_running_loop()
+        next_renew = loop.time() + L.LEASE_RENEW_S          # first renew after one period, as before
         while True:
-            await asyncio.sleep(L.LEASE_RENEW_S)
+            delay = min(L.LEASE_FENCE_CHECK_S, max(0.0, next_renew - loop.time()))
+            if delay > 0:
+                await asyncio.sleep(delay)
+            if lease.fenced():                         # also while a renew is hung: don't wait out another period
+                _fence(f"lease not renewed for > {L.fence_after_s():.0f}s (TTL - renew - I/O timeout): "
+                       "self-fenced — another instance may take it soon", "FENCED")
+                return
+            if loop.time() + 1e-3 < next_renew:
+                continue
+            next_renew = loop.time() + L.LEASE_RENEW_S
             try:                                       # a hung store call is abandoned after LEASE_IO_TIMEOUT_S
-                ok = await asyncio.wait_for(asyncio.to_thread(lease.renew), L.LEASE_IO_TIMEOUT_S)
+                ok = await _in_daemon_thread(lease.renew, L.LEASE_IO_TIMEOUT_S)
             except Exception as e:                     # store error / hang: transient, unless it lasts too long
-                print(f"[lease] renew failed: {type(e).__name__}", flush=True)
+                name = "TimeoutError" if isinstance(e, _Abandoned) else type(e).__name__
+                print(f"[lease] renew failed: {name}", flush=True)
                 if lease.fenced():
                     _fence(f"lease not renewed for > {L.fence_after_s():.0f}s (TTL - renew - I/O timeout): "
                            "self-fenced — another instance may take it soon", "FENCED")
@@ -386,17 +488,31 @@ def create_app(engine: ScannerEngine | None = None, start_scanner: bool = True,
                 state["role"] = "ACTIVE"
                 _start()
         yield
+        from core.lease import LEASE_RELEASE_DEADLINE_S
+        from core.snapshot import SHUTDOWN_DEADLINE_S, SHUTDOWN_SLOW_TIMEOUT_S, SHUTDOWN_TOTAL_S
+        t_shut = time.monotonic()
+
+        def shut_left() -> float:
+            return SHUTDOWN_TOTAL_S - (time.monotonic() - t_shut)
+
+        lease_task = state.get("lease_task")
         for t in state["aux"]:
-            t.cancel()
+            if t is not lease_task:                    # keep renewing through the final snapshot
+                t.cancel()
         try:
             if state["bot_task"]:
                 state["bot_stop"].set()
                 with contextlib.suppress(Exception):
-                    await asyncio.wait_for(state["bot_task"], 10)
+                    await asyncio.wait_for(state["bot_task"], max(0.0, min(10.0, shut_left())))
                 if state.get("snapshot_store") is None:
                     _save_price_history()                  # local restart without a store still keeps it
-                from core.snapshot import SHUTDOWN_DEADLINE_S, SHUTDOWN_SLOW_TIMEOUT_S
-                await _snapshot_now("shutdown", SHUTDOWN_SLOW_TIMEOUT_S, SHUTDOWN_DEADLINE_S)   # SIGTERM: last ...
+                # Reserve the release budget so a slow snapshot cannot eat the time the lease release needs.
+                snap_budget = min(SHUTDOWN_DEADLINE_S, max(0.0, shut_left() - LEASE_RELEASE_DEADLINE_S))
+                try:
+                    await asyncio.wait_for(                       # backstop: snapshot() itself stops at snap_budget
+                        _snapshot_now("shutdown", SHUTDOWN_SLOW_TIMEOUT_S, snap_budget), snap_budget + 1.0)
+                except asyncio.TimeoutError:
+                    print("[shutdown] snapshot exceeded its deadline", flush=True)
         except Exception as e:                             # nothing here may skip the release / engine stop
             print(f"[shutdown] snapshot step error: {type(e).__name__}", flush=True)
         finally:
@@ -406,15 +522,18 @@ def create_app(engine: ScannerEngine | None = None, start_scanner: bool = True,
                     await state["lease_task"]
             if state.get("lease") is not None and state.get("role") == "ACTIVE":
                 try:
-                    await asyncio.to_thread(state["lease"].release)   # ... THEN hand the lease over
+                    budget = max(0.0, min(LEASE_RELEASE_DEADLINE_S, shut_left()))
+                    await asyncio.wait_for(asyncio.to_thread(state["lease"].release, budget), budget + 1.0)
                     print("[lease] released after the final snapshot", flush=True)
                 except Exception as e:
                     print(f"[lease] release failed: {type(e).__name__} (it expires by itself)", flush=True)
             eng = state["engine"]
             if state["task"]:
                 eng.stop()
-                with contextlib.suppress(Exception):
-                    await asyncio.wait_for(state["task"], 15)
+                remain = shut_left()
+                if remain > 0:
+                    with contextlib.suppress(Exception):
+                        await asyncio.wait_for(state["task"], min(15.0, remain))
 
     app = FastAPI(title="SOL Memecoin Hunter", docs_url=None, redoc_url=None, openapi_url=None, lifespan=lifespan)
     app.state.hunter = state
@@ -443,36 +562,44 @@ def create_app(engine: ScannerEngine | None = None, start_scanner: bool = True,
     # ------------------------------------------------------------------ public (no data)
     @app.get("/healthz")
     async def healthz():
-        """Public liveness + which code and parameters are running (no secret, no paper data)."""
-        from core.version import git_commit
-        bot = state.get("bot")
-        out = {"ok": True, "commit": git_commit(), "role": state.get("role") or "ACTIVE"}
-        if state.get("lease") is not None:
-            out["lease"] = state["lease"].as_dict()
+        """Public liveness + which code and parameters are running (no secret, no paper data).
+        Any import or call error degrades the payload; the route itself still answers.
+        ok is decided before those calls, so a broken import cannot report ok while halted or retrying."""
+        out = {"ok": True, "role": state.get("role") or "ACTIVE"}
         if state["snapshot"].get("probe_retrying"):
             out["ok"] = False                              # store unreachable at start-up: retrying
             out["durability"] = "probe failed on a store error — retrying"
         if state.get("halted"):
             out["ok"] = False                              # a halted server is not healthy
             out["halted"] = state["halted"]
-        sn = state["snapshot"]
-        out["snapshot"] = {"durable": sn["durable"], "store": sn["store"], "last_utc": _utc(sn["last_ts"]),
-                           "last_restore_utc": _utc((sn.get("restore") or {}).get("at"))}
-        if not sn["durable"]:
-            out["snapshot"]["warning"] = sn.get("warning") or NOT_DURABLE
-        if bot is not None and getattr(bot, "entry_block", None):
-            out["entries"] = "BLOCKED: no durable snapshot store — no new positions (exits still run)"
-        if bot is not None:
-            out["params"] = bot.cfg.sample_id()
-            try:                                           # a broken import must not fail the health check
-                from trading.strategy_constants import constants_hash
-                out["constants"] = constants_hash()
-            except Exception as e:
-                out["constants"] = f"unavailable ({type(e).__name__})"
-            ep = bot.sample_epoch
-            out["sample_epoch"] = {"strategy_version": ep.strategy_version, "fingerprint": ep.fingerprint,
-                                   "started_at_utc": ep.as_dict()["started_at_utc"]}
-        return out
+        try:
+            from core.version import git_commit
+            bot = state.get("bot")
+            out["commit"] = git_commit()
+            if state.get("lease") is not None:
+                out["lease"] = state["lease"].as_dict()
+            sn = state["snapshot"]
+            out["snapshot"] = {"durable": sn["durable"], "store": sn["store"], "last_utc": _utc(sn["last_ts"]),
+                               "last_restore_utc": _utc((sn.get("restore") or {}).get("at")),
+                               "research_db_carried_in_a_row": sn.get("research_db_carried_in_a_row", 0)}
+            if not sn["durable"]:
+                out["snapshot"]["warning"] = sn.get("warning") or NOT_DURABLE
+            if bot is not None and getattr(bot, "entry_block", None):
+                out["entries"] = "BLOCKED: no durable snapshot store — no new positions (exits still run)"
+            if bot is not None:
+                out["params"] = bot.cfg.sample_id()
+                try:                                       # a broken import must not fail the health check
+                    from trading.strategy_constants import constants_hash
+                    out["constants"] = constants_hash()
+                except Exception as e:
+                    out["constants"] = f"unavailable ({type(e).__name__})"
+                ep = bot.sample_epoch
+                out["sample_epoch"] = {"strategy_version": ep.strategy_version, "fingerprint": ep.fingerprint,
+                                       "started_at_utc": ep.as_dict()["started_at_utc"]}
+            return out
+        except Exception as e:
+            out["health_error"] = type(e).__name__
+            return out
 
     # ------------------------------------------------------------------ API
     @app.get("/api/snapshot")
@@ -508,6 +635,7 @@ def create_app(engine: ScannerEngine | None = None, start_scanner: bool = True,
         rs = sn.get("restore") or {}
         return {"halted": state.get("halted"), "role": state.get("role") or "ACTIVE",
                 "lease": state["lease"].as_dict() if state.get("lease") is not None else None,
+                "research_db_carried_in_a_row": sn.get("research_db_carried_in_a_row", 0),
                 "price_history_at_start": sn.get("price_history"),
                 "durable": sn["durable"], "warning": None if sn["durable"] else (sn.get("warning") or NOT_DURABLE),
                 "store": sn["store"], "target": sn["target"], "check": sn["reason"],
