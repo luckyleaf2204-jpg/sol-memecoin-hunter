@@ -366,7 +366,10 @@ def create_app(engine: ScannerEngine | None = None, start_scanner: bool = True,
                 continue
             if got:
                 print("[lease] acquired after STANDBY: restoring the previous instance's final snapshot", flush=True)
-                await _activate()
+                try:
+                    await _activate()
+                except Exception as e:                 # a failure here must be logged, not kill the task quietly
+                    print(f"[lease] activate after STANDBY failed: {type(e).__name__}", flush=True)
                 return
 
     def _fence(why: str, role: str) -> None:
@@ -535,36 +538,42 @@ def create_app(engine: ScannerEngine | None = None, start_scanner: bool = True,
     # ------------------------------------------------------------------ public (no data)
     @app.get("/healthz")
     async def healthz():
-        """Public liveness + which code and parameters are running (no secret, no paper data)."""
-        from core.version import git_commit
-        bot = state.get("bot")
-        out = {"ok": True, "commit": git_commit(), "role": state.get("role") or "ACTIVE"}
-        if state.get("lease") is not None:
-            out["lease"] = state["lease"].as_dict()
-        if state["snapshot"].get("probe_retrying"):
-            out["ok"] = False                              # store unreachable at start-up: retrying
-            out["durability"] = "probe failed on a store error — retrying"
-        if state.get("halted"):
-            out["ok"] = False                              # a halted server is not healthy
-            out["halted"] = state["halted"]
-        sn = state["snapshot"]
-        out["snapshot"] = {"durable": sn["durable"], "store": sn["store"], "last_utc": _utc(sn["last_ts"]),
-                           "last_restore_utc": _utc((sn.get("restore") or {}).get("at"))}
-        if not sn["durable"]:
-            out["snapshot"]["warning"] = sn.get("warning") or NOT_DURABLE
-        if bot is not None and getattr(bot, "entry_block", None):
-            out["entries"] = "BLOCKED: no durable snapshot store — no new positions (exits still run)"
-        if bot is not None:
-            out["params"] = bot.cfg.sample_id()
-            try:                                           # a broken import must not fail the health check
-                from trading.strategy_constants import constants_hash
-                out["constants"] = constants_hash()
-            except Exception as e:
-                out["constants"] = f"unavailable ({type(e).__name__})"
-            ep = bot.sample_epoch
-            out["sample_epoch"] = {"strategy_version": ep.strategy_version, "fingerprint": ep.fingerprint,
-                                   "started_at_utc": ep.as_dict()["started_at_utc"]}
-        return out
+        """Public liveness + which code and parameters are running (no secret, no paper data).
+        Any import or call error degrades the payload; the route itself still answers."""
+        out = {"ok": True, "role": state.get("role") or "ACTIVE"}
+        try:
+            from core.version import git_commit
+            bot = state.get("bot")
+            out["commit"] = git_commit()
+            if state.get("lease") is not None:
+                out["lease"] = state["lease"].as_dict()
+            if state["snapshot"].get("probe_retrying"):
+                out["ok"] = False                          # store unreachable at start-up: retrying
+                out["durability"] = "probe failed on a store error — retrying"
+            if state.get("halted"):
+                out["ok"] = False                          # a halted server is not healthy
+                out["halted"] = state["halted"]
+            sn = state["snapshot"]
+            out["snapshot"] = {"durable": sn["durable"], "store": sn["store"], "last_utc": _utc(sn["last_ts"]),
+                               "last_restore_utc": _utc((sn.get("restore") or {}).get("at"))}
+            if not sn["durable"]:
+                out["snapshot"]["warning"] = sn.get("warning") or NOT_DURABLE
+            if bot is not None and getattr(bot, "entry_block", None):
+                out["entries"] = "BLOCKED: no durable snapshot store — no new positions (exits still run)"
+            if bot is not None:
+                out["params"] = bot.cfg.sample_id()
+                try:                                       # a broken import must not fail the health check
+                    from trading.strategy_constants import constants_hash
+                    out["constants"] = constants_hash()
+                except Exception as e:
+                    out["constants"] = f"unavailable ({type(e).__name__})"
+                ep = bot.sample_epoch
+                out["sample_epoch"] = {"strategy_version": ep.strategy_version, "fingerprint": ep.fingerprint,
+                                       "started_at_utc": ep.as_dict()["started_at_utc"]}
+            return out
+        except Exception as e:
+            out["health_error"] = type(e).__name__
+            return out
 
     # ------------------------------------------------------------------ API
     @app.get("/api/snapshot")

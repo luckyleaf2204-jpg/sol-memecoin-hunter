@@ -292,3 +292,63 @@ def test_a_failing_research_db_does_not_block_orders_a_critical_file_does(tmp_pa
         st = app.state.hunter
         assert _wait(lambda: st["snapshot"].get("fails_in_a_row", 0) >= S.SNAPSHOT_FAIL_BLOCK_N, 3)
         assert "snapshots in a row" in (st["bot"].entry_block or "")
+
+
+def test_standby_activate_failure_is_logged(tmp_path, monkeypatch, capsys, two_instances):
+    from trading.config import TradingConfig
+    d1 = tmp_path / "d1"
+    d1.mkdir()
+    monkeypatch.setattr(webapp, "DATA_DIR", d1)
+    old = _app(tmp_path, "old")
+    c1 = TestClient(old)
+    c1.__enter__()
+    new = _app(tmp_path, "new")
+    c2 = TestClient(new)
+    c2.__enter__()
+    try:
+        assert c2.get("/healthz").json()["role"] == "STANDBY"
+
+        def boom(*_a, **_k):
+            raise RuntimeError("activate boom")
+        monkeypatch.setattr(TradingConfig, "load", boom)
+        c1.__exit__(None, None, None)
+        c1 = None
+        time.sleep(0.8)                                    # the standby loop polls, then activate raises
+        out = capsys.readouterr().out
+        assert "[lease] activate after STANDBY failed: RuntimeError" in out
+        assert c2.get("/healthz").status_code == 200
+    finally:
+        if c1 is not None:
+            c1.__exit__(None, None, None)
+        c2.__exit__(None, None, None)
+
+
+def test_stale_s_forgets_mints_with_no_open_position():
+    from test_v12 import MINT, opened
+    b, _st, _p = opened()
+    b.stale_s["not-a-position"] = 80.0
+    b.stale_s[MINT] = 40.0
+    b.book.positions.pop(MINT)
+    b.tick()
+    assert "not-a-position" not in b.stale_s and MINT not in b.stale_s
+
+
+def test_healthz_survives_any_call_or_import_error(monkeypatch):
+    import sys
+
+    from test_v12 import opened
+    b, _, _ = opened()
+
+    def boom():
+        raise RuntimeError("params broke")
+    b.cfg.sample_id = boom
+    app = webapp.create_app(engine=b.engine, start_scanner=False, access_code="c0de", bot=b)
+    with TestClient(app) as c:
+        r = c.get("/healthz")
+        assert r.status_code == 200 and r.json()["ok"] is True and r.json()["health_error"] == "RuntimeError"
+    b2, _, _ = opened()
+    app2 = webapp.create_app(engine=b2.engine, start_scanner=False, access_code="c0de", bot=b2)
+    monkeypatch.setitem(sys.modules, "core.version", None)
+    with TestClient(app2) as c:
+        r = c.get("/healthz")
+        assert r.status_code == 200 and r.json()["health_error"] in ("TypeError", "ImportError", "ModuleNotFoundError")
