@@ -13,8 +13,8 @@ import json
 import time
 from pathlib import Path
 
-STRATEGY_VERSION = "s11-constants-v2"   # B9: the pinned constants also cover jupiter / execution / gate_eval
-# (no value changed; the manifest grew, so the pin is new). (previous: s10-http-sell-priority, never deployed)
+STRATEGY_VERSION = "s12-stale-healthy-clock"   # C1: stale time counts only while the feed has published and is healthy and Jupiter is not in its breaker; restarts / pauses never count
+# (previous: s11-constants-v2, never deployed)
 MIN_SAMPLE_COMMIT = "148af2c"            # the server must run this commit or a descendant
 LEGACY = "LEGACY"
 

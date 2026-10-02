@@ -23,7 +23,7 @@ def strategy_constants() -> dict:
         "entry_location.PULLBACK_STABLE_S": el.PULLBACK_STABLE_S,
         "entry_location.SECOND_WAVE_STABLE_S": el.SECOND_WAVE_STABLE_S,
         "bot.QUOTE_RETRY_WINDOW_S": bot.QUOTE_RETRY_WINDOW_S, "bot.FAILED_BUY_COOLDOWN_S": bot.FAILED_BUY_COOLDOWN_S,
-        "bot.STALE_TIMEOUT_S": bot.STALE_TIMEOUT_S,
+        "bot.STALE_TIMEOUT_S": bot.STALE_TIMEOUT_S, "bot.STALE_MAX_STEP_S": bot.STALE_MAX_STEP_S,
         "bot.NO_ROUTE_BLOCK_S": bot.NO_ROUTE_BLOCK_S, "bot.MAX_ENTRIES_PER_TICK": bot.MAX_ENTRIES_PER_TICK,
         "bot.TICK_S": bot.TICK_S, "bot.SELL_QUOTE_ATTEMPTS": bot.SELL_QUOTE_ATTEMPTS,
         "bot.SELL_QUOTE_BUDGET_S": bot.SELL_QUOTE_BUDGET_S,

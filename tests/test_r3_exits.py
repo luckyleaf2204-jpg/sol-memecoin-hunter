@@ -63,21 +63,27 @@ def test_escalated_reasons_count_in_the_sl_gap_scenario():
 import trading.bot as B  # noqa: E402
 
 
-def _stale(b, st, p, minutes):
-    """No validated price since `minutes` (the print stays older than the fill)."""
-    p.last_price_ts = time.time() - minutes * 60
+def _no_price(st, p):
+    """The token's print stays older than the fill: no validated price for this position."""
     st.stamps["market"].updated_at = p.opened_at - 100
     st.market.updated_at = p.opened_at - 100
 
 
-def test_stale_position_is_force_closed_after_10_min_with_quote_or_haircut():
+def _run_ticks(b, minutes, t0=None, step=20.0):
+    t = t0 or time.time()
+    for _ in range(int(minutes * 60 / step)):
+        t += step
+        b.tick(t)
+    return t
+
+
+def test_stale_position_is_force_closed_after_10_healthy_minutes_with_quote_or_haircut():
     b, st, p = opened()
     b.jupiter = SellScript([J.NO_ROUTE], p.entry_price)
-    _stale(b, st, p, 9)
-    b.tick()
+    _no_price(st, p)
+    t = _run_ticks(b, 9)
     assert MINT not in b.sell_intents                                          # 9 min: still waiting
-    _stale(b, st, p, B.STALE_TIMEOUT_S / 60 + 1)
-    b.tick()
+    _run_ticks(b, 2, t)
     it = b.sell_intents[MINT]
     assert it["reason"] == "stale_timeout" and it["hard"] and it["mark"] == p.last_price
     asyncio.run(b.execute_sells())
@@ -88,12 +94,70 @@ def test_stale_position_is_force_closed_after_10_min_with_quote_or_haircut():
 
 def test_stale_token_gone_from_the_feed_is_closed_at_the_haircut():
     b, st, p = opened()
+    _no_price(st, p)
     b.jupiter = SellScript([J.OK], p.entry_price)
-    p.last_price_ts = time.time() - B.STALE_TIMEOUT_S - 60
-    b.engine.published = []                                                    # the token left the feed
-    b.tick()
+    t = _run_ticks(b, 5)
+    from test_bot_v2 import good
+    b.engine.published = [good("OtherMint111111111111111111111111111111111")]   # feed alive, our token gone
+    _run_ticks(b, 6, t)
     j = b.book.journal[-1]
     assert MINT not in b.book.positions and j["exit_reason"] == "stale_timeout" and j["haircut"]
+
+
+def test_restore_with_an_old_last_price_ts_does_not_close():
+    """After a restart the stale clock starts at 0: an old last_price_ts from the book never closes a position."""
+    from trading.bot import PaperBot
+    from trading.config import TradingConfig
+    b, st, p = opened()
+    p.last_price_ts = time.time() - 3 * 3600                                    # saved 3 h ago
+    b2 = PaperBot(b.engine, TradingConfig(seed=4))
+    b2.book = b.book
+    b2.jupiter = SellScript([J.OK], p.entry_price)
+    _no_price(st, p)
+    b2.tick()
+    b2.tick(time.time() + 20)
+    assert MINT in b2.book.positions and MINT not in b2.sell_intents and b2.stale_s.get(MINT, 0) <= 20
+
+
+def test_feed_down_for_more_than_10_minutes_does_not_close():
+    b, st, p = opened()
+    b.jupiter = SellScript([J.OK], p.entry_price)
+    _no_price(st, p)
+    b.engine._feeds = {"dexscreener": {"ok": False, "last_error": "503"}, "pumpportal": {"connected": True}}
+    t = _run_ticks(b, 15)                                                       # whole feed down 15 min
+    assert MINT in b.book.positions and MINT not in b.sell_intents and not b.stale_s.get(MINT)
+    b.engine.published = []                                                    # nothing published at all
+    b.engine._feeds = {"dexscreener": {"ok": True, "cooldown_s": 0}, "pumpportal": {"connected": True}}
+    _run_ticks(b, 15, t)
+    assert MINT in b.book.positions and not b.stale_s.get(MINT)
+
+
+def test_jupiter_breaker_open_does_not_count_as_stale():
+    b, st, p = opened()
+
+    class Health:
+        def cooling(self, source):
+            return 30.0
+
+    class Http:
+        health = Health()
+
+    class DownJupiter(SellScript):
+        http = Http()
+    b.jupiter = DownJupiter([J.COOLDOWN], p.entry_price)
+    _no_price(st, p)
+    _run_ticks(b, 15)
+    assert MINT in b.book.positions and MINT not in b.sell_intents
+
+
+def test_a_pause_between_ticks_is_not_stale_time():
+    b, st, p = opened()
+    b.jupiter = SellScript([J.OK], p.entry_price)
+    _no_price(st, p)
+    t = time.time()
+    b.tick(t)
+    b.tick(t + 3600)                                                            # the loop slept an hour
+    assert b.stale_s[MINT] <= B.STALE_MAX_STEP_S and MINT not in b.sell_intents
 
 
 def test_protective_intent_of_a_vanished_token_is_not_dropped():

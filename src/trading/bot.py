@@ -43,6 +43,7 @@ SELL_QUOTE_ATTEMPTS, SELL_QUOTE_BUDGET_S = 2, 4.0   # one SELL quote call is sho
 NO_ROUTE_BLOCK_S = 120.0        # after a confirmed "no route": no re-quote of that CA for this long
 MAX_ENTRIES_PER_TICK = 2
 STALE_TIMEOUT_S = 600.0         # no validated price for this long -> forced exit "stale_timeout" (P&L counted)
+STALE_MAX_STEP_S = 30.0         # one tick adds at most this much stale time (a pause / restart never counts)
 FAILED_BUY_COOLDOWN_S = 300.0   # after a FAILED BUY fill, no new BUY attempt on that mint for this long
 TRUTH_QUOTES_PER_MIN = 24       # V1.3 truth SELL quotes: own budget, below Jupiter's 50/min (BUY quotes first)
 
@@ -73,6 +74,8 @@ class PaperBot:
         self.sell_intents: dict[str, dict] = {}  # mint -> SELL waiting for its Jupiter quote (non-protective exits)
         self.quote_budget = None                 # trading.quote_budget.QuoteBudget (server); None = unlimited
         self.entry_block: str | None = None      # set by the server when the sample is not durable: no NEW entries
+        self.stale_s: dict[str, float] = {}       # mint -> seconds WITHOUT a price while feed + Jupiter were healthy
+        self._last_positions_ts: float | None = None
         self.entry_block_seen: set[str] = set()   # tokens that would have been bought meanwhile (counted)
         self.gate_eval_cache: dict | None = None  # blocked vs entered vs matched baseline (research.gate_eval)
         self._last_gate_eval = 0.0
@@ -208,7 +211,22 @@ class PaperBot:
         self.ops.append((now, len(states) + len(self.book.positions)))
         self.persist()
 
+    def _jupiter_ok(self) -> bool:
+        http = getattr(self.jupiter, "http", None)
+        if http is None:
+            return True
+        from trading.jupiter import SOURCE
+        return http.health.cooling(SOURCE) <= 0
+
+    def _stale_clock_runs(self, states: dict) -> bool:
+        """Stale time only counts while the market feed has published and is healthy and Jupiter is not in its
+        breaker: a feed / Jupiter outage or a restart is not 'this token lost its price'."""
+        return bool(states) and self._feeds_ok()[0] and self._jupiter_ok()
+
     def _positions(self, states: dict, now: float) -> None:
+        step = 0.0 if self._last_positions_ts is None else min(max(now - self._last_positions_ts, 0.0), STALE_MAX_STEP_S)
+        self._last_positions_ts = now
+        healthy = self._stale_clock_runs(states)
         try:
             for p in list(self.book.positions.values()):
                 st = states.get(p.mint)
@@ -224,7 +242,11 @@ class PaperBot:
                     self._path_marks(p, price, now)
                 sig = apply_exit_options(p, exit_signal(p, st, price, self.cfg, now, p.entry_liq, p.entry_vol),
                                          price, self.cfg, now)       # A/B variants (off by default)
-                if price is None and now - (p.last_price_ts or p.opened_at) >= STALE_TIMEOUT_S and p.last_price:
+                if price is not None:
+                    self.stale_s.pop(p.mint, None)
+                elif healthy:
+                    self.stale_s[p.mint] = self.stale_s.get(p.mint, 0.0) + step
+                if price is None and self.stale_s.get(p.mint, 0.0) >= STALE_TIMEOUT_S and p.last_price:
                     sig = (1.0, "stale_timeout")         # B6: never keep an unpriceable position out of the P&L
                     if st is None:                       # token gone from the feed: nothing to quote with
                         self.sell_intents.pop(p.mint, None)
