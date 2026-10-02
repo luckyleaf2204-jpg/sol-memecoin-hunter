@@ -316,7 +316,13 @@ def test_standby_activate_failure_is_logged(tmp_path, monkeypatch, capsys, two_i
         time.sleep(0.8)                                    # the standby loop polls, then activate raises
         out = capsys.readouterr().out
         assert "[lease] activate after STANDBY failed: RuntimeError" in out
-        assert c2.get("/healthz").status_code == 200
+        body = c2.get("/healthz").json()
+        assert body["ok"] is False and body["role"] == "ACTIVATE FAILED"
+        assert "activate after STANDBY failed" in (body.get("halted") or "")
+        lease = json.loads((two_instances / "instance_lease.json").read_text())
+        assert lease.get("released") is True                 # the renew loop must not keep the lease
+        task = new.state.hunter.get("lease_task")
+        assert task is None or task.done()
     finally:
         if c1 is not None:
             c1.__exit__(None, None, None)

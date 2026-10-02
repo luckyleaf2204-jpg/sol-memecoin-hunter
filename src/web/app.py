@@ -370,6 +370,21 @@ def create_app(engine: ScannerEngine | None = None, start_scanner: bool = True,
                     await _activate()
                 except Exception as e:                 # a failure here must be logged, not kill the task quietly
                     print(f"[lease] activate after STANDBY failed: {type(e).__name__}", flush=True)
+                    why = f"activate after STANDBY failed ({type(e).__name__})"
+                    state["halted"] = why
+                    state["snapshot"]["halted"] = why
+                    state["role"] = "ACTIVATE FAILED"  # /healthz ok=false; shutdown will not treat this as ACTIVE
+                    task = state.get("lease_task")
+                    if task is not None and not task.done():
+                        task.cancel()                  # stop renewing, or the lease is held until TTL (180s)
+                        with contextlib.suppress(BaseException):
+                            await task
+                    if state.get("lease") is not None:
+                        try:
+                            await asyncio.to_thread(state["lease"].release)
+                        except Exception as rel:
+                            print(f"[lease] release after failed activate failed: {type(rel).__name__}",
+                                  flush=True)
                 return
 
     def _fence(why: str, role: str) -> None:
