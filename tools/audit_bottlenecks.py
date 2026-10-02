@@ -150,12 +150,15 @@ def decompose(st, rec, settings, sol):
             "counterfactual_opportunity": cf, "classification": reasons}
 
 
-async def run(minutes, research_db=""):
+async def run(minutes, research_db="", truth_ledger=""):
     eng = ScannerEngine(Settings(), Database(Path(tempfile.mkdtemp()) / "a.db"), keys=ApiKeys.from_env(),
                         on_log=lambda m: print(m, flush=True) if "PIPELINE" in m else None)
     bot = PaperBot(eng, TradingConfig(experimental=True, latency_probe=True, latency_slippage_model="AUTO",
                                       lifecycle=True))
     bot.jupiter = JupiterQuotes(eng.http)
+    if truth_ledger:                         # persisted after every trade; accumulates across runs
+        from trading.truth_price import TruthLedger
+        bot.truth_ledger = TruthLedger(Path(truth_ledger))
     if research_db:
         from research.dataset import DatasetRecorder
         bot.recorder = DatasetRecorder(research_db, dex=eng.dex)
@@ -967,8 +970,9 @@ def main():
     ap.add_argument("--minutes", type=float, default=15)
     ap.add_argument("--out", default="")
     ap.add_argument("--research-db", default="")
+    ap.add_argument("--truth-ledger", default="", help="JSON file: TRUTH P&L ledger (loaded, appended, saved per trade)")
     a = ap.parse_args()
-    res = report(*asyncio.run(run(a.minutes, a.research_db)))
+    res = report(*asyncio.run(run(a.minutes, a.research_db, a.truth_ledger)))
     print(json.dumps({k: v for k, v in res.items() if k not in ("es_pass_table",)}, indent=1, default=str)[:20000])
     if a.out:
         Path(a.out).write_text(json.dumps(res, indent=1, default=str), encoding="utf-8")
