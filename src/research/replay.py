@@ -113,60 +113,93 @@ def frozen_params(horizon: str, split: float, bought_only: bool, seed: int) -> d
     return p
 
 
-def holdout_check(log_path: str | None, oos: list[dict], params: dict) -> str | None:
-    """The 40 % holdout may be evaluated with ONE parameter set. A second, different set on the same holdout is
-    flagged: it is no longer an out-of-sample test."""
-    if not log_path or not oos:
-        return None
+MIN_N = 30                           # per part: below this the holdout is not opened (docs/sample_plan.md)
+
+
+def _split(cand: list[dict], split: float) -> tuple[float, list[dict]]:
+    """The holdout is a TIME window defined on all candidates (before any filter): filters are parameters."""
+    cand = sorted(cand, key=lambda r: r["ts"])
+    k = int(len(cand) * split)
+    return (cand[k]["ts"] if k < len(cand) else float("inf")), cand[k:]
+
+
+def lock_holdout(db_path: str, lock_path: str, horizon: str = "1h", split: float = 0.6, bought_only: bool = False,
+                 seed: int = 7, now: float | None = None, min_n: int = MIN_N) -> dict:
+    """Freeze the test on the in-sample part: write the parameter hash, the lock time and the time cut.
+    Refused when the in-sample part has fewer than min_n candidates or a lock already exists."""
     import json
-    key = f"{min(r['ts'] for r in oos):.0f}-{max(r['ts'] for r in oos):.0f}-{len(oos)}"
-    try:
-        log = json.loads(Path(log_path).read_text(encoding="utf-8"))
-    except (OSError, ValueError):
-        log = {}
-    prev = log.get(key)
-    if prev is None:
-        log[key] = params["hash"]
-        Path(log_path).write_text(json.dumps(log, indent=1), encoding="utf-8")
-        return None
-    if prev != params["hash"]:
-        return (f"HOLDOUT ALREADY USED with parameters {prev}; parameters {params['hash']} were changed after "
-                "seeing the out-of-sample part: this is NOT a clean out-of-sample result")
-    return None
-
-
-def replay(db_path: str, horizon: str = "1h", split: float = 0.6, bought_only: bool = False, seed: int = 7,
-           holdout_log: str | None = None) -> dict:
+    import time
+    if Path(lock_path).exists():
+        return {"status": "REFUSED", "reason": "a holdout lock already exists (one lock per holdout)",
+                "lock": json.loads(Path(lock_path).read_text(encoding="utf-8"))}
     db = sqlite3.connect(db_path)
     try:
         cand, base = load(db, horizon)
     finally:
         db.close()
-    # the holdout is a TIME window defined on all candidates (before any filter): filters are parameters
-    cand.sort(key=lambda r: r["ts"])
-    k = int(len(cand) * split)
-    t_cut = cand[k]["ts"] if k < len(cand) else float("inf")
-    holdout_all = cand[k:]
+    t_cut, _ = _split(cand, split)
+    ins = [r for r in cand if r["ts"] < t_cut and (r["bought"] or not bought_only)]
+    if len(ins) < min_n:
+        return {"status": "REFUSED", "reason": f"in-sample n = {len(ins)} < {min_n}: nothing to freeze yet"}
+    params = frozen_params(horizon, split, bought_only, seed)
+    lock = {"params_hash": params["hash"], "params": params, "locked_at": now or time.time(), "t_cut": t_cut,
+            "n_in_sample": len(ins)}
+    Path(lock_path).write_text(json.dumps(lock, indent=1), encoding="utf-8")
+    return {"status": "LOCKED", "lock": lock, "in_sample": compare(ins, base, seed)}
+
+
+def _open_holdout(lock_path: str | None, params: dict, n_oos: int, min_n: int) -> tuple[dict | None, str | None]:
+    import json
+    if not lock_path or not Path(lock_path).exists():
+        return None, "HOLDOUT NOT LOCKED: run with --lock-holdout on the in-sample part first"
+    lock = json.loads(Path(lock_path).read_text(encoding="utf-8"))
+    if lock["params_hash"] != params["hash"]:
+        return lock, (f"PARAMETERS CHANGED since the lock ({lock['params_hash']} -> {params['hash']}): "
+                      "the holdout stays closed")
+    if n_oos < min_n:
+        return lock, f"holdout n = {n_oos} < {min_n}: not opened yet"
+    return lock, None
+
+
+def replay(db_path: str, horizon: str = "1h", split: float = 0.6, bought_only: bool = False, seed: int = 7,
+           holdout_lock: str | None = None, min_n: int = MIN_N) -> dict:
+    db = sqlite3.connect(db_path)
+    try:
+        cand, base = load(db, horizon)
+    finally:
+        db.close()
+    params = frozen_params(horizon, split, bought_only, seed)
+    lock, refused = None, None
+    t_cut, _ = _split(cand, split)
+    if holdout_lock and Path(holdout_lock).exists():
+        import json
+        t_cut = json.loads(Path(holdout_lock).read_text(encoding="utf-8")).get("t_cut", t_cut)   # the locked cut
     if bought_only:
         cand = [r for r in cand if r["bought"]]
+    cand.sort(key=lambda r: r["ts"])
     ins, oos = [r for r in cand if r["ts"] < t_cut], [r for r in cand if r["ts"] >= t_cut]
-    params = frozen_params(horizon, split, bought_only, seed)
-    warn = holdout_check(holdout_log, holdout_all, params)
+    lock, refused = _open_holdout(holdout_lock, params, len(oos), min_n)
     out = {"horizon": horizon, "levels": "TP +30 % / SL -15 % (dataset)", "bought_only": bought_only,
-           "frozen_params": params, "warnings": [warn] if warn else [],
-           "protocol": "parameters fixed on the first 60 % (time order) and hashed; the last 40 % is evaluated "
-                       "once with that hash; a different hash on the same holdout is flagged",
+           "frozen_params": params, "holdout_lock": lock,
+           "protocol": "parameters fixed on the first 60 % (time order) and locked (hash + time); the last 40 % "
+                       "opens only with the same hash and n >= 30",
            "break_even_tp_share": round(BREAK_EVEN_TP_SHARE, 4),
            "metric_note": "REFERENCE ONLY: TP share reflects volatility. The decision metric is net expectancy "
                           "after 5 / 7 / 10 % round-trip cost (trading/sample_report.py).",
-           "all": compare(cand, base, seed),
-           "walk_forward": {"split": split, "in_sample": compare(ins, base, seed), "out_of_sample": compare(oos, base, seed)}}
-    n = len(cand)
-    o = out["walk_forward"]["out_of_sample"]
+           "n_in_sample": len(ins), "n_holdout": len(oos)}
+    wf = {"split": split, "in_sample": compare(ins, base, seed)}
+    if refused:
+        wf["out_of_sample"] = {"status": "REFUSED", "reason": refused}
+        out["all"] = None                                 # the pooled view would leak the holdout
+        out["walk_forward"] = wf
+        out["verdict"] = refused
+        return out
+    wf["out_of_sample"] = compare(oos, base, seed)
+    out["all"] = compare(cand, base, seed)
+    out["walk_forward"] = wf
+    o = wf["out_of_sample"]
     share, p = o["candidates"]["tp_share"], o["baseline_random"].get("p_random_at_least_as_good", 1)
-    if n < 30:
-        out["verdict"] = "INSUFFICIENT SAMPLE (<30 candidates)"
-    elif share is None or p >= 0.05:
+    if share is None or p >= 0.05:
         out["verdict"] = "no evidence of an edge over random tokens out-of-sample"
     elif share <= BREAK_EVEN_TP_SHARE:
         out["verdict"] = "better than random out-of-sample, but TP share below break-even (33 %): no tradable edge"

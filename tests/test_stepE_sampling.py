@@ -4,7 +4,7 @@ import sqlite3
 import pytest
 
 from research.dataset import SCHEMA
-from research.replay import load, replay
+from research.replay import load, lock_holdout, replay
 from test_stepB_report import epoch, row
 from test_step4_measure import _db
 from trading.sample_report import report
@@ -56,20 +56,39 @@ def test_in_sample_result_ignores_everything_after_the_in_sample_window(tmp_path
     db.close()
     a, b = replay(str(tmp_path / "a.db")), replay(str(tmp_path / "b.db"))
     assert a["walk_forward"]["in_sample"] == b["walk_forward"]["in_sample"]
-    assert a["walk_forward"]["out_of_sample"] != b["walk_forward"]["out_of_sample"]
+    la, lb = str(tmp_path / "la.json"), str(tmp_path / "lb.json")
+    lock_holdout(str(tmp_path / "a.db"), la, min_n=10)
+    lock_holdout(str(tmp_path / "b.db"), lb, min_n=10)
+    oa = replay(str(tmp_path / "a.db"), holdout_lock=la, min_n=10)["walk_forward"]["out_of_sample"]
+    ob = replay(str(tmp_path / "b.db"), holdout_lock=lb, min_n=10)["walk_forward"]["out_of_sample"]
+    assert oa != ob
 
 
-# ---------------------------------------------------------------- frozen parameters / one-shot holdout
-def test_holdout_is_evaluated_once_per_parameter_set(tmp_path):
-    _db(tmp_path / "r.db", ["tp30", "sl15"] * 20, ["sl15"] * 50)
-    log = str(tmp_path / "holdout.json")
-    first = replay(str(tmp_path / "r.db"), "1h", holdout_log=log)
-    assert first["warnings"] == [] and len(first["frozen_params"]["hash"]) == 10
-    again = replay(str(tmp_path / "r.db"), "1h", holdout_log=log)
-    assert again["warnings"] == []                                         # same frozen parameters: fine
-    tuned = replay(str(tmp_path / "r.db"), "1h", bought_only=True, holdout_log=log)
-    assert tuned["warnings"] and "HOLDOUT ALREADY USED" in tuned["warnings"][0]
-    assert "first 60 %" in first["protocol"]
+# ---------------------------------------------------------------- holdout lock
+def test_holdout_lock_records_hash_and_time_and_refuses_bad_openings(tmp_path):
+    db, lock = str(tmp_path / "r.db"), str(tmp_path / "lock.json")
+    _db(tmp_path / "r.db", ["tp30", "sl15"] * 40, ["sl15"] * 50)        # 80 candidates: 48 in / 32 holdout
+    closed = replay(db, holdout_lock=lock)
+    assert closed["walk_forward"]["out_of_sample"]["status"] == "REFUSED" and "NOT LOCKED" in closed["verdict"]
+    assert closed["all"] is None                                        # no pooled peek at the holdout
+    res = lock_holdout(db, lock, now=12345.0)
+    assert res["status"] == "LOCKED" and res["lock"]["locked_at"] == 12345.0 and res["lock"]["n_in_sample"] == 48
+    assert len(res["lock"]["params_hash"]) == 10 and "out_of_sample" not in res
+    assert lock_holdout(db, lock)["status"] == "REFUSED"                # one lock per holdout
+    opened = replay(db, holdout_lock=lock)
+    assert opened["walk_forward"]["out_of_sample"]["candidates"]["n"] == 32 and opened["holdout_lock"]["locked_at"] == 12345.0
+    changed = replay(db, "30m", holdout_lock=lock)                     # any parameter differs from the hash
+    assert "PARAMETERS CHANGED" in changed["verdict"] and changed["all"] is None
+    tuned = replay(db, bought_only=True, holdout_lock=lock)
+    assert tuned["walk_forward"]["out_of_sample"]["status"] == "REFUSED"
+
+
+def test_holdout_stays_closed_below_threshold(tmp_path):
+    db, lock = str(tmp_path / "r.db"), str(tmp_path / "lock.json")
+    _db(tmp_path / "r.db", ["tp30", "sl15"] * 30, ["sl15"] * 20)        # 60: 36 in / 24 holdout
+    assert lock_holdout(db, lock)["status"] == "LOCKED"
+    r = replay(db, holdout_lock=lock)
+    assert "holdout n = 24 < 30" in r["verdict"] and r["walk_forward"]["out_of_sample"]["status"] == "REFUSED"
 
 
 def test_frozen_params_hash_depends_on_every_choice():

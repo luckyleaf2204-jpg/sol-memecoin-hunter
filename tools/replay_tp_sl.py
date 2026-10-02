@@ -9,7 +9,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
-from research.replay import replay  # noqa: E402
+from research.replay import lock_holdout, replay  # noqa: E402
 
 
 def main():
@@ -19,10 +19,19 @@ def main():
     ap.add_argument("--split", type=float, default=0.6)
     ap.add_argument("--bought-only", action="store_true")
     ap.add_argument("--seed", type=int, default=7)
-    ap.add_argument("--holdout-log", default="", help="JSON log: one parameter hash per out-of-sample holdout")
+    ap.add_argument("--holdout-lock", default="", help="JSON lock file: parameter hash + lock time + time cut")
+    ap.add_argument("--lock-holdout", action="store_true", help="freeze the parameters on the in-sample part")
+    ap.add_argument("--min-n", type=int, default=30)
     ap.add_argument("--out", default="")
     a = ap.parse_args()
-    res = replay(a.db, a.horizon, a.split, a.bought_only, a.seed, a.holdout_log or None)
+    if a.lock_holdout:
+        if not a.holdout_lock:
+            sys.exit("--lock-holdout needs --holdout-lock PATH")
+        res = lock_holdout(a.db, a.holdout_lock, a.horizon, a.split, a.bought_only, a.seed, min_n=a.min_n)
+        print(f"HOLDOUT {res['status']}" + (f": {res['reason']}" if res.get("reason") else ""))
+    else:
+        res = replay(a.db, a.horizon, a.split, a.bought_only, a.seed, a.holdout_lock or None, a.min_n)
+        print(f"REPLAY n_in_sample={res['n_in_sample']} n_holdout={res['n_holdout']} · {res['verdict']}")
     text = json.dumps(res, indent=1)
     print(text)
     if a.out:

@@ -7,7 +7,7 @@ import time
 import pytest
 
 from research.dataset import SCHEMA, DatasetRecorder
-from research.replay import rates, replay
+from research.replay import lock_holdout, rates, replay
 from test_jupiter_exec import ScriptedJupiter
 from test_lifecycle import SECOND_WAVE, Store, history, post_tok
 from test_bot_v2 import bot
@@ -112,18 +112,27 @@ def test_rates():
     assert (r["n"], r["tp_first"], r["sl_first"], r["neither"]) == (3, 1, 1, 1) and r["tp_minus_sl_rate"] == 0.0
 
 
-def test_replay_small_sample_is_insufficient(tmp_path):
+def _locked(tmp_path, db, min_n=10, **kw):
+    """Lock the holdout on the in-sample part (frozen parameters), then open it with the same parameters."""
+    lock = str(tmp_path / "lock.json")
+    assert lock_holdout(str(db), lock, min_n=min_n, **kw)["status"] == "LOCKED"
+    return replay(str(db), holdout_lock=lock, min_n=min_n, **kw)
+
+
+def test_replay_small_sample_keeps_the_holdout_closed(tmp_path):
     _db(tmp_path / "r.db", ["tp30", "sl15", None], ["sl15"] * 20)
     res = replay(str(tmp_path / "r.db"))
-    assert res["verdict"].startswith("INSUFFICIENT") and res["all"]["candidates"]["n"] == 3
-    assert res["walk_forward"]["in_sample"]["candidates"]["n"] == 1 and res["walk_forward"]["out_of_sample"]["candidates"]["n"] == 2
-    # baseline = non-candidate tokens in the candidates' time window (t 1000-1020 -> B0..B4), never the candidates
-    assert res["all"]["baseline_random"]["n_pool"] == 5 and res["all"]["baseline_window"] == "same time window"
+    assert res["walk_forward"]["out_of_sample"]["status"] == "REFUSED" and res["all"] is None
+    assert res["n_in_sample"] == 1 and res["n_holdout"] == 2
+    ins = res["walk_forward"]["in_sample"]
+    # baseline = non-candidate tokens in the in-sample time window (t 1000 -> B0..B0), never the candidates
+    assert ins["candidates"]["n"] == 1 and ins["baseline_window"] == "same time window"
+    assert lock_holdout(str(tmp_path / "r.db"), str(tmp_path / "l.json"))["status"] == "REFUSED"   # n < 30
 
 
 def test_replay_edge_vs_random_and_walk_forward(tmp_path):
     _db(tmp_path / "r.db", ["tp30"] * 30 + ["sl15"] * 10, ["tp30"] * 20 + ["sl15"] * 80)
-    res = replay(str(tmp_path / "r.db"))
+    res = _locked(tmp_path, tmp_path / "r.db")
     a = res["all"]
     assert a["candidates"]["tp_first_rate"] == 0.75 and a["candidates"]["tp_share"] == 0.75
     assert a["baseline_random"]["mean_tp_share"] < 0.3 and a["baseline_random"]["p_random_at_least_as_good"] == 0.0
@@ -131,14 +140,16 @@ def test_replay_edge_vs_random_and_walk_forward(tmp_path):
     assert oos["n"] == 16 and oos["tp_first_rate"] == pytest.approx(6 / 16)      # time order: the last 16
     assert oos["tp_share"] == pytest.approx(6 / 16) and res["break_even_tp_share"] == pytest.approx(1 / 3, abs=1e-4)
     assert res["verdict"].startswith("out-of-sample TP share beats random")    # 37.5 % > 33.3 % and >> random
-    only = replay(str(tmp_path / "r.db"), bought_only=True)
+    other = tmp_path / "bought_only"                  # its own lock: a different frozen parameter set
+    other.mkdir()
+    only = _locked(other, tmp_path / "r.db", min_n=5, bought_only=True)
     assert only["all"]["candidates"]["n"] == 20
 
 
 def test_volatility_alone_is_not_an_edge(tmp_path):
     """Candidates hit TP first 4x more often than random tokens, but SL even more: TP share below break-even."""
     _db(tmp_path / "r.db", ["tp30"] * 12 + ["sl15"] * 28, ["tp30"] * 5 + ["sl15"] * 15 + [None] * 80)
-    res = replay(str(tmp_path / "r.db"))
+    res = _locked(tmp_path, tmp_path / "r.db")
     a = res["all"]
     assert a["candidates"]["tp_first_rate"] > 4 * a["baseline_random"]["mean_tp_first_rate"]
     assert a["candidates"]["tp_share"] == pytest.approx(0.3) and "no" in res["verdict"]
