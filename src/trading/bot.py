@@ -70,6 +70,8 @@ class PaperBot:
         self.intents: dict[str, dict] = {}     # mint -> pending BUY intent (one per CA: duplicate-order guard)
         self.sell_intents: dict[str, dict] = {}  # mint -> SELL waiting for its Jupiter quote (non-protective exits)
         self.quote_budget = None                 # trading.quote_budget.QuoteBudget (server); None = unlimited
+        self.entry_block: str | None = None      # set by the server when the sample is not durable: no NEW entries
+        self.entry_block_seen: set[str] = set()   # tokens that would have been bought meanwhile (counted)
         self.gate_eval_cache: dict | None = None  # blocked vs entered vs matched baseline (research.gate_eval)
         self._last_gate_eval = 0.0
         self._exec_task: asyncio.Task | None = None   # sells + buys run beside the tick, never block it
@@ -371,6 +373,13 @@ class PaperBot:
                     rec["state"] = "BUY_COOLDOWN"            # a failed fill pays fees: do not hammer the same mint
                     rec["blocked_by"] = (rec.get("blocked_by") or []) + [
                         f"buy_cooldown: last BUY fill FAILED {now - last_fail:.0f}s ago < {FAILED_BUY_COOLDOWN_S:.0f}s"]
+                    continue
+                if self.entry_block:                        # no durable store: observe / count, never open
+                    rec["state"] = "NOT_DURABLE"
+                    rec["blocked_by"] = (rec.get("blocked_by") or []) + [f"durability: {self.entry_block}"]
+                    if st.mint not in self.entry_block_seen:
+                        self.entry_block_seen.add(st.mint)
+                        self.log("BLOCK", f"BUY not opened — {self.entry_block}", st, now=now)
                     continue
                 if st.mint in self.intents or st.mint in self.book.positions or \
                         any(o["mint"] == st.mint for o in self.pending.values()):
@@ -1588,6 +1597,10 @@ class PaperBot:
                            "last_snapshot_ts": snap.get("last_ts")}
         if not durable:
             r["warnings"].insert(0, f"{NOT_DURABLE} ({r['durability']['reason']})")
+        if self.entry_block:
+            r["entries_blocked"] = {"reason": self.entry_block, "tokens_not_bought": len(self.entry_block_seen)}
+            r["warnings"].insert(0, f"NO NEW ENTRIES: {self.entry_block} — {len(self.entry_block_seen)} candidate "
+                                    "tokens observed but not bought")
         if snap.get("halted"):
             r["warnings"].insert(0, f"BOT STOPPED: {snap['halted']}")
         return r

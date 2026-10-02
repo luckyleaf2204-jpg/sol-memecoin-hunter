@@ -156,7 +156,7 @@ def test_without_a_store_there_is_no_lease_and_a_loud_warning(tmp_path, monkeypa
         h = c.get("/healthz").json()
         assert h["role"] == "ACTIVE" and "lease" not in h and h["snapshot"]["warning"] == S.NOT_DURABLE
         r = app.state.hunter["bot"].sample_report()
-        assert r["warnings"][0].startswith(S.NOT_DURABLE)
+        assert r["warnings"][0].startswith("NO NEW ENTRIES") and r["warnings"][1].startswith(S.NOT_DURABLE)
 
 
 # ---------------------------------------------------------------- 2.3 after a restore: first tick re-evaluates

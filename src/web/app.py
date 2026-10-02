@@ -242,7 +242,16 @@ def create_app(engine: ScannerEngine | None = None, start_scanner: bool = True,
             state["role"] = "HALTED"
             return
         state["role"] = "ACTIVE"
+        _block_entries_if_not_durable()
         _start()
+
+    def _block_entries_if_not_durable() -> None:
+        """A3: without a durable store (or with a failing one) the book dies with the container — so the bot opens no
+        NEW position (exits of open ones still run; candidates are counted). ALLOW_NOT_DURABLE=1: local dev only."""
+        if not state["snapshot"].get("durable") and os.environ.get("ALLOW_NOT_DURABLE", "0") != "1":
+            state["bot"].entry_block = f"{NOT_DURABLE} ({state['snapshot'].get('reason')})"
+            print(f"[durability] NO NEW ENTRIES until a durable snapshot store is configured: "
+                  f"{state['snapshot'].get('reason')}", flush=True)
 
     async def _standby_loop(lease) -> None:
         from core.lease import LEASE_POLL_S
@@ -394,6 +403,8 @@ def create_app(engine: ScannerEngine | None = None, start_scanner: bool = True,
                            "last_restore_utc": _utc((sn.get("restore") or {}).get("at"))}
         if not sn["durable"]:
             out["snapshot"]["warning"] = sn.get("warning") or NOT_DURABLE
+        if bot is not None and getattr(bot, "entry_block", None):
+            out["entries"] = "BLOCKED: no durable snapshot store — no new positions (exits still run)"
         if bot is not None:
             from trading.strategy_constants import constants_hash
             out["params"] = bot.cfg.sample_id()

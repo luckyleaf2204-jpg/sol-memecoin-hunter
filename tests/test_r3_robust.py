@@ -119,3 +119,54 @@ def test_render_yaml_shutdown_delay():
     import re
     m = re.search(r"maxShutdownDelaySeconds:\s*(\d+)", text)
     assert m and 120 <= int(m.group(1)) <= 300 and S.SHUTDOWN_SLOW_TIMEOUT_S + 10 + 30 <= int(m.group(1))
+
+
+# ---------------------------------------------------------------- A3: no durable store -> no new entries
+def test_not_durable_blocks_new_entries_but_counts_them():
+    import asyncio
+
+    from test_bot_v2 import FakeJupiter, bot, good
+    st = good()
+    b = bot([st], FakeJupiter())
+    b.entry_block = "MẪU KHÔNG BỀN - sẽ mất khi restart (no store)"
+    b.tick()
+    asyncio.run(b.execute_intents())
+    assert not b.book.positions and not b.intents and b.decisions[st.mint]["state"] == "NOT_DURABLE"
+    assert st.mint in b.entry_block_seen
+    r = b.sample_report()
+    assert r["warnings"][0].startswith("NO NEW ENTRIES") and r["entries_blocked"]["tokens_not_bought"] == 1
+    b.entry_block = None                                       # store configured -> trades again
+    b.tick()
+    asyncio.run(b.execute_intents())
+    assert st.mint in b.book.positions
+
+
+def test_open_positions_still_exit_while_entries_are_blocked():
+    import asyncio
+
+    from test_v12 import MINT, opened
+    b, st, p = opened()
+    b.entry_block = "not durable"
+    st.stamps["market"].updated_at = time.time() + 1
+    st.market.price_usd = p.entry_price * 0.8
+    b.tick()
+    asyncio.run(b.execute_sells())
+    assert MINT not in b.book.positions
+
+
+def test_server_without_store_blocks_entries_and_says_so(tmp_path, monkeypatch):
+    d = tmp_path / "d"
+    d.mkdir()
+    monkeypatch.setattr(webapp, "DATA_DIR", d)
+    for k in ("SNAPSHOT_DIR", "SNAPSHOT_URL", "RENDER_EXTERNAL_URL", "ALLOW_NOT_DURABLE"):
+        monkeypatch.delenv(k, raising=False)
+    monkeypatch.setenv("RESEARCH_LOG", "0")
+    app = _app(tmp_path, "a")
+    with TestClient(app) as c:
+        h = c.get("/healthz").json()
+        assert h["entries"].startswith("BLOCKED") and h["snapshot"]["warning"] == S.NOT_DURABLE
+        assert app.state.hunter["bot"].entry_block.startswith(S.NOT_DURABLE)
+    monkeypatch.setenv("ALLOW_NOT_DURABLE", "1")                 # local development override
+    app = _app(tmp_path, "b")
+    with TestClient(app) as c:
+        assert "entries" not in c.get("/healthz").json() and app.state.hunter["bot"].entry_block is None
