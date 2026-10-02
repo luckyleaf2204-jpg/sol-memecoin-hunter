@@ -6,6 +6,9 @@ from dataclasses import asdict, dataclass, fields
 from pathlib import Path
 
 PAPER, CONFIRM, AUTO = "PAPER", "CONFIRM", "AUTO"
+# trading.json may only carry OPERATIONAL switches. Strategy / risk / cost parameters always come from the code
+# (+ the server's environment): an old file — restored from a snapshot — can never pin outdated defaults.
+OPERATIONAL_KEYS = ("kill_switch", "enabled")
 ALLOWED_MODES = (PAPER,)          # CONFIRM / AUTO need a real executor + explicit owner approval: not built
 
 
@@ -109,17 +112,27 @@ class TradingConfig:
 
     @classmethod
     def load(cls, path: Path) -> "TradingConfig":
+        """Code defaults + the OPERATIONAL switches of trading.json (mode is always PAPER). Strategy keys in the
+        file are ignored and listed in `ignored_file_keys` (the server logs them)."""
+        cfg = cls()
         try:
             raw = json.loads(path.read_text(encoding="utf-8"))
         except (OSError, ValueError):
-            return cls()
-        known = {f.name: f.type for f in fields(cls)}
-        cfg = cls(**{k: v for k, v in raw.items() if k in known and k != "mode"})   # mode is always PAPER
+            raw = {}
+        if not isinstance(raw, dict):
+            raw = {}
+        known = {f.name for f in fields(cls)}
+        for k in OPERATIONAL_KEYS:
+            if k in raw:
+                setattr(cfg, k, raw[k])
+        same = lambda k: json.loads(json.dumps(getattr(cfg, k), default=str)) == raw[k]  # noqa: E731 (tuple vs list)
+        cfg.ignored_file_keys = sorted(k for k in raw if k in known and k not in OPERATIONAL_KEYS and not same(k))
         return cfg
 
     def save(self, path: Path) -> None:
-        path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_text(json.dumps(asdict(self), indent=2), encoding="utf-8")
+        """Only the operational switches are persisted (see OPERATIONAL_KEYS)."""
+        from core.snapshot import write_atomic
+        write_atomic(path, json.dumps({k: getattr(self, k) for k in OPERATIONAL_KEYS}, indent=2).encode("utf-8"))
 
     def sample_id(self) -> str:
         """Fingerprint of every strategy parameter (entries, exits, sizing, risk, costs). Trades are counted per

@@ -188,6 +188,9 @@ def create_app(engine: ScannerEngine | None = None, start_scanner: bool = True,
                 if os.environ.get("RESEARCH_ONCHAIN", "1") != "0":                  # shadow anti-rug data (budgeted)
                     from research.onchain import OnchainResearch
                     state["bot"].onchain = OnchainResearch(state["engine"].rpc, state["bot"].recorder)
+            ign = getattr(state["bot"].cfg, "ignored_file_keys", [])
+            if ign:
+                print(f"[config] trading.json strategy keys IGNORED (code defaults win): {', '.join(ign)}", flush=True)
             ep = state["bot"].begin_sample()
             print(f"[startup] commit {ep['commit']} · params {ep['fingerprint']} · strategy {ep['strategy_version']} "
                   f"· sample epoch since {ep['started_at_utc']}", flush=True)

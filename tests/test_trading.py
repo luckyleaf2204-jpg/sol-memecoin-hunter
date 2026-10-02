@@ -71,7 +71,9 @@ def test_config_file_can_never_switch_on_auto(tmp_path):
     p = tmp_path / "trading.json"
     p.write_text(json.dumps({"mode": "AUTO", "max_open_positions": 3}), encoding="utf-8")
     cfg = TradingConfig.load(p)
-    assert cfg.mode == "PAPER" and cfg.max_open_positions == 3
+    # mode is always PAPER; strategy / risk keys in the file no longer override the code defaults (fix 8)
+    assert cfg.mode == "PAPER" and cfg.max_open_positions == TradingConfig().max_open_positions
+    assert cfg.ignored_file_keys == ["max_open_positions", "mode"]          # both ignored and reported
 
 
 def test_no_private_key_or_signing_code_in_trading_package():
