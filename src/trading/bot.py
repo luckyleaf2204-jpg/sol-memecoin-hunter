@@ -72,7 +72,7 @@ class PaperBot:
         self._next_order = 1
         self._discovered: set[str] = set()
         self._pipe_logged = 0.0
-        self.last_buy_attempt: dict[str, float] = {}
+        self.last_buy_attempt = self.book.last_buy_attempt    # persisted with the book (survives a restart)
         self.quote_block: dict[str, float] = {}  # mint -> until: Jupiter confirmed NO route (no re-quote spam)
         self.quote_stats: dict[str, int] = {}    # Jupiter BUY-quote outcomes by status
         self.sell_quote_stats: dict[str, int] = {}  # Jupiter SELL-quote outcomes by status
