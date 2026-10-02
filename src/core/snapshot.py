@@ -33,6 +33,7 @@ PROBE = "probe.json"
 NOT_DURABLE = "MẪU KHÔNG BỀN - sẽ mất khi restart"
 SNAPSHOT_FAIL_BLOCK_N = 3            # this many failed snapshots in a row -> no new entries until one succeeds
 DURABILITY_RETRY_S = 60.0            # start-up probe failed on a store error: retry this often
+SHUTDOWN_DEADLINE_S = 80.0           # at SIGTERM the whole snapshot gets this long (maxShutdownDelaySeconds 120)
 SHUTDOWN_SLOW_TIMEOUT_S = 60.0       # at SIGTERM: research.db gets this long, else the previous copy is kept
 # (render.yaml maxShutdownDelaySeconds 120: bot stop <= 10 s + book files + this + lease release fit inside it)
 SNAPSHOT_EVERY_S = float(os.environ.get("SNAPSHOT_EVERY_S", "3600") or 3600)
@@ -217,14 +218,34 @@ def _put_verified(store, slot: int, name: str, raw: bytes, gen: int) -> dict:
     return {"sha256": sha, "size": len(raw), "size_gz": len(gz), "object": _obj(slot, name)}
 
 
+CRITICAL = ("paper_bot.json", "sample_epoch.json", "holdout_lock.json", "trading.json")   # never carried over
+
+
+def _timed(fn, timeout: float | None):
+    """Run fn in a worker thread, at most `timeout` seconds (None = no limit). Raises TimeoutError."""
+    if timeout is None:
+        return fn()
+    import concurrent.futures as cf
+    ex = cf.ThreadPoolExecutor(max_workers=1)
+    try:
+        return ex.submit(fn).result(timeout=max(timeout, 0.0))
+    except cf.TimeoutError as e:
+        raise TimeoutError from e
+    finally:
+        ex.shutdown(wait=False)
+
+
 def snapshot(data_dir: Path, store, commit: str = "", now: float | None = None,
-             slow_timeout_s: float | None = None) -> dict:
+             slow_timeout_s: float | None = None, deadline_s: float | None = None) -> dict:
     """Write generation N+1 into its own slot (GENERATIONS slots, rotating), read every object back and verify its
     checksum, and only then switch the manifest to it. A failed write / verify leaves the previous generation as
     the restore point (the manifest still points to it).
     Files go in priority order (book, epoch, lock first; research.db last). With slow_timeout_s (shutdown), a SLOW
     file that is not written + verified in time keeps the previous generation's verified copy (`carried_from`), so
-    the book is never lost waiting for the research DB. `steps` gives the seconds of every file."""
+    the book is never lost waiting for the research DB. `steps` gives the seconds of every file.
+    deadline_s (shutdown): a total time budget. A CRITICAL file (book / epoch / lock / config) not written in time
+    aborts the generation (SnapshotError: the previous verified generation stays the restore point, never a mix of an
+    old book and a new epoch); any other file not written in time keeps its previous verified copy."""
     t0 = time.time()
     now = now or t0
     prev = _manifest(store) or {}
@@ -239,27 +260,26 @@ def snapshot(data_dir: Path, store, commit: str = "", now: float | None = None,
     gen = max(gens) + 1
     slot = gen % GENERATIONS
     files, steps = {}, {}
+    end = None if deadline_s is None else time.time() + deadline_s
     for name in FILES:
         p = Path(data_dir) / name
         if not p.exists():
             continue
         ts = time.time()
+        limit = None if end is None else end - ts
         if name in SLOW and slow_timeout_s is not None:
-            import concurrent.futures as cf
-            ex = cf.ThreadPoolExecutor(max_workers=1)
-            fut = ex.submit(lambda p=p, name=name: _put_verified(store, slot, name, _read(p), gen))
-            try:
-                files[name] = fut.result(timeout=slow_timeout_s)
-            except cf.TimeoutError:
-                old = (prev.get("files") or {}).get(name)
-                if old is not None:                         # the previous generation's verified copy
-                    files[name] = {**old, "carried_from": old.get("carried_from", prev.get("gen"))}
-                steps[name + " (timeout, carried)" if old else name + " (timeout, omitted)"] = round(time.time() - ts, 2)
-                ex.shutdown(wait=False)
-                continue
-            ex.shutdown(wait=False)
-        else:
-            files[name] = _put_verified(store, slot, name, _read(p), gen)
+            limit = slow_timeout_s if limit is None else min(limit, slow_timeout_s)
+        try:
+            files[name] = _timed(lambda p=p, name=name: _put_verified(store, slot, name, _read(p), gen), limit)
+        except TimeoutError:
+            if name in CRITICAL:
+                raise SnapshotError(f"deadline: {name} not written in {deadline_s}s — generation {gen} discarded, "
+                                    f"generation {prev.get('gen')} stays the restore point") from None
+            old = (prev.get("files") or {}).get(name)
+            if old is not None:                             # the previous generation's verified copy
+                files[name] = {**old, "carried_from": old.get("carried_from", prev.get("gen"))}
+            steps[name + " (timeout, carried)" if old else name + " (timeout, omitted)"] = round(time.time() - ts, 2)
+            continue
         steps[name] = round(time.time() - ts, 2)
     man = {"gen": gen, "slot": slot, "ts": now, "commit": commit, "files": files, "steps": steps,
            "bytes_raw": sum(f["size"] for f in files.values()), "bytes_gz": sum(f["size_gz"] for f in files.values()),

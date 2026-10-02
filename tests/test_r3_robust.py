@@ -209,3 +209,66 @@ def test_slow_gate_evaluation_runs_beside_the_tick(monkeypatch):
         await task
     asyncio.run(scenario())
     assert seen["ticks_at_end"] - seen["ticks_at_start"] >= 10 and b.gate_eval_cache["n_blocked"] == 0
+
+
+# ---------------------------------------------------------------- C3: a total deadline at shutdown
+class SlowFile(S.LocalStore):
+    """Uploads of one chosen file take `delay` seconds."""
+    def __init__(self, root, slow="", delay=0.0):
+        super().__init__(root)
+        self.slow, self.delay = slow, delay
+
+    def put(self, name, data):
+        if self.slow and self.slow in name and self.delay:
+            time.sleep(self.delay)
+        super().put(name, data)
+
+
+def test_slow_book_upload_aborts_the_generation_within_the_deadline(tmp_path):
+    import json
+    d, store = tmp_path / "d", SlowFile(tmp_path / "store")
+    _files(d, 1)
+    S.snapshot(d, store, now=1.0)
+    _files(d, 2)
+    store.slow, store.delay = "paper_bot", 1.0
+    t0 = time.time()
+    try:
+        S.snapshot(d, store, now=2.0, deadline_s=0.3)
+        raise AssertionError("expected SnapshotError")
+    except S.SnapshotError as e:
+        assert "deadline" in str(e) and "paper_bot.json" in str(e)
+    assert time.time() - t0 < 0.8                                      # bounded by the deadline
+    man = json.loads(S.LocalStore(tmp_path / "store").get(S.MANIFEST))
+    assert man["gen"] == 1                                             # the previous verified generation stays
+
+
+def test_deadline_hit_on_a_non_critical_file_keeps_its_previous_copy(tmp_path):
+    d, store = tmp_path / "d", SlowFile(tmp_path / "store")
+    _files(d, 1)
+    S.snapshot(d, store, now=1.0)
+    _files(d, 2)
+    store.slow, store.delay = "research.db", 1.0
+    m = S.snapshot(d, store, now=2.0, deadline_s=0.3)
+    assert m["gen"] == 2 and m["files"]["research.db"]["carried_from"] == 1
+
+
+def test_shutdown_with_a_stuck_store_still_releases_and_stops(tmp_path, monkeypatch, capsys):
+    import core.lease as L
+    store = SlowFile(tmp_path / "store")
+    _setup(tmp_path, monkeypatch, store)
+    monkeypatch.setattr(S, "SHUTDOWN_DEADLINE_S", 0.3)
+    app = _app(tmp_path, "a")
+    stopped = []
+    eng = app.state.hunter["engine"]
+    real_stop = eng.stop
+    eng.stop = lambda: (stopped.append(1), real_stop())
+    c = TestClient(app)
+    c.__enter__()
+    store.slow, store.delay = "paper_bot", 2.0                        # the book upload hangs at SIGTERM
+    t0 = time.time()
+    c.__exit__(None, None, None)
+    out = capsys.readouterr().out
+    assert time.time() - t0 < 3.0 and "[snapshot] shutdown FAILED: SnapshotError" in out
+    assert stopped == [1] and "[lease] released" in out
+    import json
+    assert json.loads(store.get(L.LEASE))["released"] is True
