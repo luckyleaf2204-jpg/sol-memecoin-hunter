@@ -40,10 +40,10 @@ def post_tok(now=None):
     return st
 
 
-def history(points, pair="PAIR111", src="dexscreener_amm"):
+def history(points, pair="PAIR111", src="dexscreener_amm", now=None):
     """points: [(dt_from_now, price, liq, vol_5m, buys, sells)]"""
     h = TokenHistory()
-    now = time.time()
+    now = time.time() if now is None else now
     for dt, price, liq, vol, b, s in points:
         h.points.append(Point(now + dt, price, price * 1e9, liq, src, vol, vol * 6, b, s, b * 6, s * 6, pair))
     return h
@@ -181,8 +181,8 @@ def test_price_up_volume_up_alone_is_not_a_second_wave():
 # ---------------------------------------------------------------- 10-11 no look-ahead
 def test_future_feature_must_not_change_past_score():
     now = time.time()
-    base = history(SECOND_WAVE)
-    fut = history(SECOND_WAVE + [(400, 0.2, 5_000, 1_000, 5, 95)])   # a future crash
+    base = history(SECOND_WAVE, now=now)
+    fut = history(SECOND_WAVE + [(400, 0.2, 5_000, 1_000, 5, 95)], now=now)   # a future crash
     t0 = now - 2
     a = [(p.ts, p.price, p.liq, p.vol_5m, p.buy_share) for p in base.points]
     b = [(p.ts, p.price, p.liq, p.vol_5m, p.buy_share) for p in fut.points]

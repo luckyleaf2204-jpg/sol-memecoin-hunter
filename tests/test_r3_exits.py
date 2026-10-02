@@ -116,8 +116,9 @@ def test_restore_with_an_old_last_price_ts_does_not_close():
     b2.book = b.book
     b2.jupiter = SellScript([J.OK], p.entry_price)
     _no_price(st, p)
-    b2.tick()
-    b2.tick(time.time() + 20)
+    t = time.time()
+    b2.tick(t)
+    b2.tick(t + 20)
     assert MINT in b2.book.positions and MINT not in b2.sell_intents and b2.stale_s.get(MINT, 0) <= 20
 
 
