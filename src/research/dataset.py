@@ -45,6 +45,7 @@ FOLLOWUP_S = (1800, 3600, 21600, 86400)       # off-scanner price checks (relati
 SIGNALS = ("volume_accel", "txn_accel", "buy_pressure", "mc_accel", "holder_accel", "liquidity_growth", "whale_accum")
 KEEP_DAYS = 7
 TP, SL, TIME_STOP_S = 0.30, -0.15, 3600
+GATE_ANCHOR = {"blocked": "gate_blocked", "entered": "entered"}
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS token_discovery (
@@ -111,6 +112,10 @@ CREATE TABLE IF NOT EXISTS trade_price_truth (trade_id TEXT PRIMARY KEY, token_c
   latency_model_pct REAL, total_simulated_entry_cost_pct REAL, pnl_ds REAL, pnl_truth REAL, pnl_common_source REAL,
   old_pnl REAL, mfe_truth REAL, mae_truth REAL, time_to_mfe_s REAL, time_to_mae_s REAL, mfe_ds REAL, mae_ds REAL,
   truth_coverage_pct REAL, label TEXT, data TEXT);
+CREATE TABLE IF NOT EXISTS gate_events (id INTEGER PRIMARY KEY AUTOINCREMENT, ca TEXT NOT NULL, ts REAL,
+  kind TEXT, reasons TEXT, extension_5m_pct REAL, entry_location TEXT, age_s REAL, liquidity_usd REAL, price REAL,
+  lifecycle TEXT);
+CREATE INDEX IF NOT EXISTS ix_gate_ca ON gate_events(ca, kind);
 CREATE TABLE IF NOT EXISTS trade_journal (trade_id TEXT PRIMARY KEY, ca TEXT, symbol TEXT, engine TEXT,
   sample_id TEXT, setup TEXT, lifecycle TEXT, setup_type TEXT, entry_ts REAL, exit_ts REAL, holding_s REAL,
   entry_price REAL, entry_mid REAL, exit_reason TEXT, mfe_pct REAL, mae_pct REAL, net_pnl_usd REAL, net_pnl_pct REAL,
@@ -298,6 +303,9 @@ class DatasetRecorder:
                                       (ca,)).fetchone()
                 if row and row[1]:
                     self.t[ca]["anchors"]["candidate"] = (row[0], row[1])
+        for ca, kind, ts, price in self.db.execute("SELECT ca, kind, MIN(ts), price FROM gate_events GROUP BY ca, kind"):
+            if ca in self.t and price:
+                self.t[ca]["anchors"].setdefault(GATE_ANCHOR[kind], (ts, price))
         for ca, anchor, h in self.db.execute("SELECT ca, anchor, horizon FROM forward_returns"):
             if ca in self.t:
                 self.t[ca]["fwd_done"].add((anchor, h))
@@ -571,6 +579,22 @@ class DatasetRecorder:
     JOURNAL_COLS = ("trade_id", "mint", "symbol", "engine", "sample_id", "setup", "lifecycle", "setup_type", "entry_ts",
                     "exit_ts", "holding_s", "entry_price", "entry_mid", "exit_reason", "mfe_pct", "mae_pct",
                     "net_pnl_usd", "net_pnl_pct", "gross_move_pct", "real_cost_pct", "fees_usd", "cost_usd", "noquote")
+
+    def gate_event(self, st, kind: str, rec: dict, now: float) -> None:
+        """Step C: the no-chasing gate. kind 'blocked' (with its reasons) or 'entered' (filled BUY). The first event
+        per CA and kind becomes a forward-return anchor (gate_blocked / entered), tracked like every other anchor."""
+        p = _price(st)
+        created = st.info.created_at or (st.market.pair_created_at if st.market else None)
+        self.db.execute("INSERT INTO gate_events (ca, ts, kind, reasons, extension_5m_pct, entry_location, age_s, "
+                        "liquidity_usd, price, lifecycle) VALUES (?,?,?,?,?,?,?,?,?,?)",
+                        (st.mint, now, kind, json.dumps([r for r in rec.get("blocked_by") or [] if
+                                                         r.startswith("entry_location")]) if kind == "blocked" else "[]",
+                         rec.get("entry_extension"), rec.get("entry_location"), now - created if created else None,
+                         st.market.liquidity_usd if st.market else None, p, rec.get("lifecycle_name")))
+        t = self.t.get(st.mint) or self._discover(st, now)          # start tracking it if it was not yet
+        if p is not None:
+            t["anchors"].setdefault(GATE_ANCHOR[kind], (now, p))
+        self.db.commit()
 
     def trade_journal(self, r: dict) -> None:
         """Step 4: one row per closed paper trade (entry, MFE / MAE, exit reason, real cost, engine, sample)."""

@@ -693,6 +693,7 @@ class PaperBot:
                     "blocked_by": (rec.get("blocked_by") or []) + why, "setup_decision": WATCH})
         if (self.decisions.get(st.mint) or {}).get("entry_gate_blocked") is not True:
             self.log("BLOCK", "no chasing — " + "; ".join(why), st, now=now)
+            self._rec("gate_event", st, "blocked", rec, now)            # step C: follow it like an entry
         return WATCH
 
     @staticmethod
@@ -705,6 +706,8 @@ class PaperBot:
         p = self.book.positions.get(st.mint)
         if p is None:
             return
+        if self.recorder is not None:
+            self._rec("gate_event", st, "entered", self.decisions.get(st.mint) or {}, now)
         self.provenance[st.mint] = {
             "mint": st.mint, "symbol": st.info.symbol, "lifecycle": it.get("lifecycle"),
             "entry_ts": now, "decision_ts": it.get("ts"),
