@@ -12,10 +12,13 @@ from __future__ import annotations
 
 import random
 
-from trading.exit_policy import PROTECTIVE, base_reason
+from trading.exit_policy import base_reason
+from trading.exits import HARD
 
 STOP_REASONS = ("stop_loss",)
-GAP_REASONS = PROTECTIVE         # stop gap floor: every protective exit (stop, break-even, trailing, risk, liquidity ...)
+# stop gap floor: exits that fire BECAUSE the price is falling through a level or a risk event — a real stop can gap.
+# A trailing stop locks a gain (kept as filled); the floor applies only to LOSING trades of these reasons.
+GAP_REASONS = tuple(HARD) + ("break_even_stop", "stale_timeout")
 TP_REASONS = ("take_profit_1", "take_profit_2", "runner_trailing_stop")
 SL_GAP_PCT = -20.0
 MIN_PRELIMINARY_N = 30          # per sample: preliminary check only (docs/sample_plan.md)
@@ -79,7 +82,7 @@ def metrics(rows: list[dict], nets: list[float], starting: float) -> dict:
 
 def gross_of(r: dict, sl_gap: bool = False) -> float:
     g = r["gross_move_pct"]
-    if sl_gap and base_reason(r.get("exit_reason")) in GAP_REASONS:
+    if sl_gap and g < 0 and base_reason(r.get("exit_reason")) in GAP_REASONS:
         return min(g, SL_GAP_PCT)
     return g
 

@@ -39,5 +39,5 @@ def test_stop_gap_floor_on_every_hard_exit(reason):
     e = epoch()
     rows = [row(e, -8.0, reason), row(e, 30.0, "take_profit_2"), row(e, -5.0, "trailing_stop")]
     g = report(rows, e)["sl_gap_scenario"]
-    assert g["hard_exits"] == 2                       # B4: a trailing stop is protective too (gap floor applies)
-    assert g["by_cost"]["5%"]["expectancy_pct"] == pytest.approx((-25 + 25 - 25) / 3, abs=1e-3)   # -8, -5 -> -20
+    assert g["hard_exits"] == 1                       # C4: a trailing stop is not a gap stop (restored)
+    assert g["by_cost"]["5%"]["expectancy_pct"] == pytest.approx((-25 + 25 - 10) / 3, abs=1e-3)   # -8 -> -20

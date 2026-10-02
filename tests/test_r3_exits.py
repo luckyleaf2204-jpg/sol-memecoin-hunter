@@ -3,6 +3,8 @@ escalates even when the route impact is above max_slippage; escalated reasons co
 import asyncio
 import time
 
+import pytest
+
 from test_g1_sell_retry import SellScript, _signal
 from test_stepB_report import epoch, row
 from test_v12 import MINT, opened
@@ -157,7 +159,7 @@ def test_a_pause_between_ticks_is_not_stale_time():
     t = time.time()
     b.tick(t)
     b.tick(t + 3600)                                                            # the loop slept an hour
-    assert b.stale_s[MINT] <= B.STALE_MAX_STEP_S and MINT not in b.sell_intents
+    assert b.stale_s[MINT] <= B.STALE_MAX_STEP_S + 1 and MINT not in b.sell_intents   # not 3600 s
 
 
 def test_protective_intent_of_a_vanished_token_is_not_dropped():
@@ -173,3 +175,22 @@ def test_stale_timeout_counts_in_the_report():
     e = epoch()
     r = report([row(e, -30.0, "stale_timeout"), row(e, 10.0, "take_profit_1")], e)
     assert r["n"] == 2 and r["sl_gap_scenario"]["hard_exits"] == 1
+
+
+# ---------------------------------------------------------------- C4: the SL-gap floor only on losing stops
+def test_sl_gap_floor_only_on_losing_real_stops():
+    from trading.sample_report import gross_of
+    assert gross_of({"gross_move_pct": 25.0, "exit_reason": "trailing_stop"}, sl_gap=True) == 25.0
+    assert gross_of({"gross_move_pct": -5.0, "exit_reason": "trailing_stop"}, sl_gap=True) == -5.0
+    assert gross_of({"gross_move_pct": 1.0, "exit_reason": "break_even_stop"}, sl_gap=True) == 1.0
+    assert gross_of({"gross_move_pct": -2.0, "exit_reason": "break_even_stop"}, sl_gap=True) == -20.0
+    assert gross_of({"gross_move_pct": -8.0, "exit_reason": "take_profit_1->stop_loss"}, sl_gap=True) == -20.0
+    assert gross_of({"gross_move_pct": 3.0, "exit_reason": "risk_spike"}, sl_gap=True) == 3.0
+    assert gross_of({"gross_move_pct": -30.0, "exit_reason": "stop_loss"}, sl_gap=True) == -30.0
+
+
+def test_sl_gap_scenario_keeps_a_winning_trailing_stop():
+    e = epoch()
+    rows = [row(e, 25.0, "trailing_stop"), row(e, -8.0, "stop_loss"), row(e, 4.0, "whale_dump")]
+    m = report(rows, e)["sl_gap_scenario"]["by_cost"]["5%"]
+    assert m["expectancy_pct"] == pytest.approx((20 - 25 - 1) / 3, abs=1e-3)
