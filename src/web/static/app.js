@@ -798,6 +798,7 @@ function sampleReport(d) {
   const warn = (R.warnings || []).map((w) => `<div class="meta c-orange">⚠ ${esc(w)}</div>`).join("");
   return `<div class="panel"><h3><span>SAMPLE REPORT · net expectancy after cost</span><span class="meta">n=${esc(R.n)} · epoch ${esc(ep.fingerprint || "—")} since ${esc(ep.started_at_utc || "—")}</span></h3>${warn}
     <div class="tblw"><table class="tbl"><thead><tr><th>COST</th><th>EXPECTANCY</th><th>95% CI</th><th>WIN</th><th>R:R</th><th>MAX DD</th></tr></thead><tbody>${t(R.by_cost)}</tbody></table></div>
+    ${R.haircut && R.haircut.n_haircut_trades ? `<div class="meta c-orange">HAIRCUT exits (no Jupiter SELL quote): ${esc(R.haircut.n_haircut_trades)} trades (${esc(R.haircut.share_pct)}%) · @7% with ${pc(R.haircut.haircut_trades["7%"]?.expectancy_pct)} · without them ${pc(R.haircut.without_haircut_trades["7%"]?.expectancy_pct)}</div>` : ""}
     <div class="meta">STOP GAP −20%: ${Object.entries((R.sl_gap_scenario || {}).by_cost || {}).map(([k, m]) => `${esc(k)} ${pc(m.expectancy_pct)}`).join(" · ")} · TP/(TP+SL) ${esc(R.reference_only?.tp_share ?? "—")} (reference only: volatility) · excluded LEGACY ${esc(R.excluded_legacy_or_noquote)}</div></div>`;
 }
 

@@ -15,6 +15,7 @@ import time
 from dataclasses import asdict
 from pathlib import Path
 
+from trading.execution import HAIRCUT_MODEL
 from trading.exit_options import stop_pct
 from trading.models import Execution, Position
 
@@ -67,7 +68,8 @@ def journal_row(p) -> dict:
             "net_pnl_usd": round(p.realized_usd - p.cost_usd, 4), "net_pnl_pct": None if net_pct is None else round(net_pct, 3),
             "gross_move_pct": None if g is None else round(g, 3),
             "real_cost_pct": None if g is None or net_pct is None else round(g - net_pct, 3),
-            "fees_usd": round(p.fees_usd, 4), "cost_usd": round(p.cost_usd, 4), "noquote": p.noquote}
+            "fees_usd": round(p.fees_usd, 4), "cost_usd": round(p.cost_usd, 4), "noquote": p.noquote,
+            "haircut": p.haircut_exits > 0, "haircut_exits": p.haircut_exits}
 
 
 def samples(journal: list[dict]) -> dict:
@@ -183,6 +185,8 @@ class PaperBook:
         p.slippage_usd += (ex.ref_price - ex.fill_price) * ex.tokens
         p.tokens -= ex.tokens
         p.realized_usd += ex.usd_in
+        if ex.model == HAIRCUT_MODEL:
+            p.haircut_exits += 1
         p.exit_mid_value += ex.tokens * (mid_price(ex) or 0.0)
         if p.tokens <= p.initial_tokens * 1e-6:
             p.tokens, p.status, p.exit_reason, p.closed_at = 0.0, "CLOSED", reason, now

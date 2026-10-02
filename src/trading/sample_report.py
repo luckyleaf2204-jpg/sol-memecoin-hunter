@@ -59,6 +59,16 @@ def cost_table(rows: list[dict], levels, starting: float, sl_gap: bool = False) 
     return {f"{c:g}%": metrics(rows, [gross_of(r, sl_gap) - c for r in rows], starting) for c in levels}
 
 
+def haircut_split(counted: list[dict], levels, starting: float) -> dict:
+    """Step D: exits that had NO Jupiter SELL quote and were filled with the haircut (default 30 %) — reported
+    apart, and the sample without them."""
+    hc = [r for r in counted if r.get("haircut")]
+    rest = [r for r in counted if not r.get("haircut")]
+    return {"n_haircut_trades": len(hc), "share_pct": round(100 * len(hc) / len(counted), 1) if counted else None,
+            "haircut_trades": cost_table(hc, levels, starting), "without_haircut_trades": cost_table(rest, levels, starting),
+            "note": "haircut fills are an assumption (no executable quote existed); judge the strategy on both"}
+
+
 def report(journal: list[dict], epoch, levels=(5.0, 7.0, 10.0), starting: float = 1000.0) -> dict:
     counted = [r for r in journal if epoch is not None and epoch.counts(r) and r.get("gross_move_pct") is not None]
     legacy = sum(1 for r in journal if epoch is None or not epoch.counts(r))
@@ -73,6 +83,7 @@ def report(journal: list[dict], epoch, levels=(5.0, 7.0, 10.0), starting: float 
                                  starting) if all(r.get("net_pnl_pct") is not None for r in counted) else None,
         "sl_gap_scenario": {"assumption": f"every stop-loss exit fills at {SL_GAP_PCT:.0f}% (or worse)",
                             "stop_exits": sl, "by_cost": cost_table(counted, levels, starting, sl_gap=True)},
+        "haircut": haircut_split(counted, levels, starting),
         "reference_only": {"tp_share": round(tp / (tp + sl), 4) if tp + sl else None, "tp_exits": tp, "sl_exits": sl,
                            "note": "TP/(TP+SL) mostly reflects volatility; NOT a decision metric"},
     }
