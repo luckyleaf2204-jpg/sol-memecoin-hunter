@@ -1334,63 +1334,72 @@ class PaperBot:
 
         async def quote(entry):
             m, it, p, st, tk = entry
-            return entry, await self._sell_quote(m, int(tk * it["frac"] * 10 ** (st.info.decimals or 6)), sol)
+            try:
+                return entry, await self._sell_quote(m, int(tk * it["frac"] * 10 ** (st.info.decimals or 6)), sol)
+            except Exception as e:                     # one broken quote never breaks the round
+                from trading.jupiter import API_ERROR, QuoteResult
+                print(f"[sell] quote error {m[:8]}: {type(e).__name__}: {e}", flush=True)
+                return entry, QuoteResult(API_ERROR, detail=f"client error {type(e).__name__}")
         for fut in asyncio.as_completed([quote(e) for e in due]):     # concurrently, filled as each quote lands:
             (mint, it, p, st, tokens_then), qr = await fut             # one slow quote never delays the others
-            if self.book.positions.get(mint) is not p or p.tokens != tokens_then or self.sell_intents.get(mint) is not it:
-                continue                                # position / intent changed while quoting: next round
-            tokens, reason = p.tokens * it["frac"], it["reason"]
-            if p.last_price:
-                it["mark"] = p.last_price               # latest validated mark (refreshed every tick)
-            self.sell_quote_stats[qr.status] = self.sell_quote_stats.get(qr.status, 0) + 1
-            haircut = self.cfg.hard_exit_no_quote_haircut_pct / 100
-            if qr.ok:
-                q = qr.quote
-                imp = price_impact(q)
-                if not it.get("hard") and imp is not None and 100 * imp > self.cfg.max_slippage_pct \
-                        and it["mark"] <= p.stop_price:
-                    partial = it["frac"] < 1.0
-                    it["hard"], it["frac"] = True, 1.0  # bad route, but the price is through the stop: protect
-                    reason = it["reason"] = f"{reason}->stop_loss"
-                    self.log("RISK", f"SELL escalated to HARD: mark <= stop although impact {100 * imp:.2f}% > "
-                                     f"{self.cfg.max_slippage_pct}%", st, now=now)
-                    if partial:
-                        it["next"] = 0.0                # the quote was for a part: re-quote the whole next round
+            try:
+                if self.book.positions.get(mint) is not p or p.tokens != tokens_then or self.sell_intents.get(mint) is not it:
+                    continue                                # position / intent changed while quoting: next round
+                tokens, reason = p.tokens * it["frac"], it["reason"]
+                if p.last_price:
+                    it["mark"] = p.last_price               # latest validated mark (refreshed every tick)
+                self.sell_quote_stats[qr.status] = self.sell_quote_stats.get(qr.status, 0) + 1
+                haircut = self.cfg.hard_exit_no_quote_haircut_pct / 100
+                if qr.ok:
+                    q = qr.quote
+                    imp = price_impact(q)
+                    if not it.get("hard") and imp is not None and 100 * imp > self.cfg.max_slippage_pct \
+                            and it["mark"] <= p.stop_price:
+                        partial = it["frac"] < 1.0
+                        it["hard"], it["frac"] = True, 1.0  # bad route, but the price is through the stop: protect
+                        reason = it["reason"] = f"{reason}->stop_loss"
+                        self.log("RISK", f"SELL escalated to HARD: mark <= stop although impact {100 * imp:.2f}% > "
+                                         f"{self.cfg.max_slippage_pct}%", st, now=now)
+                        if partial:
+                            it["next"] = 0.0                # the quote was for a part: re-quote the whole next round
+                            continue
+                    if not it.get("hard") and imp is not None and 100 * imp > self.cfg.max_slippage_pct:
+                        self.sell_intents.pop(mint, None)   # re-signalled next tick
+                        self.log("INFO", f"SELL {reason} waits: Jupiter impact {100 * imp:.2f}% > "
+                                         f"{self.cfg.max_slippage_pct}%", st, now=now)
                         continue
-                if not it.get("hard") and imp is not None and 100 * imp > self.cfg.max_slippage_pct:
-                    self.sell_intents.pop(mint, None)   # re-signalled next tick
-                    self.log("INFO", f"SELL {reason} waits: Jupiter impact {100 * imp:.2f}% > "
-                                     f"{self.cfg.max_slippage_pct}%", st, now=now)
-                    continue
-                ex = self.exec.sell_from_quote(st, tokens, q, sol, reason, now)
-                if it.get("hard"):
-                    ex.ref_price = it["mark"]           # validated mark (post-entry print or the fill), not a raw print
-            elif qr.status in (NO_ROUTE, INVALID):      # really no executable route
-                ex = self.exec.sell_haircut(st, tokens, it["mark"], sol, reason, haircut, now)
-            else:                                       # transient: keep the intent, retry inside the window
-                first = it.setdefault("first", now)
-                if now - first < QUOTE_RETRY_WINDOW_S:
-                    it["retries"] = it.get("retries", 0) + 1
-                    wait = min(20.0, 2.5 * 2 ** (it["retries"] - 1))
-                    it["next"] = now + wait
-                    self.log("INFO", f"SELL {reason} → QUOTE {qr.label()} → RETRY in {wait:.0f}s "
-                                     f"(attempt {it['retries'] + 1})", st, now=now)
-                    continue
-                if not it.get("hard") and it["mark"] <= p.stop_price:
-                    it["hard"], it["frac"] = True, 1.0  # the price fell through the stop while we waited: protect
-                    reason = it["reason"] = f"{reason}->stop_loss"
-                    tokens = p.tokens                   # a stop sells everything (TP1 would have sold a part)
-                    self.log("RISK", f"SELL escalated to HARD: mark {it['mark']:.10g} <= stop {p.stop_price:.10g} "
-                                     f"after {QUOTE_RETRY_WINDOW_S:.0f}s without a quote", st, now=now)
-                if not it.get("hard"):
-                    self.sell_intents.pop(mint, None)
-                    self.log("INFO", f"SELL {reason} postponed: no quote for {QUOTE_RETRY_WINDOW_S:.0f}s "
-                                     f"({qr.label()}); re-signalled next tick, never sold blind", st, now=now)
-                    continue
-                ex = self.exec.sell_haircut(st, tokens, it["mark"], sol, reason, haircut, now)
-                ex.reason = (ex.reason + " · " if ex.reason else "") + f"emergency after {QUOTE_RETRY_WINDOW_S:.0f}s of {qr.status}"
-            self.sell_intents.pop(mint, None)
-            self._after_sell(p, st, ex, reason, it["frac"], now)
+                    ex = self.exec.sell_from_quote(st, tokens, q, sol, reason, now)
+                    if it.get("hard"):
+                        ex.ref_price = it["mark"]           # validated mark (post-entry print or the fill), not a raw print
+                elif qr.status in (NO_ROUTE, INVALID):      # really no executable route
+                    ex = self.exec.sell_haircut(st, tokens, it["mark"], sol, reason, haircut, now)
+                else:                                       # transient: keep the intent, retry inside the window
+                    first = it.setdefault("first", now)
+                    if now - first < QUOTE_RETRY_WINDOW_S:
+                        it["retries"] = it.get("retries", 0) + 1
+                        wait = min(20.0, 2.5 * 2 ** (it["retries"] - 1))
+                        it["next"] = now + wait
+                        self.log("INFO", f"SELL {reason} → QUOTE {qr.label()} → RETRY in {wait:.0f}s "
+                                         f"(attempt {it['retries'] + 1})", st, now=now)
+                        continue
+                    if not it.get("hard") and it["mark"] <= p.stop_price:
+                        it["hard"], it["frac"] = True, 1.0  # the price fell through the stop while we waited: protect
+                        reason = it["reason"] = f"{reason}->stop_loss"
+                        tokens = p.tokens                   # a stop sells everything (TP1 would have sold a part)
+                        self.log("RISK", f"SELL escalated to HARD: mark {it['mark']:.10g} <= stop {p.stop_price:.10g} "
+                                         f"after {QUOTE_RETRY_WINDOW_S:.0f}s without a quote", st, now=now)
+                    if not it.get("hard"):
+                        self.sell_intents.pop(mint, None)
+                        self.log("INFO", f"SELL {reason} postponed: no quote for {QUOTE_RETRY_WINDOW_S:.0f}s "
+                                         f"({qr.label()}); re-signalled next tick, never sold blind", st, now=now)
+                        continue
+                    ex = self.exec.sell_haircut(st, tokens, it["mark"], sol, reason, haircut, now)
+                    ex.reason = (ex.reason + " · " if ex.reason else "") + f"emergency after {QUOTE_RETRY_WINDOW_S:.0f}s of {qr.status}"
+                self.sell_intents.pop(mint, None)
+                self._after_sell(p, st, ex, reason, it["frac"], now)
+            except Exception as e:                     # logged; the other sells of this round still run
+                print(f"[sell] {mint[:8]} round error: {type(e).__name__}: {e}", flush=True)
+                self.log("INFO", f"SELL round error on {mint[:8]}: {type(e).__name__}: {e}")
 
     # ---------------------------------------------------------------- CONFIRM mode
     def approve(self, order_id: str, now: float | None = None) -> bool:
@@ -1470,147 +1479,151 @@ class PaperBot:
         now = now or time.time()
         states = {s.mint: s for s in (self.engine.published or [])}
         for mint, it in list(self.intents.items()):
-            if it.get("next", 0) > now:
-                continue                                   # quote retry scheduled later
-            self.intents.pop(mint, None)
-            st = states.get(mint)
-            rec = self.decisions.get(mint, {})
-            sol = self._sol()
-            if st is None or not is_trade_candidate(st, rec) or not sol or mint in self.book.positions:
-                self.log("BLOCK", "BUY cancelled at execution: no longer a valid Trade Candidate", st, now=now)
-                self.audit.execution("skip", st, now, reason="no_longer_candidate")
-                continue
-            usd = it["usd"]
-            t_req = time.time()
-            m_at_quote = self._mobs(st, t_req)
-            qr = await self._buy_quote(mint, int(usd / sol * 1e9))
-            t_resp = time.time()
-            self.quote_stats[qr.status] = self.quote_stats.get(qr.status, 0) + 1
-            if not qr.ok:
-                first = it.setdefault("first", it["ts"])
-                if qr.transient and now - first < QUOTE_RETRY_WINDOW_S:
-                    it["retries"] = it.get("retries", 0) + 1
-                    wait = min(20.0, 2.5 * 2 ** (it["retries"] - 1))
-                    it["next"] = now + wait
-                    self.intents[mint] = it
-                    rec["state"] = "QUOTE_RETRY"
-                    self._rec("quote", st, rec, now, qr.status, qr.label() + " (retrying)", None, False,
-                              int(self.cfg.max_slippage_pct * 100))
-                    self.log("INFO", f"BUY → QUOTE FAILED ({qr.label()}) → RETRY in {wait:.0f}s "
-                                     f"(attempt {it['retries'] + 1})", st, now=now)
-                    self.audit.execution("retry", st, now, qr.label())
-                    continue
-                if qr.status == NO_ROUTE:
-                    self.quote_block[mint] = now + NO_ROUTE_BLOCK_S
-                if self.cfg.experimental and self.cfg.paper_fill_without_quote:
-                    self._simulated_fill(st, rec, it, usd, sol, qr, now)
-                    continue
-                rec["state"] = "QUOTE_FAILED"
-                self._rec("quote", st, rec, now, qr.status, qr.label(), None, False, int(self.cfg.max_slippage_pct * 100))
-                self.log("FAILED", f"BUY → QUOTE FAILED ({qr.label()}) → SKIP · BUY SKIPPED — JUPITER", st, now=now)
-                self.audit.execution("skip", st, now, qr.label(), reason="jupiter:" + qr.status)
-                continue
-            q = qr.quote
-            imp = price_impact(q)
-            from trading.jupiter import route_label
-            self.log("INFO", f"BUY → QUOTE → MATCH · {route_label(q)} · impact "
-                             f"{100 * imp:.2f}%" if imp is not None else f"BUY → QUOTE → MATCH · {route_label(q)}",
-                     st, now=now)
-            self.audit.execution("quote_ok", st, now, route_label(q))
-            from trading.price_provenance import buy_quote_obs, pct
-            qobs = buy_quote_obs(q, usd, st.info.decimals or 6, mint, t_req, t_resp).as_dict()
-            self.quote_obs_log.append({"mint": mint, "symbol": st.info.symbol, "ts": t_resp, "usd": usd,
-                                       "decimal_source": "pump.fun/rpc" if st.info.total_supply else "default 6",
-                                       "decision_market": it.get("decision_market"), "market": m_at_quote, "quote": qobs,
-                                       "decision_to_quote_ms": round(1000 * (t_req - it["ts"])),
-                                       "quote_vs_market_pct": pct(qobs["price"], m_at_quote.get("price")),
-                                       "lifecycle": it.get("lifecycle"), "liq": st.market.liquidity_usd if st.market else None,
-                                       "impact_pct": None if imp is None else round(100 * imp, 3)})
-            del self.quote_obs_log[:-500]
-            self.market_trail[mint] = deque([m_at_quote], maxlen=40)
-            self.quote_obs_log[-1]["trail"] = self.market_trail[mint]      # later prints validate the discrepancy
-            risk_at_quote = st.risk.score if st.risk else None
-            drift = await self._latency_probe(st, mint, int(usd / sol * 1e9), q)
-            risk_at_entry = st.risk.score if st.risk else None
-            risk_ctx = {"risk_at_candidate": it.get("risk_at_candidate"), "risk_at_quote": risk_at_quote,
-                        "risk_at_entry": risk_at_entry, "entry_risk_buffer": self.cfg.entry_max_risk}
-            if self.cfg.experimental and (risk_at_entry is None or risk_at_entry > self.cfg.entry_max_risk):
-                rec["state"] = "RISK_BUFFER"
-                self.buffer_blocks.append({"ts": now, "mint": mint, "symbol": st.info.symbol, "stage": "entry", **risk_ctx})
-                del self.buffer_blocks[:-300]
-                self.log("BLOCK", f"BUY → QUOTE → MATCH → ENTRY RISK BUFFER: Risk {risk_at_entry} > "
-                                  f"{self.cfg.entry_max_risk} (hard limit 60) → WAIT · candidate kept", st, now=now)
-                self.audit.execution("skip", st, now, f"risk {risk_at_entry}", reason="entry_risk_buffer")
-                self._rec("fill", st, now, {"status": "BLOCKED", "fail_reason": "entry_blocked_by_risk_buffer",
-                                            "entry_blocked_by_risk_buffer": 1, "candidate_status": "risk_buffer",
-                                            **risk_ctx})
-                continue
-            feeds_ok, why = self._feeds_ok()
-            last = self.book.last_exit.get(mint)
-            rd = self.risk.check_entry(mint=mint, usd=usd, equity=self.book.equity(), peak=self.book.peak,
-                                       day_start=self.book.day_start, open_positions=len(self.book.positions),
-                                       holding=False, in_cooldown=bool(last and now - last < self.cfg.cooldown_min * 60),
-                                       exposure=self.book.exposure(), est_impact=imp, feeds_ok=feeds_ok, feeds_reason=why)
-            if not rd.allowed:
-                self.log("BLOCK", "risk at execution: " + "; ".join(rd.reasons) + " → SKIP", st, now=now)
-                self.audit.execution("skip", st, now, "; ".join(rd.reasons), reason="risk_at_execution")
-                self._rec("quote", st, rec, now, "OK", "risk at execution: " + "; ".join(rd.reasons), q, False,
-                          int(self.cfg.max_slippage_pct * 100))
-                continue
-            ex = self.exec.buy_from_quote(st, usd, q, sol, now)
-            self._rec("quote", st, rec, now, "OK", "filled" if ex.status == "FILLED" else f"paper fill failed: {ex.reason}",
-                      q, ex.status == "FILLED", int(self.cfg.max_slippage_pct * 100))
             try:
-                out_tokens = int(q["outAmount"]) / 10 ** (st.info.decimals or 6)
-            except (KeyError, TypeError, ValueError):
-                out_tokens = 0.0
-            quote_price = usd / out_tokens if out_tokens else None
-            fill = {"jupiter_impact_pct": round(ex.price_impact_pct, 3), "latency_slippage_pct": round(ex.slippage_pct, 3),
-                    "total_slippage_pct": round(ex.price_impact_pct + ex.slippage_pct, 3),
-                    "max_slippage_pct": self.cfg.max_slippage_pct, "status": ex.status,
-                    "fail_reason": "" if ex.status == "FILLED" else ex.reason,
-                    "quote_ts": now, "execution_ts": now + ex.latency_ms / 1000, "quote_price": quote_price,
-                    "simulated_execution_price": ex.fill_price if ex.fill_price else
-                    (quote_price * (1 + ex.slippage_pct / 100) if quote_price else None),
-                    "jupiter_impact_bps": round(100 * ex.price_impact_pct), "latency_slippage_bps": round(100 * ex.slippage_pct),
-                    "total_slippage_bps": round(100 * (ex.price_impact_pct + ex.slippage_pct)),
-                    "max_slippage_bps": round(100 * self.cfg.max_slippage_pct), "fill_result": ex.status,
-                    "latency_model": self.exec.last_model_used, "requote_drift_bps": drift,
-                    "ref_price": ex.ref_price, "fill_price": ex.fill_price,
-                    "fill_vs_ref_pct": round(100 * (ex.fill_price / ex.ref_price - 1), 3)
-                    if ex.fill_price and ex.ref_price else None,
-                    "requote_ts": (getattr(self, "_last_probe", None) or {}).get("requote_ts") if drift is not None else None,
-                    "latency_actual_s": (getattr(self, "_last_probe", None) or {}).get("latency_s") if drift is not None else None,
-                    "route": ex.route, "liquidity_usd": st.market.liquidity_usd if st.market else None,
-                    "lifecycle": it.get("lifecycle"), "setup_type": it.get("setup_type"), "setup_score": it.get("setup_score"),
-                    "position_size_usd": usd,
-                    "candidate_status": "bought" if ex.status == "FILLED" else
-                    ("slippage_blocked" if "slippage" in (ex.reason or "") else "fill_failed"), **risk_ctx}
-            self.fill_log.append({"ts": now, "mint": mint, "symbol": st.info.symbol, **fill})
-            del self.fill_log[:-300]
-            self.audit.execution("fill_ok" if ex.status == "FILLED" else "fill_fail", st, now,
-                                 f"impact {fill['jupiter_impact_pct']}% + latency {fill['latency_slippage_pct']}% = "
-                                 f"{fill['total_slippage_pct']}% (max {fill['max_slippage_pct']}%)", reason=fill["fail_reason"])
-            self._rec("fill", st, now, fill)
-            if ex.status == "FILLED":
-                self.book.open(ex, self.cfg, now, it.get("opportunity"), it.get("why"), st.market.liquidity_usd,
-                               st.market.vol_5m, setup=it.get("setup", ""))
-                self.log("BUY", f"${usd:,.2f} @ ${ex.fill_price:.8g} · impact {ex.price_impact_pct:.2f}% · "
-                                f"slip {ex.slippage_pct:.2f}% · {ex.route} · WHY: {'; '.join((it.get('why') or [])[:3])}",
-                         st, usd=usd, price=ex.fill_price, now=now)
-                self.audit.execution("buy", st, now, f"${usd:,.2f} @ {ex.fill_price:.8g} · {ex.route}")
-                self._forensic_open(st, now, risk_ctx)
-                self._tag_position(mint, it)
-                self._provenance_open(st, it, qobs, m_at_quote, ex, fill, now)
-            else:
-                self.book.record(ex)
-                if ex.status == "FAILED":
-                    self.last_buy_attempt[mint] = now           # cooldown: FAILED_BUY_COOLDOWN_S
-                self.log("FAILED", f"BUY → QUOTE → MATCH → PAPER FILL FAILED: {ex.reason} · Jupiter impact "
-                                   f"{fill['jupiter_impact_pct']:.2f}% + simulated latency slippage "
-                                   f"{fill['latency_slippage_pct']:.2f}% = {fill['total_slippage_pct']:.2f}% "
-                                   f"(max {fill['max_slippage_pct']}%) · candidate kept", st, now=now)
-                self.audit.execution("skip", st, now, ex.reason, reason="paper_fill_failed")
+                if it.get("next", 0) > now:
+                    continue                                   # quote retry scheduled later
+                self.intents.pop(mint, None)
+                st = states.get(mint)
+                rec = self.decisions.get(mint, {})
+                sol = self._sol()
+                if st is None or not is_trade_candidate(st, rec) or not sol or mint in self.book.positions:
+                    self.log("BLOCK", "BUY cancelled at execution: no longer a valid Trade Candidate", st, now=now)
+                    self.audit.execution("skip", st, now, reason="no_longer_candidate")
+                    continue
+                usd = it["usd"]
+                t_req = time.time()
+                m_at_quote = self._mobs(st, t_req)
+                qr = await self._buy_quote(mint, int(usd / sol * 1e9))
+                t_resp = time.time()
+                self.quote_stats[qr.status] = self.quote_stats.get(qr.status, 0) + 1
+                if not qr.ok:
+                    first = it.setdefault("first", it["ts"])
+                    if qr.transient and now - first < QUOTE_RETRY_WINDOW_S:
+                        it["retries"] = it.get("retries", 0) + 1
+                        wait = min(20.0, 2.5 * 2 ** (it["retries"] - 1))
+                        it["next"] = now + wait
+                        self.intents[mint] = it
+                        rec["state"] = "QUOTE_RETRY"
+                        self._rec("quote", st, rec, now, qr.status, qr.label() + " (retrying)", None, False,
+                                  int(self.cfg.max_slippage_pct * 100))
+                        self.log("INFO", f"BUY → QUOTE FAILED ({qr.label()}) → RETRY in {wait:.0f}s "
+                                         f"(attempt {it['retries'] + 1})", st, now=now)
+                        self.audit.execution("retry", st, now, qr.label())
+                        continue
+                    if qr.status == NO_ROUTE:
+                        self.quote_block[mint] = now + NO_ROUTE_BLOCK_S
+                    if self.cfg.experimental and self.cfg.paper_fill_without_quote:
+                        self._simulated_fill(st, rec, it, usd, sol, qr, now)
+                        continue
+                    rec["state"] = "QUOTE_FAILED"
+                    self._rec("quote", st, rec, now, qr.status, qr.label(), None, False, int(self.cfg.max_slippage_pct * 100))
+                    self.log("FAILED", f"BUY → QUOTE FAILED ({qr.label()}) → SKIP · BUY SKIPPED — JUPITER", st, now=now)
+                    self.audit.execution("skip", st, now, qr.label(), reason="jupiter:" + qr.status)
+                    continue
+                q = qr.quote
+                imp = price_impact(q)
+                from trading.jupiter import route_label
+                self.log("INFO", f"BUY → QUOTE → MATCH · {route_label(q)} · impact "
+                                 f"{100 * imp:.2f}%" if imp is not None else f"BUY → QUOTE → MATCH · {route_label(q)}",
+                         st, now=now)
+                self.audit.execution("quote_ok", st, now, route_label(q))
+                from trading.price_provenance import buy_quote_obs, pct
+                qobs = buy_quote_obs(q, usd, st.info.decimals or 6, mint, t_req, t_resp).as_dict()
+                self.quote_obs_log.append({"mint": mint, "symbol": st.info.symbol, "ts": t_resp, "usd": usd,
+                                           "decimal_source": "pump.fun/rpc" if st.info.total_supply else "default 6",
+                                           "decision_market": it.get("decision_market"), "market": m_at_quote, "quote": qobs,
+                                           "decision_to_quote_ms": round(1000 * (t_req - it["ts"])),
+                                           "quote_vs_market_pct": pct(qobs["price"], m_at_quote.get("price")),
+                                           "lifecycle": it.get("lifecycle"), "liq": st.market.liquidity_usd if st.market else None,
+                                           "impact_pct": None if imp is None else round(100 * imp, 3)})
+                del self.quote_obs_log[:-500]
+                self.market_trail[mint] = deque([m_at_quote], maxlen=40)
+                self.quote_obs_log[-1]["trail"] = self.market_trail[mint]      # later prints validate the discrepancy
+                risk_at_quote = st.risk.score if st.risk else None
+                drift = await self._latency_probe(st, mint, int(usd / sol * 1e9), q)
+                risk_at_entry = st.risk.score if st.risk else None
+                risk_ctx = {"risk_at_candidate": it.get("risk_at_candidate"), "risk_at_quote": risk_at_quote,
+                            "risk_at_entry": risk_at_entry, "entry_risk_buffer": self.cfg.entry_max_risk}
+                if self.cfg.experimental and (risk_at_entry is None or risk_at_entry > self.cfg.entry_max_risk):
+                    rec["state"] = "RISK_BUFFER"
+                    self.buffer_blocks.append({"ts": now, "mint": mint, "symbol": st.info.symbol, "stage": "entry", **risk_ctx})
+                    del self.buffer_blocks[:-300]
+                    self.log("BLOCK", f"BUY → QUOTE → MATCH → ENTRY RISK BUFFER: Risk {risk_at_entry} > "
+                                      f"{self.cfg.entry_max_risk} (hard limit 60) → WAIT · candidate kept", st, now=now)
+                    self.audit.execution("skip", st, now, f"risk {risk_at_entry}", reason="entry_risk_buffer")
+                    self._rec("fill", st, now, {"status": "BLOCKED", "fail_reason": "entry_blocked_by_risk_buffer",
+                                                "entry_blocked_by_risk_buffer": 1, "candidate_status": "risk_buffer",
+                                                **risk_ctx})
+                    continue
+                feeds_ok, why = self._feeds_ok()
+                last = self.book.last_exit.get(mint)
+                rd = self.risk.check_entry(mint=mint, usd=usd, equity=self.book.equity(), peak=self.book.peak,
+                                           day_start=self.book.day_start, open_positions=len(self.book.positions),
+                                           holding=False, in_cooldown=bool(last and now - last < self.cfg.cooldown_min * 60),
+                                           exposure=self.book.exposure(), est_impact=imp, feeds_ok=feeds_ok, feeds_reason=why)
+                if not rd.allowed:
+                    self.log("BLOCK", "risk at execution: " + "; ".join(rd.reasons) + " → SKIP", st, now=now)
+                    self.audit.execution("skip", st, now, "; ".join(rd.reasons), reason="risk_at_execution")
+                    self._rec("quote", st, rec, now, "OK", "risk at execution: " + "; ".join(rd.reasons), q, False,
+                              int(self.cfg.max_slippage_pct * 100))
+                    continue
+                ex = self.exec.buy_from_quote(st, usd, q, sol, now)
+                self._rec("quote", st, rec, now, "OK", "filled" if ex.status == "FILLED" else f"paper fill failed: {ex.reason}",
+                          q, ex.status == "FILLED", int(self.cfg.max_slippage_pct * 100))
+                try:
+                    out_tokens = int(q["outAmount"]) / 10 ** (st.info.decimals or 6)
+                except (KeyError, TypeError, ValueError):
+                    out_tokens = 0.0
+                quote_price = usd / out_tokens if out_tokens else None
+                fill = {"jupiter_impact_pct": round(ex.price_impact_pct, 3), "latency_slippage_pct": round(ex.slippage_pct, 3),
+                        "total_slippage_pct": round(ex.price_impact_pct + ex.slippage_pct, 3),
+                        "max_slippage_pct": self.cfg.max_slippage_pct, "status": ex.status,
+                        "fail_reason": "" if ex.status == "FILLED" else ex.reason,
+                        "quote_ts": now, "execution_ts": now + ex.latency_ms / 1000, "quote_price": quote_price,
+                        "simulated_execution_price": ex.fill_price if ex.fill_price else
+                        (quote_price * (1 + ex.slippage_pct / 100) if quote_price else None),
+                        "jupiter_impact_bps": round(100 * ex.price_impact_pct), "latency_slippage_bps": round(100 * ex.slippage_pct),
+                        "total_slippage_bps": round(100 * (ex.price_impact_pct + ex.slippage_pct)),
+                        "max_slippage_bps": round(100 * self.cfg.max_slippage_pct), "fill_result": ex.status,
+                        "latency_model": self.exec.last_model_used, "requote_drift_bps": drift,
+                        "ref_price": ex.ref_price, "fill_price": ex.fill_price,
+                        "fill_vs_ref_pct": round(100 * (ex.fill_price / ex.ref_price - 1), 3)
+                        if ex.fill_price and ex.ref_price else None,
+                        "requote_ts": (getattr(self, "_last_probe", None) or {}).get("requote_ts") if drift is not None else None,
+                        "latency_actual_s": (getattr(self, "_last_probe", None) or {}).get("latency_s") if drift is not None else None,
+                        "route": ex.route, "liquidity_usd": st.market.liquidity_usd if st.market else None,
+                        "lifecycle": it.get("lifecycle"), "setup_type": it.get("setup_type"), "setup_score": it.get("setup_score"),
+                        "position_size_usd": usd,
+                        "candidate_status": "bought" if ex.status == "FILLED" else
+                        ("slippage_blocked" if "slippage" in (ex.reason or "") else "fill_failed"), **risk_ctx}
+                self.fill_log.append({"ts": now, "mint": mint, "symbol": st.info.symbol, **fill})
+                del self.fill_log[:-300]
+                self.audit.execution("fill_ok" if ex.status == "FILLED" else "fill_fail", st, now,
+                                     f"impact {fill['jupiter_impact_pct']}% + latency {fill['latency_slippage_pct']}% = "
+                                     f"{fill['total_slippage_pct']}% (max {fill['max_slippage_pct']}%)", reason=fill["fail_reason"])
+                self._rec("fill", st, now, fill)
+                if ex.status == "FILLED":
+                    self.book.open(ex, self.cfg, now, it.get("opportunity"), it.get("why"), st.market.liquidity_usd,
+                                   st.market.vol_5m, setup=it.get("setup", ""))
+                    self.log("BUY", f"${usd:,.2f} @ ${ex.fill_price:.8g} · impact {ex.price_impact_pct:.2f}% · "
+                                    f"slip {ex.slippage_pct:.2f}% · {ex.route} · WHY: {'; '.join((it.get('why') or [])[:3])}",
+                             st, usd=usd, price=ex.fill_price, now=now)
+                    self.audit.execution("buy", st, now, f"${usd:,.2f} @ {ex.fill_price:.8g} · {ex.route}")
+                    self._forensic_open(st, now, risk_ctx)
+                    self._tag_position(mint, it)
+                    self._provenance_open(st, it, qobs, m_at_quote, ex, fill, now)
+                else:
+                    self.book.record(ex)
+                    if ex.status == "FAILED":
+                        self.last_buy_attempt[mint] = now           # cooldown: FAILED_BUY_COOLDOWN_S
+                    self.log("FAILED", f"BUY → QUOTE → MATCH → PAPER FILL FAILED: {ex.reason} · Jupiter impact "
+                                       f"{fill['jupiter_impact_pct']:.2f}% + simulated latency slippage "
+                                       f"{fill['latency_slippage_pct']:.2f}% = {fill['total_slippage_pct']:.2f}% "
+                                       f"(max {fill['max_slippage_pct']}%) · candidate kept", st, now=now)
+                    self.audit.execution("skip", st, now, ex.reason, reason="paper_fill_failed")
+            except Exception as e:                     # logged; the other intents of this round still run
+                print(f"[buy] {mint[:8]} round error: {type(e).__name__}: {e}", flush=True)
+                self.log("INFO", f"BUY round error on {mint[:8]}: {type(e).__name__}: {e}")
         self.persist()
 
     def begin_sample(self, now: float | None = None) -> dict:
@@ -1744,6 +1757,7 @@ class PaperBot:
             if self.intents:
                 await self.execute_intents()
         except Exception as e:                           # never kill the loop
+            print(f"[exec] execution round error: {type(e).__name__}: {e}", flush=True)
             self.log("INFO", f"execution round error: {type(e).__name__}: {e}")
 
     def pipeline(self, now: float | None = None) -> dict:

@@ -231,3 +231,42 @@ def test_server_wires_the_budget():
 
 def test_a_single_sell_quote_call_is_short():
     assert B.SELL_QUOTE_BUDGET_S <= 5.0 and 1 <= B.SELL_QUOTE_ATTEMPTS <= 2      # the bot-level retry does the rest
+
+
+# ---------------------------------------------------------------- B11: one broken quote / intent never breaks the round
+class Boom(PerMint):
+    async def quote_result(self, input_mint, output_mint, amount_raw, slippage_bps, **kw):
+        if output_mint == J.WSOL and input_mint == MINT:
+            raise RuntimeError("client bug")
+        return await super().quote_result(input_mint, output_mint, amount_raw, slippage_bps, **kw)
+
+
+def test_a_raising_sell_quote_is_logged_and_the_other_sell_fills(capsys):
+    j = Boom({MB: "ok"})
+    b, sa, sb = two_open(j)
+    for s, m in ((sa, MINT), (sb, MB)):
+        _signal(b, s, b.book.positions[m], 0.8)
+    asyncio.run(b.execute_sells())
+    assert MB not in b.book.positions and MINT in b.book.positions             # B sold, A kept for a retry
+    assert b.sell_intents[MINT]["retries"] == 1 and "[sell] quote error" in capsys.readouterr().out
+
+
+def test_a_raising_buy_intent_does_not_stop_the_others(capsys):
+    sa, sb = good(MINT), good(MB)
+    for s in (sa, sb):
+        s.market.price_usd = 0.0002
+    b = bot([sa, sb], FakeJupiter())
+    for s in (sa, sb):
+        s.stamps["market"].updated_at = s.market.updated_at = time.time() - 15
+    b.tick()
+    assert len(b.intents) == 2
+    real = b.exec.buy_from_quote
+
+    def flaky(st, *a, **kw):
+        if st.mint == MINT:
+            raise ValueError("bad quote shape")
+        return real(st, *a, **kw)
+    b.exec.buy_from_quote = flaky
+    asyncio.run(b.execute_intents())
+    assert MB in b.book.positions and MINT not in b.book.positions
+    assert "[buy] GoodMint round error: ValueError" in capsys.readouterr().out
