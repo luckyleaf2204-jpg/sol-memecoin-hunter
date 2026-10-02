@@ -63,6 +63,7 @@ def journal_row(p) -> dict:
     path = p.path_log()
     return {"trade_id": f"{p.id}:{p.mint}", "mint": p.mint, "symbol": p.symbol, "engine": p.entry_engine or "old",
             "sample_id": p.sample_id, "epoch": p.sample_epoch, "setup": p.setup, "lifecycle": p.entry_lifecycle, "setup_type": p.entry_setup,
+            "location": p.entry_location, "extension_5m_pct": p.entry_extension_5m,
             "entry_ts": p.opened_at, "exit_ts": p.closed_at,
             "holding_s": round(p.closed_at - p.opened_at, 1) if p.closed_at else None,
             "entry_price": p.entry_price, "entry_mid": p.entry_mid, "exit_reason": p.exit_reason,

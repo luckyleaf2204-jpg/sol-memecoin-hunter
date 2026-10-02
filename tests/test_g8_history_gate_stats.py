@@ -95,7 +95,7 @@ def test_gate_records_and_book_persists_and_report_shows_it(tmp_path):
     r = b.sample_report(now=1e9)
     assert r["gate_block_rates"]["by_reason"]["EXTENDED"]["rate"] == 1.0
     from trading.sample_report import summary_line
-    assert summary_line(r).startswith("gate blocked 1/1 tokens")
+    assert summary_line(r).endswith("gate blocked 1/1 tokens")
     b.book.save(tmp_path / "pb.json")
     assert PaperBook.load(tmp_path / "pb.json", 1000.0).gate_seen == b.book.gate_seen
     assert json.loads((tmp_path / "pb.json").read_text())["gate_seen"][st.mint]["passed"] is False

@@ -392,6 +392,22 @@ def create_app(engine: ScannerEngine | None = None, start_scanner: bool = True,
     async def snapshot_status():
         """Durability of the paper sample (access code required): store, target (no token), last snapshot with
         sizes, last error, last restore."""
+        return _snapshot_view()
+
+    @app.get("/api/review_bundle")
+    async def review_bundle():
+        """Part 3.4: sample report + last 50 trades + gate statistics + durability, for tools/export_review_bundle.py
+        (access code required; no secret in it)."""
+        from trading.review_bundle import build
+        b = state["bot"]
+        if b is None:
+            return JSONResponse({"error": "bot_not_started"}, status_code=503)
+        rep = b.sample_report()
+        from trading.sample_report import summary_line
+        rep["summary_line"] = summary_line(rep)
+        return build(b.book.journal, rep, _snapshot_view())
+
+    def _snapshot_view() -> dict:
         sn = state["snapshot"]
         rs = sn.get("restore") or {}
         return {"halted": state.get("halted"), "role": state.get("role") or "ACTIVE",

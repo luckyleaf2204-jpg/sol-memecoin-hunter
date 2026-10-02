@@ -69,11 +69,11 @@ def _summary(outs: list[dict]) -> dict:
             "tp_share_reference": round(tp / (tp + sl), 3) if tp + sl else None}
 
 
-def events(db: sqlite3.Connection) -> dict[str, list[dict]]:
+def events(db: sqlite3.Connection, since: float | None = None) -> dict[str, list[dict]]:
     out = {"blocked": [], "entered": []}
     q = ("SELECT ca, MIN(ts), kind, reasons, extension_5m_pct, entry_location, age_s, liquidity_usd, price "
-         "FROM gate_events GROUP BY ca, kind")
-    for ca, ts, kind, reasons, ext, loc, age, liq, price in db.execute(q):
+         "FROM gate_events WHERE ts >= ? GROUP BY ca, kind")
+    for ca, ts, kind, reasons, ext, loc, age, liq, price in db.execute(q, (since or 0.0,)):
         if kind in out:
             out[kind].append({"ca": ca, "ts": ts, "reasons": reasons, "extension": ext, "location": loc, "age_s": age,
                               "liq": liq, "price": price})
@@ -95,10 +95,11 @@ def baseline_matches(db: sqlite3.Connection, ev: dict, exclude: set[str], rng: r
     return rng.sample(pool, min(BASELINE_PER_EVENT, len(pool)))
 
 
-def evaluate(db_path: str, seed: int = 7) -> dict:
+def evaluate(db_path: str, seed: int = 7, since: float | None = None) -> dict:
+    """since: only gate events at or after it (the sample epoch start)."""
     db = sqlite3.connect(db_path)
     try:
-        ev = events(db)
+        ev = events(db, since)
         rng = random.Random(seed)
         exclude = {e["ca"] for g in ev.values() for e in g}
         out = {"n_blocked": len(ev["blocked"]), "n_entered": len(ev["entered"])}

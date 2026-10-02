@@ -118,6 +118,8 @@ class Position:
     entry_lifecycle: str | None = None     # NEW | PRE_MIGRATION | POST_MIGRATION (lifecycle engine)
     entry_setup: str | None = None         # NEW | PRE_MIGRATION | SECOND_WAVE
     entry_setup_score: float | None = None
+    entry_location: str | None = None      # 3.3: where in the move it was bought (trading.entry_location)
+    entry_extension_5m: float | None = None
     # cost-free price move (step 1: P&L at fixed round-trip costs): mid prices backed out of every fill
     entry_mid: float | None = None
     high_ts: float | None = None           # last time the observed price made a new high (step 3 time stop)

@@ -32,6 +32,27 @@ def bootstrap_ci(values: list[float], iters: int = BOOT_ITERS, seed: int = 7) ->
     return round(means[int(0.025 * iters)], 3), round(means[int(0.975 * iters) - 1], 3)
 
 
+def cluster_bootstrap_ci(rows: list[dict], nets: list[float], key: str = "mint", iters: int = BOOT_ITERS,
+                         seed: int = 7) -> tuple[float, float] | None:
+    """95 % CI of the mean net % when trades of the same token (episode / re-entries) are correlated: whole tokens
+    are resampled with replacement, the mean is taken over all their trades. Wider than the plain CI when trades
+    cluster; None below 2 tokens."""
+    groups: dict = {}
+    for i, (r, x) in enumerate(zip(rows, nets)):
+        groups.setdefault(r.get(key) or r.get("trade_id") or f"#{i}", []).append(x)
+    g = list(groups.values())
+    if len(g) < 2:
+        return None
+    rng = random.Random(seed)
+    means = []
+    for _ in range(iters):
+        pick = rng.choices(g, k=len(g))
+        n = sum(len(c) for c in pick)
+        means.append(sum(sum(c) for c in pick) / n)
+    means.sort()
+    return round(means[int(0.025 * iters)], 3), round(means[int(0.975 * iters) - 1], 3)
+
+
 def max_drawdown(rows: list[dict], nets: list[float], starting: float) -> dict:
     eq = peak = dd = 0.0
     for r, n in sorted(zip(rows, nets), key=lambda x: x[0].get("exit_ts") or 0):
@@ -45,6 +66,8 @@ def metrics(rows: list[dict], nets: list[float], starting: float) -> dict:
     n = len(nets)
     wins, losses = [x for x in nets if x > 0], [x for x in nets if x <= 0]
     return {"n": n, "expectancy_pct": round(sum(nets) / n, 3) if n else None, "ci95_pct": bootstrap_ci(nets),
+            "ci95_cluster_pct": cluster_bootstrap_ci(rows, nets),
+            "n_tokens": len({r.get("mint") or r.get("trade_id") or f"#{i}" for i, r in enumerate(rows)}),
             "win_rate_pct": round(100 * len(wins) / n, 1) if n else None,
             "avg_win_pct": round(sum(wins) / len(wins), 3) if wins else None,
             "avg_loss_pct": round(sum(losses) / len(losses), 3) if losses else None,
@@ -89,7 +112,35 @@ def warnings(n: int, by_cost: dict) -> tuple[str, list[str]]:
         ci = m.get("ci95_pct")
         if ci and ci[0] <= 0 <= ci[1]:
             w.append(f"at {k} cost the 95 % CI [{ci[0]}, {ci[1]}] includes 0: no evidence of a positive or negative edge")
+        cc = m.get("ci95_cluster_pct")
+        if cc and cc[0] <= 0 <= cc[1] and not (ci and ci[0] <= 0 <= ci[1]):
+            w.append(f"at {k} cost the per-token (cluster) 95 % CI [{cc[0]}, {cc[1]}] includes 0")
     return status, w
+
+
+NOT_ENOUGH = "Chưa đủ dữ liệu để kết luận có lãi"
+
+
+def conclusion(n: int, by_cost: dict) -> dict:
+    """3.2: a verdict only with n >= MIN_AB_N AND every CI (plain and per-token, at every cost) on one side of 0."""
+    why = []
+    if n < MIN_AB_N:
+        why.append(f"n = {n} < {MIN_AB_N}")
+    cis = [(k, name, m.get(name)) for k, m in by_cost.items() for name in ("ci95_pct", "ci95_cluster_pct")]
+    for k, name, ci in cis:
+        if ci is None:
+            why.append(f"no {name} at {k}")
+        elif ci[0] <= 0 <= ci[1]:
+            why.append(f"{name} at {k} includes 0 [{ci[0]}, {ci[1]}]")
+    if why:
+        return {"text": NOT_ENOUGH, "profitable": None, "why": why}
+    if all(ci[0] > 0 for _, _, ci in cis):
+        return {"text": f"Có lãi sau chi phí ở mọi mức ({', '.join(by_cost)}), n = {n}, CI 95 % > 0 (cả theo token)",
+                "profitable": True, "why": []}
+    if all(ci[1] < 0 for _, _, ci in cis):
+        return {"text": f"THUA LỖ sau chi phí ở mọi mức ({', '.join(by_cost)}), n = {n}, CI 95 % < 0",
+                "profitable": False, "why": []}
+    return {"text": NOT_ENOUGH, "profitable": None, "why": ["the sign of the CI changes with the cost level"]}
 
 
 FIXED_FEE_TARGET_PCT = 2.0
@@ -141,6 +192,7 @@ def report(journal: list[dict], epoch, levels=(5.0, 7.0, 10.0), starting: float 
     status, warns = warnings(len(counted), by_cost)
     return {
         "epoch": epoch.as_dict() if epoch is not None else None,
+        "conclusion": conclusion(len(counted), by_cost),
         "sample_status": status, "warnings": warns,
         "n": len(counted), "excluded_legacy_or_noquote": legacy,
         "gaps": {"count": len(epoch_gaps), "minutes": round(sum(g["minutes"] for g in epoch_gaps), 1),
@@ -171,7 +223,8 @@ def summary_line(r: dict) -> str:
     ep = r.get("epoch") or {}
     g = r.get("gaps") or {}
     gb = r.get("gate_block_rates")
-    gate = f"gate blocked {gb['blocked_any']}/{gb['tokens_at_gate']} tokens · " if gb else ""
-    return (gate + f"SAMPLE {r.get('sample_status')} n={r.get('n')} (thresholds 30 preliminary / 200 A/B) · "
+    gate = f" · gate blocked {gb['blocked_any']}/{gb['tokens_at_gate']} tokens" if gb else ""
+    concl = f"{(r.get('conclusion') or {}).get('text')} · " if r.get("conclusion") else ""
+    return (f"SAMPLE {r.get('sample_status')} n={r.get('n')} · " + concl + "(thresholds 30 preliminary / 200 A/B) · "
             f"net expectancy {' · '.join(parts)} · gaps {g.get('count', 0)} ({g.get('excluded_trades', 0)} trades "
-            f"excluded) · epoch since {ep.get('started_at_utc')} params {ep.get('fingerprint')}")
+            f"excluded) · epoch since {ep.get('started_at_utc')} params {ep.get('fingerprint')}" + gate)

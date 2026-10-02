@@ -37,6 +37,7 @@ TICK_S = 5.0
 LAT_P90_MIN, LAT_P75_MIN = 50, 100        # AUTO latency model: samples needed for EMPIRICAL P90 / P75
 FAST_SCORE_MARGIN, FAST_CONF_MARGIN = 0.05, 0.10   # fast getAsset lane: "genuinely near a NEW BUY"
 QUOTE_RETRY_WINDOW_S = 60.0     # transient Jupiter failures (429 / timeout / 5xx) are retried this long
+GATE_EVAL_EVERY_S = 600.0       # blocked vs entered vs baseline (research.db) refreshed every 10 min
 SELL_QUOTE_ATTEMPTS, SELL_QUOTE_BUDGET_S = 2, 4.0   # one SELL quote call is short: the bot-level retry does the rest
 NO_ROUTE_BLOCK_S = 120.0        # after a confirmed "no route": no re-quote of that CA for this long
 MAX_ENTRIES_PER_TICK = 2
@@ -69,6 +70,8 @@ class PaperBot:
         self.intents: dict[str, dict] = {}     # mint -> pending BUY intent (one per CA: duplicate-order guard)
         self.sell_intents: dict[str, dict] = {}  # mint -> SELL waiting for its Jupiter quote (non-protective exits)
         self.quote_budget = None                 # trading.quote_budget.QuoteBudget (server); None = unlimited
+        self.gate_eval_cache: dict | None = None  # blocked vs entered vs matched baseline (research.gate_eval)
+        self._last_gate_eval = 0.0
         self._exec_task: asyncio.Task | None = None   # sells + buys run beside the tick, never block it
         self._selling = False
         self.pending: dict[str, dict] = {}     # CONFIRM mode: BUYs waiting for the owner's approval (id -> order)
@@ -658,6 +661,8 @@ class PaperBot:
             p.sample_id = self.cfg.sample_id()
             p.sample_epoch = self.sample_epoch.id if self.sample_epoch.started_at else ""
             p.entry_lifecycle, p.entry_setup, p.entry_setup_score = it.get("lifecycle"), it.get("setup_type"), it.get("setup_score")
+            d = self.decisions.get(mint) or {}
+            p.entry_location, p.entry_extension_5m = d.get("entry_location"), d.get("entry_extension")
 
     def _history(self, mint: str):
         store = getattr(self.engine, "history", None)
@@ -1571,6 +1576,8 @@ class PaperBot:
         r["gate_block_rates"] = block_rates(self.book.gate_seen, self.sample_epoch.started_at)
         if self.quote_budget is not None:
             r["quote_budget"] = self.quote_budget.as_dict()
+        r["gate_forward_returns"] = self.gate_eval_cache or {
+            "status": "not computed yet (every GATE_EVAL_EVERY_S from research.db, RESEARCH_LOG on)"}
         r["costs"]["failed_attempts_all_time"] = {"count": self.book.failed, "fees_usd": round(self.book.failed_fees, 4),
                                                   "fee_per_tx_usd_now": round(self.exec.network_fee(self._sol()), 4)}
         from core.snapshot import NOT_DURABLE
@@ -1614,6 +1621,12 @@ class PaperBot:
                 self._expire_pending(time.time())
                 if (self.sell_intents or self.intents) and (self._exec_task is None or self._exec_task.done()):
                     self._exec_task = asyncio.create_task(self._execution_round())   # never blocks the next tick
+                if self.recorder is not None and time.time() - self._last_gate_eval >= GATE_EVAL_EVERY_S:
+                    self._last_gate_eval = time.time()
+                    try:
+                        await self.refresh_gate_eval()
+                    except Exception as e:                # research never breaks trading
+                        self.log("INFO", f"gate evaluation error: {type(e).__name__}: {e}")
                 if self.recorder is not None and time.time() - self._last_followup >= 30:
                     self._last_followup = time.time()
                     await self.recorder.run_followups()
@@ -1647,6 +1660,15 @@ class PaperBot:
                 await asyncio.wait_for(self._exec_task, 10)
             except Exception:
                 pass
+
+    async def refresh_gate_eval(self) -> dict:
+        """Forward returns of gate-BLOCKED vs ENTERED tokens vs an age / liquidity matched baseline, for this sample
+        epoch (research.db, in a thread: it never blocks the tick)."""
+        from research.gate_eval import evaluate
+        res = await asyncio.to_thread(evaluate, str(self.recorder.path), 7, self.sample_epoch.started_at)
+        res["computed_at"] = time.time()
+        self.gate_eval_cache = res
+        return res
 
     async def _execution_round(self) -> None:
         """SELLs first, then BUYs. Runs as its own task so a slow / retrying quote never delays the tick (stop
