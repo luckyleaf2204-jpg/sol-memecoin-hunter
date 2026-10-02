@@ -14,6 +14,8 @@ import random
 STOP_REASONS = ("stop_loss",)
 TP_REASONS = ("take_profit_1", "take_profit_2", "runner_trailing_stop")
 SL_GAP_PCT = -20.0
+MIN_PRELIMINARY_N = 30          # per sample: preliminary check only (docs/sample_plan.md)
+MIN_AB_N = 200                  # per arm: needed to compare exit variants
 BOOT_ITERS = 2000
 
 
@@ -69,16 +71,36 @@ def haircut_split(counted: list[dict], levels, starting: float) -> dict:
             "note": "haircut fills are an assumption (no executable quote existed); judge the strategy on both"}
 
 
+def warnings(n: int, by_cost: dict) -> tuple[str, list[str]]:
+    w = []
+    if n < MIN_PRELIMINARY_N:
+        status = "INSUFFICIENT"
+        w.append(f"n = {n} < {MIN_PRELIMINARY_N}: not even a preliminary check — no conclusion")
+    elif n < MIN_AB_N:
+        status = "PRELIMINARY"
+        w.append(f"n = {n}: preliminary only; comparing exit variants (A/B) needs >= {MIN_AB_N} trades per arm")
+    else:
+        status = "OK"
+    for k, m in by_cost.items():
+        ci = m.get("ci95_pct")
+        if ci and ci[0] <= 0 <= ci[1]:
+            w.append(f"at {k} cost the 95 % CI [{ci[0]}, {ci[1]}] includes 0: no evidence of a positive or negative edge")
+    return status, w
+
+
 def report(journal: list[dict], epoch, levels=(5.0, 7.0, 10.0), starting: float = 1000.0) -> dict:
     counted = [r for r in journal if epoch is not None and epoch.counts(r) and r.get("gross_move_pct") is not None]
     legacy = sum(1 for r in journal if epoch is None or not epoch.counts(r))
     tp = sum(1 for r in counted if r.get("exit_reason") in TP_REASONS)
     sl = sum(1 for r in counted if r.get("exit_reason") in STOP_REASONS)
+    by_cost = cost_table(counted, levels, starting)
+    status, warns = warnings(len(counted), by_cost)
     return {
         "epoch": epoch.as_dict() if epoch is not None else None,
+        "sample_status": status, "warnings": warns,
         "n": len(counted), "excluded_legacy_or_noquote": legacy,
         "primary_metric": "net expectancy per trade after a fixed round-trip cost (95 % bootstrap CI)",
-        "by_cost": cost_table(counted, levels, starting),
+        "by_cost": by_cost,
         "modelled_cost": metrics(counted, [r["net_pnl_pct"] for r in counted if r.get("net_pnl_pct") is not None],
                                  starting) if all(r.get("net_pnl_pct") is not None for r in counted) else None,
         "sl_gap_scenario": {"assumption": f"every stop-loss exit fills at {SL_GAP_PCT:.0f}% (or worse)",

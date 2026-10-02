@@ -19,9 +19,10 @@ def main():
     ap.add_argument("--split", type=float, default=0.6)
     ap.add_argument("--bought-only", action="store_true")
     ap.add_argument("--seed", type=int, default=7)
+    ap.add_argument("--holdout-log", default="", help="JSON log: one parameter hash per out-of-sample holdout")
     ap.add_argument("--out", default="")
     a = ap.parse_args()
-    res = replay(a.db, a.horizon, a.split, a.bought_only, a.seed)
+    res = replay(a.db, a.horizon, a.split, a.bought_only, a.seed, a.holdout_log or None)
     text = json.dumps(res, indent=1)
     print(text)
     if a.out:

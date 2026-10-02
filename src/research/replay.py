@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import random
 import sqlite3
+from pathlib import Path
 
 
 def _rows(db: sqlite3.Connection, anchor: str, horizon: str) -> list[dict]:
@@ -25,22 +26,27 @@ def _rows(db: sqlite3.Connection, anchor: str, horizon: str) -> list[dict]:
 
 def load(db: sqlite3.Connection, horizon: str = "1h") -> tuple[list[dict], list[dict]]:
     cand = _rows(db, "candidate", horizon)
-    info = {}
+    eps: dict[str, list] = {}
     try:
         cols = {r[1] for r in db.execute("PRAGMA table_info(candidates)")}
-        eng = "MAX(engine)" if "engine" in cols else "NULL"          # older databases: no engine column
-        for ca, bought, engine in db.execute(f"SELECT ca, MAX(bought), {eng} FROM candidates GROUP BY ca"):
-            info[ca] = (bool(bought), engine)
+        eng = "engine" if "engine" in cols else "NULL"               # older databases: no engine column
+        for ca, ts, bought, engine in db.execute(f"SELECT ca, ts, bought, {eng} FROM candidates"):
+            eps.setdefault(ca, []).append((ts or 0.0, bool(bought), engine))
     except sqlite3.OperationalError:
         pass
     for r in cand:
-        r["bought"], r["engine"] = info.get(r["ca"], (False, None))
+        # NO LOOK-AHEAD: "bought" only from the episode of this decision (its candidate row, ts within
+        # EPISODE_S of the anchor) — never from a later episode of the same token
+        same = [e for e in eps.get(r["ca"], []) if r["ts"] - 1 <= e[0] <= r["ts"] + EPISODE_S]
+        r["bought"] = any(b for _, b, _ in same)
+        r["engine"] = next((e for _, _, e in same if e), None)
     cas = {r["ca"] for r in cand}
     base = [r for r in _rows(db, "discovery", horizon) if r["ca"] not in cas]
     return cand, base
 
 
 TP_LEVEL, SL_LEVEL = 30.0, 15.0
+EPISODE_S = 300.0                    # research.dataset.CANDIDATE_GAP_S: one candidate episode
 BREAK_EVEN_TP_SHARE = SL_LEVEL / (TP_LEVEL + SL_LEVEL)
 
 
@@ -97,18 +103,59 @@ def compare(cand: list[dict], base: list[dict], seed: int = 7) -> dict:
             "baseline_window": "same time window" if _window(base, cand) else "all (no tokens in the window)"}
 
 
-def replay(db_path: str, horizon: str = "1h", split: float = 0.6, bought_only: bool = False, seed: int = 7) -> dict:
+def frozen_params(horizon: str, split: float, bought_only: bool, seed: int) -> dict:
+    """Everything that defines the test. Chosen on the in-sample part BEFORE the out-of-sample part is looked at."""
+    import hashlib
+    import json
+    p = {"horizon": horizon, "split": split, "bought_only": bought_only, "seed": seed, "tp_pct": TP_LEVEL,
+         "sl_pct": SL_LEVEL, "baseline": "same-window random non-candidates, bootstrap"}
+    p["hash"] = hashlib.sha256(json.dumps(p, sort_keys=True).encode()).hexdigest()[:10]
+    return p
+
+
+def holdout_check(log_path: str | None, oos: list[dict], params: dict) -> str | None:
+    """The 40 % holdout may be evaluated with ONE parameter set. A second, different set on the same holdout is
+    flagged: it is no longer an out-of-sample test."""
+    if not log_path or not oos:
+        return None
+    import json
+    key = f"{min(r['ts'] for r in oos):.0f}-{max(r['ts'] for r in oos):.0f}-{len(oos)}"
+    try:
+        log = json.loads(Path(log_path).read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        log = {}
+    prev = log.get(key)
+    if prev is None:
+        log[key] = params["hash"]
+        Path(log_path).write_text(json.dumps(log, indent=1), encoding="utf-8")
+        return None
+    if prev != params["hash"]:
+        return (f"HOLDOUT ALREADY USED with parameters {prev}; parameters {params['hash']} were changed after "
+                "seeing the out-of-sample part: this is NOT a clean out-of-sample result")
+    return None
+
+
+def replay(db_path: str, horizon: str = "1h", split: float = 0.6, bought_only: bool = False, seed: int = 7,
+           holdout_log: str | None = None) -> dict:
     db = sqlite3.connect(db_path)
     try:
         cand, base = load(db, horizon)
     finally:
         db.close()
-    if bought_only:
-        cand = [r for r in cand if r["bought"]]
+    # the holdout is a TIME window defined on all candidates (before any filter): filters are parameters
     cand.sort(key=lambda r: r["ts"])
     k = int(len(cand) * split)
-    ins, oos = cand[:k], cand[k:]
+    t_cut = cand[k]["ts"] if k < len(cand) else float("inf")
+    holdout_all = cand[k:]
+    if bought_only:
+        cand = [r for r in cand if r["bought"]]
+    ins, oos = [r for r in cand if r["ts"] < t_cut], [r for r in cand if r["ts"] >= t_cut]
+    params = frozen_params(horizon, split, bought_only, seed)
+    warn = holdout_check(holdout_log, holdout_all, params)
     out = {"horizon": horizon, "levels": "TP +30 % / SL -15 % (dataset)", "bought_only": bought_only,
+           "frozen_params": params, "warnings": [warn] if warn else [],
+           "protocol": "parameters fixed on the first 60 % (time order) and hashed; the last 40 % is evaluated "
+                       "once with that hash; a different hash on the same holdout is flagged",
            "break_even_tp_share": round(BREAK_EVEN_TP_SHARE, 4),
            "metric_note": "REFERENCE ONLY: TP share reflects volatility. The decision metric is net expectancy "
                           "after 5 / 7 / 10 % round-trip cost (trading/sample_report.py).",
