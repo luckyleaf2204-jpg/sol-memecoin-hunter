@@ -280,8 +280,9 @@ def snapshot(data_dir: Path, store, commit: str = "", now: float | None = None,
     When the deadline is at least PUBLISH_RESERVE_S, a SLOW file's cap is min(slow_timeout, remaining - reserve) so
     the two manifest puts still have that reserve. Shorter deadlines (unit tests) keep the previous 1s publish grace.
     The manifest is not switched when the budget runs out, so a late critical file cannot publish a mixed generation.
-    With slow_timeout_s set (hourly and shutdown), a non-critical file that errors is carried the same way, so one
-    slow research.db cannot fail the generation."""
+    With slow_timeout_s set (hourly and shutdown), an error is carried only for a SLOW file (research.db). Any other
+    file that errors fails the snapshot, so a stale truth_ledger.json or price_history.json is never published next
+    to a new book and epoch."""
     t0 = time.time()
     now = now or t0
     _log_research_db(data_dir)
@@ -348,7 +349,11 @@ def snapshot(data_dir: Path, store, commit: str = "", now: float | None = None,
             steps[name + " (timeout, carried)" if old else name + " (timeout, omitted)"] = round(time.time() - ts, 2)
             continue
         except Exception:
-            if name in CRITICAL or slow_timeout_s is None:
+            # Carry on error only for SLOW (research.db). truth_ledger.json is restored with the book and the
+            # epoch (not OPTIONAL); a stale ledger next to a new epoch is a mixed generation. price_history.json
+            # is OPTIONAL scanner state, not part of that pair — an error still fails the snapshot rather than
+            # publishing it stale. A deadline timeout above may still carry any non-critical file.
+            if name not in SLOW or slow_timeout_s is None:
                 raise
             old = (prev.get("files") or {}).get(name)      # do not fail the generation, and do not overwrite it
             if old is not None:

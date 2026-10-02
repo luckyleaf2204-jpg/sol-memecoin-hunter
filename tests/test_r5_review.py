@@ -309,6 +309,81 @@ class _Boom(S.LocalStore):
         super().put(name, data)
 
 
+def test_an_error_carries_only_research_db(tmp_path):
+    """truth_ledger.json is restored with the book and the epoch, so an upload error must fail the snapshot
+    instead of publishing a stale ledger next to a new epoch. price_history.json is optional scanner state;
+    an error fails the snapshot too. Only research.db is carried."""
+    d = tmp_path / "d"
+    _files(d, 1)
+    (d / "truth_ledger.json").write_text('{"n": 1}', encoding="utf-8")
+    (d / "price_history.json").write_text('{"n": 1}', encoding="utf-8")
+
+    class Boom(S.LocalStore):
+        def __init__(self, root):
+            super().__init__(root)
+            self.bad = ""
+
+        def put(self, name, data):
+            if self.bad and self.bad in name:
+                raise RuntimeError("upload failed")
+            super().put(name, data)
+
+    store = Boom(tmp_path / "store")
+    S.snapshot(d, store, now=1.0)
+    (d / "paper_bot.json").write_text(json.dumps({"cash": 2}), encoding="utf-8")
+    (d / "truth_ledger.json").write_text('{"n": 2}', encoding="utf-8")
+    (d / "price_history.json").write_text('{"n": 2}', encoding="utf-8")
+    store.bad = "truth_ledger"
+    with pytest.raises(RuntimeError, match="upload failed"):
+        S.snapshot(d, store, now=2.0, slow_timeout_s=60)
+    assert json.loads(store.get(S.MANIFEST))["gen"] == 1
+    store.bad = "price_history"
+    with pytest.raises(RuntimeError, match="upload failed"):
+        S.snapshot(d, store, now=3.0, slow_timeout_s=60)
+    assert json.loads(store.get(S.MANIFEST))["gen"] == 1
+    store.bad = "research.db"
+    m = S.snapshot(d, store, now=4.0, slow_timeout_s=60)
+    assert m["gen"] == 2 and m["files"]["research.db"]["carried_from"] == 1
+    assert "carried_from" not in m["files"]["truth_ledger.json"]
+    assert "carried_from" not in m["files"]["price_history.json"]
+    assert m["files"]["truth_ledger.json"]["sha256"] != json.loads(
+        store.get("manifest-gen-1.json"))["files"]["truth_ledger.json"]["sha256"]
+
+
+def test_research_db_carried_in_a_row_is_surfaced(tmp_path, monkeypatch, capsys):
+    """Three carried research.db snapshots in a row show up on /healthz and /api/snapshot and log a warning."""
+
+    class Toggle(S.LocalStore):
+        def __init__(self, root):
+            super().__init__(root)
+            self.fail = False
+
+        def put(self, name, data):
+            if self.fail and "research.db" in name:
+                raise RuntimeError("db")
+            super().put(name, data)
+
+    store = Toggle(tmp_path / "store")
+    _setup(tmp_path, monkeypatch, store)
+    _research_db(tmp_path / "d")
+    monkeypatch.setattr(S, "SNAPSHOT_EVERY_S", 0.05)
+    monkeypatch.setattr(S, "HOURLY_SLOW_TIMEOUT_S", 0.5)
+    app = _app(tmp_path, "a")
+    with TestClient(app) as c:
+        st = app.state.hunter
+        assert _wait(lambda: (st["snapshot"].get("last") or {}).get("reason") == "hourly", 3)
+        assert st["snapshot"].get("research_db_carried_in_a_row", 0) == 0
+        store.fail = True
+        assert _wait(lambda: st["snapshot"].get("research_db_carried_in_a_row", 0) >= 3, 4)
+        body = c.get("/healthz").json()
+        assert body["ok"] is True
+        assert body["snapshot"]["research_db_carried_in_a_row"] >= 3
+        view = c.get("/api/snapshot", headers={"X-Access-Code": "c0de"}).json()
+        assert view["research_db_carried_in_a_row"] >= 3
+        assert st["bot"].entry_block is None
+    assert "WARNING: research.db carried" in capsys.readouterr().out
+
+
 def test_a_failing_research_db_does_not_block_orders_a_critical_file_does(tmp_path, monkeypatch):
     store = _Boom(tmp_path / "store", "research.db")
     _setup(tmp_path, monkeypatch, store)

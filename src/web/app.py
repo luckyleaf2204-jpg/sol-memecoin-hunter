@@ -191,6 +191,15 @@ def create_app(engine: ScannerEngine | None = None, start_scanner: bool = True,
                 raise SnapshotError(f"deadline: no time left for the snapshot ({deadline_s}s)")
             man = await asyncio.to_thread(snapshot, DATA_DIR, store, git_commit(), None, slow_timeout_s, rem)
             state["snapshot"]["fails_in_a_row"] = 0
+            db_meta = (man.get("files") or {}).get("research.db") or {}
+            if db_meta.get("carried_from") is not None:
+                carried_n = int(state["snapshot"].get("research_db_carried_in_a_row") or 0) + 1
+                state["snapshot"]["research_db_carried_in_a_row"] = carried_n
+                if carried_n >= 3:
+                    print(f"[snapshot] WARNING: research.db carried {carried_n} snapshots in a row "
+                          f"(the research DB is not being refreshed)", flush=True)
+            else:
+                state["snapshot"]["research_db_carried_in_a_row"] = 0
             _update_entry_block()
             state["snapshot"].update(last_ts=man["ts"], last_error=None, last={
                 "reason": reason,
@@ -570,7 +579,8 @@ def create_app(engine: ScannerEngine | None = None, start_scanner: bool = True,
                 out["halted"] = state["halted"]
             sn = state["snapshot"]
             out["snapshot"] = {"durable": sn["durable"], "store": sn["store"], "last_utc": _utc(sn["last_ts"]),
-                               "last_restore_utc": _utc((sn.get("restore") or {}).get("at"))}
+                               "last_restore_utc": _utc((sn.get("restore") or {}).get("at")),
+                               "research_db_carried_in_a_row": sn.get("research_db_carried_in_a_row", 0)}
             if not sn["durable"]:
                 out["snapshot"]["warning"] = sn.get("warning") or NOT_DURABLE
             if bot is not None and getattr(bot, "entry_block", None):
@@ -624,6 +634,7 @@ def create_app(engine: ScannerEngine | None = None, start_scanner: bool = True,
         rs = sn.get("restore") or {}
         return {"halted": state.get("halted"), "role": state.get("role") or "ACTIVE",
                 "lease": state["lease"].as_dict() if state.get("lease") is not None else None,
+                "research_db_carried_in_a_row": sn.get("research_db_carried_in_a_row", 0),
                 "price_history_at_start": sn.get("price_history"),
                 "durable": sn["durable"], "warning": None if sn["durable"] else (sn.get("warning") or NOT_DURABLE),
                 "store": sn["store"], "target": sn["target"], "check": sn["reason"],
