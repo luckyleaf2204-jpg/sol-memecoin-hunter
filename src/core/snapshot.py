@@ -208,14 +208,40 @@ def _manifest(store) -> dict | None:
         return None
 
 
-def _put_verified(store, slot: int, name: str, raw: bytes, gen: int) -> dict:
+def _free_obj(slot: int, name: str, protected: set[str]) -> str:
+    """The object name to write: the slot's usual name, unless a newer generation still references it (a carried
+    research.db) — then an alternate name, so a live restore point is never overwritten."""
+    base = _obj(slot, name)
+    for cand in (base, base[:-3] + ".alt.gz", base[:-3] + ".alt2.gz"):
+        if cand not in protected:
+            return cand
+    raise SnapshotError(f"no free object name for {name} in slot {slot}")
+
+
+def _protected(store, slot: int) -> set[str]:
+    """Objects referenced by the live manifest and by every generation manifest of the OTHER slots."""
+    refs = set()
+    raws = [store.get(MANIFEST)] + [store.get(_gen_manifest_name(s)) for s in range(GENERATIONS) if s != slot]
+    for raw in raws:
+        if raw is None:
+            continue
+        try:
+            m = _parse(raw, "manifest")
+        except SnapshotError:
+            continue
+        refs |= {meta.get("object") for meta in m["files"].values() if meta.get("object")}
+    return refs
+
+
+def _put_verified(store, slot: int, name: str, raw: bytes, gen: int, protected: set[str] = frozenset()) -> dict:
     gz = gzip.compress(raw, 6)
     sha = hashlib.sha256(raw).hexdigest()
-    store.put(_obj(slot, name), gz)
-    back = store.get(_obj(slot, name))
+    obj = _free_obj(slot, name, protected)
+    store.put(obj, gz)
+    back = store.get(obj)
     if back is None or hashlib.sha256(gzip.decompress(back)).hexdigest() != sha:
         raise SnapshotError(f"verify failed for {name}: manifest not switched (generation {gen} discarded)")
-    return {"sha256": sha, "size": len(raw), "size_gz": len(gz), "object": _obj(slot, name)}
+    return {"sha256": sha, "size": len(raw), "size_gz": len(gz), "object": obj}
 
 
 CRITICAL = ("paper_bot.json", "sample_epoch.json", "holdout_lock.json", "trading.json")   # never carried over
@@ -260,6 +286,7 @@ def snapshot(data_dir: Path, store, commit: str = "", now: float | None = None,
     gen = max(gens) + 1
     slot = gen % GENERATIONS
     files, steps = {}, {}
+    protected = _protected(store, slot)
     end = None if deadline_s is None else time.time() + deadline_s
     for name in FILES:
         p = Path(data_dir) / name
@@ -270,7 +297,8 @@ def snapshot(data_dir: Path, store, commit: str = "", now: float | None = None,
         if name in SLOW and slow_timeout_s is not None:
             limit = slow_timeout_s if limit is None else min(limit, slow_timeout_s)
         try:
-            files[name] = _timed(lambda p=p, name=name: _put_verified(store, slot, name, _read(p), gen), limit)
+            files[name] = _timed(lambda p=p, name=name: _put_verified(store, slot, name, _read(p), gen, protected),
+                                 limit)
         except TimeoutError:
             if name in CRITICAL:
                 raise SnapshotError(f"deadline: {name} not written in {deadline_s}s — generation {gen} discarded, "

@@ -272,3 +272,85 @@ def test_shutdown_with_a_stuck_store_still_releases_and_stops(tmp_path, monkeypa
     assert stopped == [1] and "[lease] released" in out
     import json
     assert json.loads(store.get(L.LEASE))["released"] is True
+
+
+# ---------------------------------------------------------------- C8 (low): carried objects, loops, healthz, auth errors
+def test_a_slot_holding_a_carried_research_db_is_not_overwritten(tmp_path):
+    import json
+    import sqlite3
+    d, store = tmp_path / "d", SlowFile(tmp_path / "store")
+    _files(d, 1)
+    S.snapshot(d, store, now=1.0)                                      # gen 1 -> slot 1 (research.db v1 there)
+    _files(d, 2)
+    S.snapshot(d, store, now=2.0)                                      # gen 2 -> slot 2
+    _files(d, 3)
+    store.slow, store.delay = "research.db", 1.0
+    m3 = S.snapshot(d, store, now=3.0, slow_timeout_s=0.2)             # gen 3 -> slot 0, research.db carried (slot 2)
+    time.sleep(1.1)
+    store.slow, store.delay = "", 0.0
+    _files(d, 4)
+    S.snapshot(d, store, now=4.0)                                      # gen 4 -> slot 1
+    _files(d, 5)
+    m5 = S.snapshot(d, store, now=5.0)                                 # gen 5 -> slot 2: holds gen 3's carried db
+    assert m3["files"]["research.db"]["object"] == "gen-2--research.db.gz"
+    assert m5["files"]["research.db"]["object"] == "gen-2--research.db.alt.gz"   # written beside it
+    st3 = S.LocalStore(tmp_path / "store")
+    st3.put(S.MANIFEST, st3.get("manifest-gen-0.json"))               # fall back to gen 3: still restorable
+    fresh = tmp_path / "fresh"
+    r = S.restore(fresh, st3)
+    assert r["gen"] == 3
+    db = sqlite3.connect(fresh / "research.db")
+    assert db.execute("SELECT MAX(v) FROM t").fetchone()[0] == 2
+    db.close()
+    assert json.loads((fresh / "paper_bot.json").read_text()) == {"cash": 3}
+
+
+def test_not_durable_loop_survives_an_error(tmp_path, monkeypatch, capsys):
+    d = tmp_path / "d"
+    d.mkdir()
+    monkeypatch.setattr(webapp, "DATA_DIR", d)
+    for k in ("SNAPSHOT_DIR", "SNAPSHOT_URL", "RENDER_EXTERNAL_URL"):
+        monkeypatch.delenv(k, raising=False)
+    monkeypatch.setenv("RESEARCH_LOG", "0")
+    monkeypatch.setattr(S, "SNAPSHOT_EVERY_S", 0.05)
+    app = _app(tmp_path, "a")
+    with TestClient(app):
+        bot = app.state.hunter["bot"]
+        bot.sample_summary_line = lambda *a: (_ for _ in ()).throw(RuntimeError("report bug"))
+        time.sleep(0.4)
+    out = capsys.readouterr().out
+    assert out.count("[durability] hourly line error: RuntimeError") >= 2
+
+
+def test_healthz_survives_a_broken_constants_import(tmp_path, monkeypatch):
+    import sys
+    from test_v12 import opened
+    b, _, _ = opened()
+    app = webapp.create_app(engine=b.engine, start_scanner=False, access_code="c0de", bot=b)
+    monkeypatch.setitem(sys.modules, "trading.strategy_constants", None)    # import fails
+    with TestClient(app) as c:
+        r = c.get("/healthz")
+        assert r.status_code == 200 and r.json()["ok"] is True and r.json()["constants"].startswith("unavailable")
+
+
+def test_persistent_401_hard_exit_is_haircut_by_60s():
+    import asyncio
+
+    import trading.bot as B
+    from test_g1_sell_retry import SellScript, _signal
+    from test_v12 import MINT, opened
+    from trading import jupiter as J
+    b, st, p = opened()
+
+    class Auth(SellScript):
+        async def quote_result(self, *a, **kw):
+            self.sells += 1
+            return J.classify(401, {"error": "unauthorized"}, "HTTP 401", a[0], a[1], a[2])
+    b.jupiter = Auth([J.OK], p.entry_price)
+    _signal(b, st, p, 0.8)
+    t = time.time()
+    asyncio.run(b.execute_sells(t))
+    assert MINT in b.book.positions and b.sell_intents[MINT]["retries"] == 1      # transient: retried first
+    asyncio.run(b.execute_sells(t + B.QUOTE_RETRY_WINDOW_S))                       # exactly at 60 s
+    sell = [e for e in b.book.executions if e.side == "SELL"][-1]
+    assert MINT not in b.book.positions and "emergency after 60s of API_ERROR" in sell.reason

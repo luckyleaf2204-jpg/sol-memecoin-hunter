@@ -337,9 +337,12 @@ def create_app(engine: ScannerEngine | None = None, start_scanner: bool = True,
         from core.snapshot import SNAPSHOT_EVERY_S
         while True:
             await asyncio.sleep(SNAPSHOT_EVERY_S)
-            print(f"[durability] {NOT_DURABLE}: {state['snapshot'].get('reason')}", flush=True)
-            if state["bot"] is not None:
-                print("[sample] " + state["bot"].sample_summary_line(), flush=True)
+            try:
+                print(f"[durability] {NOT_DURABLE}: {state['snapshot'].get('reason')}", flush=True)
+                if state["bot"] is not None:
+                    print("[sample] " + state["bot"].sample_summary_line(), flush=True)
+            except Exception as e:                     # never dies silently
+                print(f"[durability] hourly line error: {type(e).__name__} (loop continues)", flush=True)
 
     @contextlib.asynccontextmanager
     async def lifespan(app: FastAPI):
@@ -460,9 +463,12 @@ def create_app(engine: ScannerEngine | None = None, start_scanner: bool = True,
         if bot is not None and getattr(bot, "entry_block", None):
             out["entries"] = "BLOCKED: no durable snapshot store — no new positions (exits still run)"
         if bot is not None:
-            from trading.strategy_constants import constants_hash
             out["params"] = bot.cfg.sample_id()
-            out["constants"] = constants_hash()
+            try:                                           # a broken import must not fail the health check
+                from trading.strategy_constants import constants_hash
+                out["constants"] = constants_hash()
+            except Exception as e:
+                out["constants"] = f"unavailable ({type(e).__name__})"
             ep = bot.sample_epoch
             out["sample_epoch"] = {"strategy_version": ep.strategy_version, "fingerprint": ep.fingerprint,
                                    "started_at_utc": ep.as_dict()["started_at_utc"]}
