@@ -116,7 +116,11 @@ def create_app(engine: ScannerEngine | None = None, start_scanner: bool = True,
         from core.snapshot import snapshot
         from core.version import git_commit
         store = state.get("snapshot_store")
-        if store is None or state.get("halted"):
+        if store is None or state.get("halted") or state.get("role") not in (None, "ACTIVE"):
+            return
+        lease = state.get("lease")
+        if lease is not None and not await asyncio.to_thread(lease.held):
+            print(f"[snapshot] {reason} SKIPPED: this instance does not hold the lease ({lease.status})", flush=True)
             return
         try:
             if state["bot"] is not None:
@@ -143,10 +147,142 @@ def create_app(engine: ScannerEngine | None = None, start_scanner: bool = True,
             if state["bot"] is not None:
                 print("[sample] " + state["bot"].sample_summary_line(), flush=True)
 
+    async def _restore(store) -> None:
+        from core.snapshot import restore
+        try:
+            res = await asyncio.to_thread(restore, DATA_DIR, store)
+        except Exception as e:                       # SnapshotError text is ours; others: type only (URL)
+            why = f"{type(e).__name__}: {e}" if isinstance(e, SnapshotError) else type(e).__name__
+            res = {"status": f"RESTORE FAILED: {why}", "restored": [], "at": time.time()}
+            state["halted"] = f"restore failed ({why}): the bot is STOPPED instead of trading on an empty book"
+            state["snapshot"]["halted"] = state["halted"]
+        state["snapshot"]["restore"] = res
+        frm = f" from snapshot {_utc(res['snapshot_ts'])}" if res.get("snapshot_ts") else ""
+        print(f"[snapshot] restore {res['status']}: {', '.join(res.get('restored', [])) or '-'}{frm}", flush=True)
+
+    def _ensure_engine() -> None:
+        if state["engine"] is None:
+            state["engine"] = ScannerEngine(Settings.load(), Database(DB_PATH), on_log=lambda m: print(m, flush=True))
+
+    def _start() -> None:
+        """Scanner + bot + snapshots + keep-alive: only on the instance that holds the lease (or has no store)."""
+        from trading.jupiter import JupiterQuotes
+        state["bot"].jupiter = JupiterQuotes(state["engine"].http)      # paper BUYs on real Jupiter quotes
+        from trading.quote_budget import QuoteBudget
+        state["bot"].quote_budget = QuoteBudget()                      # 50/min, SELL quotes first
+        state["bot"].cfg.experimental = os.environ.get("EXPERIMENTAL_MODE", "1") != "0"   # spec Part 3 (PAPER)
+        state["bot"].cfg.latency_probe = os.environ.get("LATENCY_PROBE", "1") != "0"     # measure real drift
+        state["bot"].cfg.lifecycle = os.environ.get("LIFECYCLE_ENGINE", "1") != "0"      # Lifecycle-Aware Hunter V1
+        lm = os.environ.get("LATENCY_SLIPPAGE_MODEL", "AUTO").upper()   # AUTO | CURRENT | CONSERVATIVE | EMPIRICAL
+        if lm in ("AUTO", "CURRENT", "CONSERVATIVE", "EMPIRICAL"):
+            state["bot"].cfg.latency_slippage_model = state["bot"].exec.latency_model = lm
+        if os.environ.get("RESEARCH_LOG", "1") != "0":                # research dataset (read-only log)
+            from research.dataset import DatasetRecorder
+            state["bot"].recorder = DatasetRecorder(DATA_DIR / "research.db", dex=state["engine"].dex)
+            if os.environ.get("MONEYFLOW", "1") != "0":                         # shadow money flow (budgeted)
+                from trading.money_flow import MoneyFlowCollector
+                state["bot"].money_flow = MoneyFlowCollector(state["engine"].rpc)
+            if os.environ.get("RESEARCH_ONCHAIN", "1") != "0":                  # shadow anti-rug data (budgeted)
+                from research.onchain import OnchainResearch
+                state["bot"].onchain = OnchainResearch(state["engine"].rpc, state["bot"].recorder)
+        ign = getattr(state["bot"].cfg, "ignored_file_keys", [])
+        if ign:
+            print(f"[config] trading.json strategy keys IGNORED (code defaults win): {', '.join(ign)}", flush=True)
+        ep = state["bot"].begin_sample()
+        print(f"[startup] commit {ep['commit']} · params {ep['fingerprint']} · strategy {ep['strategy_version']} "
+              f"· sample epoch since {ep['started_at_utc']}", flush=True)
+        from history import persist as hist_persist
+        ph = hist_persist.load(state["engine"].history, DATA_DIR / hist_persist.FILE)
+        state["snapshot"]["price_history"] = ph
+        print(f"[history] price history {ph['status']}: {ph['tokens']} tokens, {ph['points']} points", flush=True)
+        state["task"] = asyncio.create_task(state["engine"].run())
+        state["bot_stop"] = asyncio.Event()
+        state["bot"].snapshot_status = state["snapshot"]
+        state["bot_task"] = asyncio.create_task(state["bot"].run(state["bot_stop"]))
+        if state.get("snapshot_store") is not None:
+            state["aux"].append(asyncio.create_task(_snapshot_loop()))
+        else:
+            state["aux"].append(asyncio.create_task(_not_durable_loop()))
+        if state.get("lease") is not None:
+            state["aux"].append(asyncio.create_task(_lease_loop(state["lease"])))
+        from web.keepalive import keepalive_url, keepalive_loop
+        ka = keepalive_url()
+        if ka:
+            state["aux"].append(asyncio.create_task(keepalive_loop(ka)))
+            print(f"[keepalive] pinging {ka} every 10 min (Render free plan spins down after 15 min idle)",
+                  flush=True)
+
+    async def _activate() -> None:
+        """Lease held (or no store): restore, build the real bot, start. Halted: nothing runs."""
+        store = state.get("snapshot_store")
+        if store is not None:
+            await _restore(store)
+        _ensure_engine()
+        halted = state.get("halted")
+        if state["bot"] is None or state.get("placeholder_bot"):    # PAPER trading bot: reads scanner results only
+            persist = not halted                         # halted: never write an empty book over the real one
+            cfg_path = DATA_DIR / "trading.json"
+            state["bot"] = PaperBot(state["engine"], TradingConfig.load(cfg_path) if persist else TradingConfig(),
+                                    state_path=DATA_DIR / "paper_bot.json" if persist else None,
+                                    config_path=cfg_path if persist else None)
+            state["placeholder_bot"] = False
+        state["bot"].snapshot_status = state["snapshot"]
+        if halted:
+            print(f"[HALT] {halted}. Fix the snapshot store, then restart. Scanner, bot and snapshots are NOT "
+                  "started (a snapshot now would overwrite the good one).", flush=True)
+            if state.get("lease") is not None:
+                await asyncio.to_thread(state["lease"].release)       # a halted instance never writes anything
+            state["role"] = "HALTED"
+            return
+        state["role"] = "ACTIVE"
+        _start()
+
+    async def _standby_loop(lease) -> None:
+        from core.lease import LEASE_POLL_S
+        while True:
+            await asyncio.sleep(LEASE_POLL_S)
+            try:
+                got = await asyncio.to_thread(lease.acquire)
+            except Exception as e:                     # store unreachable: keep waiting
+                print(f"[lease] acquire failed: {type(e).__name__}", flush=True)
+                continue
+            if got:
+                print("[lease] acquired after STANDBY: restoring the previous instance's final snapshot", flush=True)
+                await _activate()
+                return
+
+    async def _lease_loop(lease) -> None:
+        from core.lease import LEASE_RENEW_S
+        while True:
+            await asyncio.sleep(LEASE_RENEW_S)
+            try:
+                ok = await asyncio.to_thread(lease.renew)
+            except Exception as e:                     # store unreachable: the lease simply ages; try again
+                print(f"[lease] renew failed: {type(e).__name__}", flush=True)
+                continue
+            if not ok:
+                state["halted"] = f"lease lost ({lease.status}): another instance is active — this one stopped " \
+                                  "trading and snapshots"
+                state["snapshot"]["halted"] = state["halted"]
+                state["role"] = "LEASE LOST"
+                if state.get("bot_stop") is not None:
+                    state["bot_stop"].set()
+                print(f"[lease] LOST: {lease.status}. Bot and snapshots stopped on this instance.", flush=True)
+                return
+
+    async def _not_durable_loop() -> None:
+        """No snapshot store: say so in the log every hour, with the sample line (it will be lost on restart)."""
+        from core.snapshot import SNAPSHOT_EVERY_S
+        while True:
+            await asyncio.sleep(SNAPSHOT_EVERY_S)
+            print(f"[durability] {NOT_DURABLE}: {state['snapshot'].get('reason')}", flush=True)
+            if state["bot"] is not None:
+                print("[sample] " + state["bot"].sample_summary_line(), flush=True)
+
     @contextlib.asynccontextmanager
     async def lifespan(app: FastAPI):
         if start_scanner and state["bot"] is None:     # restore the sample BEFORE anything opens the files
-            from core.snapshot import durability_check, restore, store_from_env
+            from core.snapshot import durability_check, store_from_env
             store = store_from_env()
             state["snapshot_store"] = store
             chk = await asyncio.to_thread(durability_check, store, DATA_DIR)
@@ -156,73 +292,33 @@ def create_app(engine: ScannerEngine | None = None, start_scanner: bool = True,
                 print(f"[durability] DURABLE: {chk['store']} {chk['target']} ({chk['reason']})", flush=True)
             else:
                 print(f"[durability] {NOT_DURABLE}: {chk['reason']}", flush=True)
+            got = True
             if store is not None:
+                from core.lease import Lease
+                state["lease"] = lease = Lease(store)
                 try:
-                    res = await asyncio.to_thread(restore, DATA_DIR, store)
-                except Exception as e:                       # SnapshotError text is ours; others: type only (URL)
-                    why = f"{type(e).__name__}: {e}" if isinstance(e, SnapshotError) else type(e).__name__
-                    res = {"status": f"RESTORE FAILED: {why}", "restored": [], "at": time.time()}
-                    state["halted"] = f"restore failed ({why}): the bot is STOPPED instead of trading on an empty book"
-                    state["snapshot"]["halted"] = state["halted"]
-                state["snapshot"]["restore"] = res
-                frm = f" from snapshot {_utc(res['snapshot_ts'])}" if res.get("snapshot_ts") else ""
-                print(f"[snapshot] restore {res['status']}: {', '.join(res.get('restored', [])) or '-'}{frm}",
-                      flush=True)
-        if state["engine"] is None:
-            state["engine"] = ScannerEngine(Settings.load(), Database(DB_PATH), on_log=lambda m: print(m, flush=True))
-        halted = state.get("halted")
-        if state["bot"] is None:                         # PAPER trading bot: reads scanner results only
-            persist = start_scanner and not halted       # halted: never write an empty book over the real one
-            cfg_path = DATA_DIR / "trading.json"
-            state["bot"] = PaperBot(state["engine"], TradingConfig.load(cfg_path) if persist else TradingConfig(),
-                                    state_path=DATA_DIR / "paper_bot.json" if persist else None,
-                                    config_path=cfg_path if persist else None)
-        if start_scanner and halted:
-            state["bot"].snapshot_status = state["snapshot"]
-            print(f"[HALT] {halted}. Fix the snapshot store, then restart. Scanner, bot and snapshots are NOT "
-                  "started (a snapshot now would overwrite the good one).", flush=True)
-        elif start_scanner:
-            from trading.jupiter import JupiterQuotes
-            state["bot"].jupiter = JupiterQuotes(state["engine"].http)      # paper BUYs on real Jupiter quotes
-            from trading.quote_budget import QuoteBudget
-            state["bot"].quote_budget = QuoteBudget()                      # 50/min, SELL quotes first
-            state["bot"].cfg.experimental = os.environ.get("EXPERIMENTAL_MODE", "1") != "0"   # spec Part 3 (PAPER)
-            state["bot"].cfg.latency_probe = os.environ.get("LATENCY_PROBE", "1") != "0"     # measure real drift
-            state["bot"].cfg.lifecycle = os.environ.get("LIFECYCLE_ENGINE", "1") != "0"      # Lifecycle-Aware Hunter V1
-            lm = os.environ.get("LATENCY_SLIPPAGE_MODEL", "AUTO").upper()   # AUTO | CURRENT | CONSERVATIVE | EMPIRICAL
-            if lm in ("AUTO", "CURRENT", "CONSERVATIVE", "EMPIRICAL"):
-                state["bot"].cfg.latency_slippage_model = state["bot"].exec.latency_model = lm
-            if os.environ.get("RESEARCH_LOG", "1") != "0":                # research dataset (read-only log)
-                from research.dataset import DatasetRecorder
-                state["bot"].recorder = DatasetRecorder(DATA_DIR / "research.db", dex=state["engine"].dex)
-                if os.environ.get("MONEYFLOW", "1") != "0":                         # shadow money flow (budgeted)
-                    from trading.money_flow import MoneyFlowCollector
-                    state["bot"].money_flow = MoneyFlowCollector(state["engine"].rpc)
-                if os.environ.get("RESEARCH_ONCHAIN", "1") != "0":                  # shadow anti-rug data (budgeted)
-                    from research.onchain import OnchainResearch
-                    state["bot"].onchain = OnchainResearch(state["engine"].rpc, state["bot"].recorder)
-            ign = getattr(state["bot"].cfg, "ignored_file_keys", [])
-            if ign:
-                print(f"[config] trading.json strategy keys IGNORED (code defaults win): {', '.join(ign)}", flush=True)
-            ep = state["bot"].begin_sample()
-            print(f"[startup] commit {ep['commit']} · params {ep['fingerprint']} · strategy {ep['strategy_version']} "
-                  f"· sample epoch since {ep['started_at_utc']}", flush=True)
-            from history import persist as hist_persist
-            ph = hist_persist.load(state["engine"].history, DATA_DIR / hist_persist.FILE)
-            state["snapshot"]["price_history"] = ph
-            print(f"[history] price history {ph['status']}: {ph['tokens']} tokens, {ph['points']} points", flush=True)
-            state["task"] = asyncio.create_task(state["engine"].run())
-            state["bot_stop"] = asyncio.Event()
-            state["bot"].snapshot_status = state["snapshot"]
-            state["bot_task"] = asyncio.create_task(state["bot"].run(state["bot_stop"]))
-            if state.get("snapshot_store") is not None:
-                state["aux"].append(asyncio.create_task(_snapshot_loop()))
-            from web.keepalive import keepalive_url, keepalive_loop
-            ka = keepalive_url()
-            if ka:
-                state["aux"].append(asyncio.create_task(keepalive_loop(ka)))
-                print(f"[keepalive] pinging {ka} every 10 min (Render free plan spins down after 15 min idle)",
-                      flush=True)
+                    got = await asyncio.to_thread(lease.acquire)
+                except Exception as e:
+                    got = False
+                    lease.status = f"STANDBY: store unreachable ({type(e).__name__})"
+            if got:
+                await _activate()
+            else:                                       # another instance is active (zero-downtime deploy overlap)
+                state["role"] = "STANDBY"
+                _ensure_engine()
+                state["bot"] = PaperBot(state["engine"], TradingConfig())      # placeholder: no file, no trading
+                state["placeholder_bot"] = True
+                state["bot"].snapshot_status = state["snapshot"]
+                print(f"[lease] {state['lease'].status}: STANDBY — no restore, no trading, no snapshot until the "
+                      "active instance releases the lease or it expires", flush=True)
+                state["aux"].append(asyncio.create_task(_standby_loop(state["lease"])))
+        else:                                           # tests / tools: a given bot, or no scanner at all
+            _ensure_engine()
+            if state["bot"] is None:
+                state["bot"] = PaperBot(state["engine"], TradingConfig())
+            if start_scanner:
+                state["role"] = "ACTIVE"
+                _start()
         yield
         for t in state["aux"]:
             t.cancel()
@@ -232,7 +328,11 @@ def create_app(engine: ScannerEngine | None = None, start_scanner: bool = True,
                 await asyncio.wait_for(state["bot_task"], 10)
             if state.get("snapshot_store") is None:
                 _save_price_history()                      # local restart without a store still keeps it
-            await _snapshot_now("shutdown")                # SIGTERM before a deploy / restart
+            await _snapshot_now("shutdown")                # SIGTERM before a deploy / restart: last snapshot ...
+        if state.get("lease") is not None and state.get("role") == "ACTIVE":
+            with contextlib.suppress(Exception):
+                await asyncio.to_thread(state["lease"].release)   # ... THEN hand the lease to the new instance
+                print("[lease] released after the final snapshot", flush=True)
         eng = state["engine"]
         if state["task"]:
             eng.stop()
@@ -269,7 +369,9 @@ def create_app(engine: ScannerEngine | None = None, start_scanner: bool = True,
         """Public liveness + which code and parameters are running (no secret, no paper data)."""
         from core.version import git_commit
         bot = state.get("bot")
-        out = {"ok": True, "commit": git_commit()}
+        out = {"ok": True, "commit": git_commit(), "role": state.get("role") or "ACTIVE"}
+        if state.get("lease") is not None:
+            out["lease"] = state["lease"].as_dict()
         if state.get("halted"):
             out["ok"] = False                              # a halted server is not healthy
             out["halted"] = state["halted"]
@@ -292,7 +394,9 @@ def create_app(engine: ScannerEngine | None = None, start_scanner: bool = True,
         sizes, last error, last restore."""
         sn = state["snapshot"]
         rs = sn.get("restore") or {}
-        return {"halted": state.get("halted"), "price_history_at_start": sn.get("price_history"),
+        return {"halted": state.get("halted"), "role": state.get("role") or "ACTIVE",
+                "lease": state["lease"].as_dict() if state.get("lease") is not None else None,
+                "price_history_at_start": sn.get("price_history"),
                 "durable": sn["durable"], "warning": None if sn["durable"] else (sn.get("warning") or NOT_DURABLE),
                 "store": sn["store"], "target": sn["target"], "check": sn["reason"],
                 "last_snapshot": {**sn["last"], "at_utc": _utc(sn["last_ts"])} if sn.get("last") else None,

@@ -43,7 +43,7 @@ def test_healthz_public_and_minimal(env):
     r = c.get("/healthz")
     d = r.json()
     # public: liveness + running code / parameter fingerprint only — no secret, no paper data
-    assert r.status_code == 200 and d["ok"] is True and set(d) <= {"ok", "commit", "params", "sample_epoch", "snapshot", "halted"}
+    assert r.status_code == 200 and d["ok"] is True and set(d) <= {"ok", "commit", "params", "sample_epoch", "snapshot", "halted", "role", "lease"}
     assert isinstance(d["commit"], str) and d["commit"]
     text = r.text.lower()
     assert all(w not in text for w in ("api-key", "helius", "balance", "equity", "position", "access"))

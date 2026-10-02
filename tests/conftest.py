@@ -28,6 +28,14 @@ def _offline_unless_live(request, monkeypatch):
 
 
 @pytest.fixture(autouse=True)
+def _fast_lease(monkeypatch):
+    """The lease's acquire settle wait (2 s on the server) is 0 in tests; test_lease drives it explicitly."""
+    import core.lease
+    monkeypatch.setattr(core.lease, "ACQUIRE_SETTLE_S", 0.0)
+    yield
+
+
+@pytest.fixture(autouse=True)
 def _reset_language():
     """create_app() switches the global UI language to Vietnamese; never let that leak into the next test."""
     set_language("en")
