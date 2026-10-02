@@ -8,7 +8,7 @@ services:
     buildCommand: pip install -r requirements-server.txt
     startCommand: python src/main.py --web --host 0.0.0.0 --port $PORT
     healthCheckPath: /healthz
-    maxShutdownDelaySeconds: 120   # SIGTERM -> final snapshot (book first, research.db <= 60 s) -> lease release
+    maxShutdownDelaySeconds: 120   # 5s HTTP drain, then final snapshot + lease release (lifespan budget 105s)
     autoDeploy: true
     envVars:
       - key: PYTHON_VERSION

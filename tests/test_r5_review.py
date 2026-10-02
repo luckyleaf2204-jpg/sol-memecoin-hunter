@@ -539,6 +539,21 @@ def test_stale_s_forgets_mints_with_no_open_position():
     assert "not-a-position" not in b.stale_s and MINT not in b.stale_s
 
 
+def test_uvicorn_bounds_connection_drain_before_lifespan_shutdown(monkeypatch):
+    """Connection draining runs before the lifespan snapshot and is not part of the 105s budget."""
+    import uvicorn
+
+    from main import cmd_web
+    seen = {}
+
+    def fake_run(*_a, **k):
+        seen.update(k)
+
+    monkeypatch.setattr(uvicorn, "run", fake_run)
+    cmd_web("127.0.0.1", 9)
+    assert seen["timeout_graceful_shutdown"] == 5
+
+
 def test_healthz_ok_is_computed_before_calls_that_can_fail(monkeypatch):
     """A broken git_commit import must not leave ok true while the instance is halted or the probe is retrying."""
     import sys
