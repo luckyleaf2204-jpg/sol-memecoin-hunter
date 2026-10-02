@@ -59,11 +59,13 @@ def test_restore_never_overwrites_local_files_and_checks_integrity(tmp_path):
     (live / "paper_bot.json").write_text("{\"cash\": 1}", encoding="utf-8")
     res = S.restore(live, store)
     assert "paper_bot.json" in res["skipped"] and (live / "paper_bot.json").read_text() == "{\"cash\": 1}"
-    store.put("truth_ledger.json.gz", gzip.compress(b"tampered"))
+    obj = json.loads(store.get(S.MANIFEST))["files"]["truth_ledger.json"]["object"]
+    store.put(obj, gzip.compress(b"tampered"))
     other = tmp_path / "other"
     other.mkdir()
-    with pytest.raises(ValueError):                      # checksum mismatch: nothing silently restored
+    with pytest.raises(S.SnapshotError):                 # checksum mismatch: nothing silently restored
         S.restore(other, store)
+    assert list(other.iterdir()) == []                  # all-or-nothing
     assert S.restore(tmp_path, S.LocalStore(tmp_path / "empty"))["status"] == "NO SNAPSHOT"
 
 

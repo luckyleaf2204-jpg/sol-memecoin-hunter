@@ -62,8 +62,8 @@ class SampleEpoch:
     def save(self) -> None:
         if self.path is None:
             return
-        Path(self.path).parent.mkdir(parents=True, exist_ok=True)
-        Path(self.path).write_text(json.dumps(self.as_dict()), encoding="utf-8")
+        from core.snapshot import write_atomic
+        write_atomic(self.path, json.dumps(self.as_dict()).encode("utf-8"))
 
     def as_dict(self) -> dict:
         return {"id": self.id, "strategy_version": self.strategy_version, "fingerprint": self.fingerprint,

@@ -1477,6 +1477,8 @@ class PaperBot:
                            "last_snapshot_ts": snap.get("last_ts")}
         if not durable:
             r["warnings"].insert(0, f"{NOT_DURABLE} ({r['durability']['reason']})")
+        if snap.get("halted"):
+            r["warnings"].insert(0, f"BOT STOPPED: {snap['halted']}")
         return r
 
     def sample_summary_line(self, now: float | None = None) -> str:

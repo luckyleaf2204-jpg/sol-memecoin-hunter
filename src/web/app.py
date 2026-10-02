@@ -28,7 +28,7 @@ from fastapi.staticfiles import StaticFiles
 from analytics.narratives import aggregate_narratives
 from api.serialize import card, view
 from core.config import DATA_DIR, DB_PATH, Settings, env
-from core.snapshot import NOT_DURABLE, fmt_bytes
+from core.snapshot import NOT_DURABLE, SnapshotError, fmt_bytes
 from database.db import Database
 from i18n import load as load_lang, set_language, t
 from scanner.engine import ScannerEngine
@@ -106,7 +106,7 @@ def create_app(engine: ScannerEngine | None = None, start_scanner: bool = True,
         from core.snapshot import snapshot
         from core.version import git_commit
         store = state.get("snapshot_store")
-        if store is None:
+        if store is None or state.get("halted"):
             return
         try:
             if state["bot"] is not None:
@@ -148,21 +148,29 @@ def create_app(engine: ScannerEngine | None = None, start_scanner: bool = True,
             if store is not None:
                 try:
                     res = await asyncio.to_thread(restore, DATA_DIR, store)
-                except Exception as e:
-                    res = {"status": f"RESTORE FAILED: {type(e).__name__}", "restored": [], "at": time.time()}
+                except Exception as e:                       # SnapshotError text is ours; others: type only (URL)
+                    why = f"{type(e).__name__}: {e}" if isinstance(e, SnapshotError) else type(e).__name__
+                    res = {"status": f"RESTORE FAILED: {why}", "restored": [], "at": time.time()}
+                    state["halted"] = f"restore failed ({why}): the bot is STOPPED instead of trading on an empty book"
+                    state["snapshot"]["halted"] = state["halted"]
                 state["snapshot"]["restore"] = res
                 frm = f" from snapshot {_utc(res['snapshot_ts'])}" if res.get("snapshot_ts") else ""
                 print(f"[snapshot] restore {res['status']}: {', '.join(res.get('restored', [])) or '-'}{frm}",
                       flush=True)
         if state["engine"] is None:
             state["engine"] = ScannerEngine(Settings.load(), Database(DB_PATH), on_log=lambda m: print(m, flush=True))
+        halted = state.get("halted")
         if state["bot"] is None:                         # PAPER trading bot: reads scanner results only
-            persist = start_scanner
+            persist = start_scanner and not halted       # halted: never write an empty book over the real one
             cfg_path = DATA_DIR / "trading.json"
             state["bot"] = PaperBot(state["engine"], TradingConfig.load(cfg_path) if persist else TradingConfig(),
                                     state_path=DATA_DIR / "paper_bot.json" if persist else None,
                                     config_path=cfg_path if persist else None)
-        if start_scanner:
+        if start_scanner and halted:
+            state["bot"].snapshot_status = state["snapshot"]
+            print(f"[HALT] {halted}. Fix the snapshot store, then restart. Scanner, bot and snapshots are NOT "
+                  "started (a snapshot now would overwrite the good one).", flush=True)
+        elif start_scanner:
             from trading.jupiter import JupiterQuotes
             state["bot"].jupiter = JupiterQuotes(state["engine"].http)      # paper BUYs on real Jupiter quotes
             state["bot"].cfg.experimental = os.environ.get("EXPERIMENTAL_MODE", "1") != "0"   # spec Part 3 (PAPER)
@@ -240,6 +248,8 @@ def create_app(engine: ScannerEngine | None = None, start_scanner: bool = True,
         from core.version import git_commit
         bot = state.get("bot")
         out = {"ok": True, "commit": git_commit()}
+        if state.get("halted"):
+            out["halted"] = state["halted"]
         sn = state["snapshot"]
         out["snapshot"] = {"durable": sn["durable"], "store": sn["store"], "last_utc": _utc(sn["last_ts"]),
                            "last_restore_utc": _utc((sn.get("restore") or {}).get("at"))}
@@ -259,7 +269,8 @@ def create_app(engine: ScannerEngine | None = None, start_scanner: bool = True,
         sizes, last error, last restore."""
         sn = state["snapshot"]
         rs = sn.get("restore") or {}
-        return {"durable": sn["durable"], "warning": None if sn["durable"] else (sn.get("warning") or NOT_DURABLE),
+        return {"halted": state.get("halted"),
+                "durable": sn["durable"], "warning": None if sn["durable"] else (sn.get("warning") or NOT_DURABLE),
                 "store": sn["store"], "target": sn["target"], "check": sn["reason"],
                 "last_snapshot": {**sn["last"], "at_utc": _utc(sn["last_ts"])} if sn.get("last") else None,
                 "last_error": sn.get("last_error"),

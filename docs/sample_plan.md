@@ -37,6 +37,18 @@ The durable place must be configured by the owner in the Render dashboard (no se
 Until one is set, `/healthz` shows `"snapshot": {"store": "NOT CONFIGURED"}` and the sample report warns that the
 sample restarts with the container. `SNAPSHOT_EVERY_S` changes the interval (default 3600).
 
+### Generations, all-or-nothing restore, halt on failure
+
+* Each snapshot is generation N written into slot `N % 3` (objects `gen-<slot>--<file>.gz`, flat names); every
+  object is read back and checksum-verified, and only then is `manifest.json` switched to generation N. A failed
+  write / verify keeps the previous manifest, so the live restore point is never overwritten.
+* Restore is all-or-nothing: every file of the manifest's generation is downloaded and verified into a staging
+  directory first, then all are moved in. If any sample file already exists locally, nothing is restored.
+* If the restore FAILS the server does not trade on an empty book: scanner, bot and snapshots are not started,
+  `/healthz` shows `"halted": "restore failed (...)"`, the log prints `[HALT] ...`. Fix the store and restart.
+* Snapshotted: `paper_bot.json`, `sample_epoch.json`, `truth_ledger.json`, `trading.json`, `holdout_lock.json`
+  (keep the replay lock at `data/holdout_lock.json`), `research.db`. Epoch and lock files are written atomically.
+
 ### Start-up durability check and status
 
 * At start-up the app writes a probe file to the store and reads it back. No store, a failed write / read-back, or

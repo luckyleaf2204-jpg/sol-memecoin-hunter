@@ -144,7 +144,8 @@ def lock_holdout(db_path: str, lock_path: str, horizon: str = "1h", split: float
     params = frozen_params(horizon, split, bought_only, seed)
     lock = {"params_hash": params["hash"], "params": params, "locked_at": now or time.time(), "t_cut": t_cut,
             "n_in_sample": len(ins)}
-    Path(lock_path).write_text(json.dumps(lock, indent=1), encoding="utf-8")
+    from core.snapshot import write_atomic
+    write_atomic(lock_path, json.dumps(lock, indent=1).encode("utf-8"))
     return {"status": "LOCKED", "lock": lock, "in_sample": compare(ins, base, seed)}
 
 
