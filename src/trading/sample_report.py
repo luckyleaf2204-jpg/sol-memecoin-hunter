@@ -12,10 +12,10 @@ from __future__ import annotations
 
 import random
 
-from trading.exits import HARD
+from trading.exit_policy import PROTECTIVE, base_reason
 
 STOP_REASONS = ("stop_loss",)
-GAP_REASONS = HARD               # stop gap floor applies to every HARD exit (stop, risk, liquidity, whale, ...)
+GAP_REASONS = PROTECTIVE         # stop gap floor: every protective exit (stop, break-even, trailing, risk, liquidity ...)
 TP_REASONS = ("take_profit_1", "take_profit_2", "runner_trailing_stop")
 SL_GAP_PCT = -20.0
 MIN_PRELIMINARY_N = 30          # per sample: preliminary check only (docs/sample_plan.md)
@@ -79,7 +79,7 @@ def metrics(rows: list[dict], nets: list[float], starting: float) -> dict:
 
 def gross_of(r: dict, sl_gap: bool = False) -> float:
     g = r["gross_move_pct"]
-    if sl_gap and r.get("exit_reason") in GAP_REASONS:
+    if sl_gap and base_reason(r.get("exit_reason")) in GAP_REASONS:
         return min(g, SL_GAP_PCT)
     return g
 
@@ -186,8 +186,8 @@ def report(journal: list[dict], epoch, levels=(5.0, 7.0, 10.0), starting: float 
     epoch_gaps = [g for g in gaps if g["end"] >= start]
     in_gap = [r for r in in_epoch if overlaps(r, epoch_gaps, now)]
     counted = [r for r in in_epoch if not overlaps(r, epoch_gaps, now)]
-    tp = sum(1 for r in counted if r.get("exit_reason") in TP_REASONS)
-    sl = sum(1 for r in counted if r.get("exit_reason") in STOP_REASONS)
+    tp = sum(1 for r in counted if base_reason(r.get("exit_reason")) in TP_REASONS)
+    sl = sum(1 for r in counted if base_reason(r.get("exit_reason")) in STOP_REASONS)
     by_cost = cost_table(counted, levels, starting)
     status, warns = warnings(len(counted), by_cost)
     return {
@@ -204,7 +204,7 @@ def report(journal: list[dict], epoch, levels=(5.0, 7.0, 10.0), starting: float 
                                  starting) if all(r.get("net_pnl_pct") is not None for r in counted) else None,
         "sl_gap_scenario": {"assumption": f"every HARD exit ({', '.join(GAP_REASONS)}) fills at "
                                           f"{SL_GAP_PCT:.0f}% (or worse)",
-                            "stop_exits": sl, "hard_exits": sum(1 for r in counted if r.get("exit_reason") in GAP_REASONS),
+                            "stop_exits": sl, "hard_exits": sum(1 for r in counted if base_reason(r.get("exit_reason")) in GAP_REASONS),
                             "by_cost": cost_table(counted, levels, starting, sl_gap=True)},
         "haircut": haircut_split(counted, levels, starting),
         "costs": costs(counted),

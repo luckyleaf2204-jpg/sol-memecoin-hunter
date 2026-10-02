@@ -12,6 +12,7 @@ def strategy_constants() -> dict:
     import history.persist as hp
     import trading.bot as bot
     import trading.entry_location as el
+    import trading.exit_policy as ep
     import trading.exits as ex
     import trading.quote_budget as qb
     return {
@@ -22,7 +23,7 @@ def strategy_constants() -> dict:
         "bot.NO_ROUTE_BLOCK_S": bot.NO_ROUTE_BLOCK_S, "bot.MAX_ENTRIES_PER_TICK": bot.MAX_ENTRIES_PER_TICK,
         "bot.TICK_S": bot.TICK_S, "bot.SELL_QUOTE_ATTEMPTS": bot.SELL_QUOTE_ATTEMPTS,
         "bot.SELL_QUOTE_BUDGET_S": bot.SELL_QUOTE_BUDGET_S,
-        "exits.HARD": list(ex.HARD),
+        "exits.HARD": list(ex.HARD), "exit_policy.PROTECTIVE": list(ep.PROTECTIVE),
         "quote_budget.PER_MIN": qb.PER_MIN, "quote_budget.SELL_RESERVE": qb.SELL_RESERVE,
         "history.persist.MAX_RESTORE_GAP_S": hp.MAX_RESTORE_GAP_S, "history.persist.KEEP_S": hp.KEEP_S,
     }

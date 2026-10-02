@@ -13,10 +13,9 @@ import json
 import time
 from pathlib import Path
 
-STRATEGY_VERSION = "s7-sellguard-budget"   # s6 self-check: a waiting exit below the stop becomes a full HARD exit,
-# a HARD signal keeps the retry start, SELL/BUY execution beside the tick (concurrent short SELL quotes), one bot
-# quote budget 50/min with SELL first. Strategy module constants: trading/strategy_constants.py (hash pinned with
-# this version). (previous: s6-sellretry-sw180, never deployed)
+STRATEGY_VERSION = "s8-protective-exits"   # B4: break-even and trailing stops are protective (filled on a bad
+# route, haircut after the retry window, SL-gap scenario); a waiting exit through the stop escalates even when the route
+# impact is above max. (previous: s7-sellguard-budget, never deployed)
 MIN_SAMPLE_COMMIT = "148af2c"            # the server must run this commit or a descendant
 LEGACY = "LEGACY"
 

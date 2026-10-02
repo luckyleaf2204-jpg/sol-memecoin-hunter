@@ -20,7 +20,8 @@ from trading.book import PaperBook
 from trading.config import ModeNotAllowed, PAPER, TradingConfig
 from trading.execution import PaperExecutor
 from trading.exit_options import apply_exit_options, on_filled_sell, stop_pct
-from trading.exits import HARD, exit_signal
+from trading.exit_policy import is_protective
+from trading.exits import exit_signal
 from trading.models import BLOCKED, ERROR, PENDING_IDENTITY, READY, RUN, TRADE, WATCH, Activity, ModuleState
 from trading.risk import RiskEngine
 
@@ -229,7 +230,7 @@ class PaperBot:
                     self.log("INFO", f"exit signal {reason} but no validated price — waiting", st, now=now)
                     continue
                 tokens = p.tokens * frac
-                hard = reason in HARD
+                hard = is_protective(reason)            # HARD + break-even / trailing stops
                 if self.jupiter is not None:
                     it = {"frac": frac, "reason": reason, "mark": mark, "ts": now, "hard": hard}
                     cur = self.sell_intents.get(p.mint)
@@ -1326,6 +1327,16 @@ class PaperBot:
             if qr.ok:
                 q = qr.quote
                 imp = price_impact(q)
+                if not it.get("hard") and imp is not None and 100 * imp > self.cfg.max_slippage_pct \
+                        and it["mark"] <= p.stop_price:
+                    partial = it["frac"] < 1.0
+                    it["hard"], it["frac"] = True, 1.0  # bad route, but the price is through the stop: protect
+                    reason = it["reason"] = f"{reason}->stop_loss"
+                    self.log("RISK", f"SELL escalated to HARD: mark <= stop although impact {100 * imp:.2f}% > "
+                                     f"{self.cfg.max_slippage_pct}%", st, now=now)
+                    if partial:
+                        it["next"] = 0.0                # the quote was for a part: re-quote the whole next round
+                        continue
                 if not it.get("hard") and imp is not None and 100 * imp > self.cfg.max_slippage_pct:
                     self.sell_intents.pop(mint, None)   # re-signalled next tick
                     self.log("INFO", f"SELL {reason} waits: Jupiter impact {100 * imp:.2f}% > "

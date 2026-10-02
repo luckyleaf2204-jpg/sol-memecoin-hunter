@@ -116,7 +116,8 @@ def test_deploy_hand_over_standby_then_restore_the_final_snapshot(tmp_path, monk
     c1.__exit__(None, None, None)                                      # SIGTERM: final snapshot, then release
     man = json.loads(S.LocalStore(two_instances).get(S.MANIFEST))
     assert man["gen"] > gen_before
-    assert _wait(lambda: new.state.hunter.get("role") == "ACTIVE")     # the standby took over ...
+    assert _wait(lambda: new.state.hunter.get("role") == "ACTIVE"      # the standby took over ...
+                 and new.state.hunter.get("bot_task") is not None)      # (read from another thread: wait for both)
     assert new.state.hunter["snapshot"]["restore"]["status"] == "RESTORED"
     assert json.loads((d2 / "paper_bot.json").read_text())["cash"] == 1234.5     # ... from the FINAL state
     assert new.state.hunter["bot_task"] is not None
