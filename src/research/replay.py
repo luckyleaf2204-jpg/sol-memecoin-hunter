@@ -39,26 +39,28 @@ def horizon_s(horizon: str) -> int:
     return dict(HORIZONS)[horizon]
 
 
-def _rows(db: sqlite3.Connection, anchor: str, horizon: str) -> list[dict]:
+def _rows(db: sqlite3.Connection, anchor: str, horizon: str, since: float | None = None) -> list[dict]:
     q = ("SELECT ca, anchor_ts, first_hit, hit_tp30, hit_sl15, return_pct, mfe_pct, mae_pct FROM forward_returns "
-         "WHERE anchor=? AND horizon=? AND samples > 0")
+         "WHERE anchor=? AND horizon=? AND samples > 0 AND anchor_ts >= ?")
     return [{"ca": r[0], "ts": r[1], "first_hit": r[2], "hit_tp": r[3], "hit_sl": r[4], "ret": r[5], "mfe": r[6],
-             "mae": r[7]} for r in db.execute(q, (anchor, horizon))]
+             "mae": r[7]} for r in db.execute(q, (anchor, horizon, since or 0.0))]
 
 
-def _events(db: sqlite3.Connection, kind: str) -> dict[str, tuple]:
-    """First gate event of this kind per token: (ts, age_s, liquidity_usd, lifecycle stage)."""
+def _events(db: sqlite3.Connection, kind: str, since: float | None = None) -> dict[str, tuple]:
+    """First gate event of this kind per token in the epoch: (ts, age_s, liquidity_usd, lifecycle stage)."""
     try:
-        q = ("SELECT ca, MIN(ts), age_s, liquidity_usd, lifecycle FROM gate_events WHERE kind=? GROUP BY ca")
-        return {ca: (ts, age, liq, lc) for ca, ts, age, liq, lc in db.execute(q, (kind,))}
+        q = ("SELECT ca, MIN(ts), age_s, liquidity_usd, lifecycle FROM gate_events WHERE kind=? AND ts >= ? "
+             "GROUP BY ca")
+        return {ca: (ts, age, liq, lc) for ca, ts, age, liq, lc in db.execute(q, (kind, since or 0.0))}
     except sqlite3.OperationalError:
         return {}
 
 
-def _group(db: sqlite3.Connection, anchor: str, kind: str, horizon: str, engine: str | None) -> tuple[list, int]:
-    ev = _events(db, kind)
+def _group(db: sqlite3.Connection, anchor: str, kind: str, horizon: str, engine: str | None,
+           since: float | None = None) -> tuple[list, int]:
+    ev = _events(db, kind, since)
     rows, excluded = [], 0
-    for r in _rows(db, anchor, horizon):
+    for r in _rows(db, anchor, horizon, since):
         e = ev.get(r["ca"])
         if e is None:
             excluded += 1                                 # no gate event: cannot attribute it to an engine
@@ -71,10 +73,12 @@ def _group(db: sqlite3.Connection, anchor: str, kind: str, horizon: str, engine:
     return rows, excluded
 
 
-def load(db: sqlite3.Connection, horizon: str = "1h", engine: str | None = ENGINE) -> tuple[list[dict], dict]:
-    """Entered trades (the strategy) + gate-blocked tokens (reported apart), with age / liquidity at the decision."""
-    entered, ex_e = _group(db, "entered", "entered", horizon, engine)
-    blocked, ex_b = _group(db, "gate_blocked", "blocked", horizon, engine)
+def load(db: sqlite3.Connection, horizon: str = "1h", engine: str | None = ENGINE,
+         since: float | None = None) -> tuple[list[dict], dict]:
+    """Entered trades (the strategy) + gate-blocked tokens (reported apart), with age / liquidity at the decision.
+    since: only decisions of the current sample epoch (ts >= epoch start)."""
+    entered, ex_e = _group(db, "entered", "entered", horizon, engine, since)
+    blocked, ex_b = _group(db, "gate_blocked", "blocked", horizon, engine, since)
     later = {r["ca"]: r["ts"] for r in entered}
     return entered, {"engine": engine, "entered": len(entered), "excluded_entered": ex_e,
                      "gate_blocked": blocked, "excluded_blocked": ex_b,
@@ -141,9 +145,20 @@ def compare(db: sqlite3.Connection, rows: list[dict], exclude: set[str], h_s: in
             "baseline": "same age / liquidity bucket, chosen from snapshots at or before each decision"}
 
 
+def epoch_start(db_path: str) -> float | None:
+    """The current sample epoch start, from sample_epoch.json next to research.db (None: no epoch file -> all)."""
+    import json
+    f = Path(db_path).parent / "sample_epoch.json"
+    try:
+        return json.loads(f.read_text(encoding="utf-8")).get("started_at")
+    except (OSError, ValueError):
+        return None
+
+
 def frozen_params(horizon: str, split: float, seed: int, min_n: int = MIN_N,
                   engine: str | None = ENGINE, sample_id: str | None = None,
-                  strategy_version: str | None = None) -> dict:
+                  strategy_version: str | None = None, constants: str | None = None,
+                  since: float | None = None) -> dict:
     """Everything that defines the test. Chosen on the in-sample part BEFORE the holdout is looked at."""
     import hashlib
     import json
@@ -153,8 +168,12 @@ def frozen_params(horizon: str, split: float, seed: int, min_n: int = MIN_N,
     if strategy_version is None:
         from trading.sample_epoch import STRATEGY_VERSION
         strategy_version = STRATEGY_VERSION
+    if constants is None:
+        from trading.strategy_constants import constants_hash
+        constants = constants_hash()
     p = {"horizon": horizon, "split": split, "population": "entered (gate passed, filled)", "seed": seed, "min_n": min_n,
-         "engine": engine, "sample_id": sample_id, "strategy_version": strategy_version, "embargo_s": horizon_s(horizon),
+         "engine": engine, "sample_id": sample_id, "strategy_version": strategy_version, "constants_hash": constants,
+         "epoch_since": since, "embargo_s": horizon_s(horizon),
          "tp_pct": TP_LEVEL, "sl_pct": SL_LEVEL, "baseline": "age/liquidity-matched random tokens, bootstrap"}
     p["hash"] = hashlib.sha256(json.dumps(p, sort_keys=True).encode()).hexdigest()[:10]
     return p
@@ -180,7 +199,8 @@ def _parts(cand: list[dict], t_cut: float, embargo_s: float):
 
 def lock_holdout(db_path: str, lock_path: str, horizon: str = "1h", split: float = 0.6, seed: int = 7,
                  now: float | None = None, min_n: int = MIN_N, engine: str | None = ENGINE,
-                 sample_id: str | None = None, strategy_version: str | None = None) -> dict:
+                 sample_id: str | None = None, strategy_version: str | None = None,
+                 since: float | None = None) -> dict:
     """Freeze the test on the in-sample part: write the parameter hash, the lock time, the time cut and the embargo.
     Refused when the in-sample part has fewer than min_n candidates or a lock already exists."""
     import json
@@ -188,10 +208,11 @@ def lock_holdout(db_path: str, lock_path: str, horizon: str = "1h", split: float
     if Path(lock_path).exists():
         return {"status": "REFUSED", "reason": "a holdout lock already exists (one lock per holdout)",
                 "lock": json.loads(Path(lock_path).read_text(encoding="utf-8"))}
-    params = frozen_params(horizon, split, seed, min_n, engine, sample_id, strategy_version)
+    since = epoch_start(db_path) if since is None else since
+    params = frozen_params(horizon, split, seed, min_n, engine, sample_id, strategy_version, None, since)
     db = sqlite3.connect(db_path)
     try:
-        cand, info = load(db, horizon, engine)
+        cand, info = load(db, horizon, engine, since)
         t_cut = _cut(cand, split)
         ins, _, _ = _parts(cand, t_cut, params["embargo_s"])
         if len(ins) < min_n:
@@ -225,12 +246,14 @@ def _info(info: dict) -> dict:
 
 def replay(db_path: str, horizon: str = "1h", split: float = 0.6, seed: int = 7,
            holdout_lock: str | None = None, min_n: int = MIN_N, engine: str | None = ENGINE,
-           sample_id: str | None = None, strategy_version: str | None = None) -> dict:
+           sample_id: str | None = None, strategy_version: str | None = None,
+           since: float | None = None) -> dict:
     import json
-    params = frozen_params(horizon, split, seed, min_n, engine, sample_id, strategy_version)
+    since = epoch_start(db_path) if since is None else since
+    params = frozen_params(horizon, split, seed, min_n, engine, sample_id, strategy_version, None, since)
     db = sqlite3.connect(db_path)
     try:
-        cand, info = load(db, horizon, engine)
+        cand, info = load(db, horizon, engine, since)
         t_cut = _cut(cand, split)
         if holdout_lock and Path(holdout_lock).exists():
             t_cut = json.loads(Path(holdout_lock).read_text(encoding="utf-8")).get("t_cut", t_cut)   # the locked cut
