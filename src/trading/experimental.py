@@ -89,12 +89,21 @@ class EarlyScore:
 
 
 # ---------------------------------------------------------------- components (None = no data)
+PRICE_RISE_FULL, PRICE_CHASE_START, PRICE_CHASE_ZERO = 20.0, 40.0, 100.0
+
+
 def s_price(st: TokenState) -> float | None:
+    """Inverted U on the 5-min price change (step 2: no chasing): 0 -> 1 from 0 % to +20 %, flat 1 up to +40 %,
+    then down to 0 at +100 % (a vertical candle is late, not early)."""
     m = st.market
     pc = m.price_change_5m if m else None
     if pc is None and m and m.market_cap and st.mc_track and st.mc_track.initial_mc:
         pc = 100 * (m.market_cap / st.mc_track.initial_mc - 1)
-    return None if pc is None else ramp(pc, 0, 60)
+    if pc is None:
+        return None
+    if pc <= PRICE_CHASE_START:
+        return ramp(pc, 0, PRICE_RISE_FULL)
+    return max(0.0, 1 - (pc - PRICE_CHASE_START) / (PRICE_CHASE_ZERO - PRICE_CHASE_START))
 
 
 def s_vol(st: TokenState) -> float | None:

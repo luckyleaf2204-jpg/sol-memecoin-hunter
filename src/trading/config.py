@@ -61,6 +61,11 @@ class TradingConfig:
     latency_slippage_model: str = "CURRENT"    # AUTO: <50 samples CURRENT · >=50 P90 · >=100 P75 if stable
     latency_probe: bool = False              # (server: on) re-quote after the latency window to measure real drift (quotes only)
     empirical_min_samples: int = 50          # EMPIRICAL stays off (falls back to CURRENT) below this
+    # ENTRY LOCATION gate (step 2: no chasing) — lifecycle engine BUYs only
+    entry_location_gate: bool = True
+    entry_max_extension_5m_pct: float = 40.0     # block when the price is more than this above its level 5 min ago
+    entry_block_locations: tuple = ("EXTENDED", "MID_MOVE")
+    entry_prefer_locations: tuple = ("PULLBACK", "SECOND_WAVE")   # SECOND_WAVE = post state SECOND_WAVE_READY
     # ENTRY risk buffer (experimental NEW BUYs only; Risk Engine, exits and the hard limit 60 unchanged)
     entry_max_risk: int = 55
     # LIFECYCLE engine (Lifecycle-Aware Hunter V1). Conservative initial thresholds, chosen for A/B and later

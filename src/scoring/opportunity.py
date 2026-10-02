@@ -1,7 +1,7 @@
 """OPPORTUNITY ENGINE — upside ACTIVITY only (per the rule: liquidity / concentration / dev belong to Risk).
 
 Parts and weights:
-  momentum       45   MOMENTUM sub-score (volume level + acceleration, buy pressure, txn acceleration, price)
+  momentum       30   MOMENTUM sub-score (volume level + acceleration, buy pressure, txn acceleration, price)
   holder_growth  25   the growth factors of the HOLDER sub-score only: growth_15m, holder_accel, holder_quality
                       (top-10 concentration and retention are NOT opportunity; they inform Risk / Holder score)
   whale          10   WHALE sub-score (accumulation vs distribution)
@@ -22,7 +22,8 @@ from __future__ import annotations
 
 from core.models import INVALID, Factor, OpportunityResult, SubScore, TokenState
 
-WEIGHTS = {"momentum": 45, "holder_growth": 25, "whale": 10, "smart_money": 10, "social": 5, "narrative": 5}
+# step 2 (no chasing): momentum 45 -> 30. With smart money / social / narrative unavailable it was 45/80 of the score.
+WEIGHTS = {"momentum": 30, "holder_growth": 25, "whale": 10, "smart_money": 10, "social": 5, "narrative": 5}
 HOLDER_GROWTH_FACTORS = ("growth_15m", "holder_accel", "holder_quality")
 
 

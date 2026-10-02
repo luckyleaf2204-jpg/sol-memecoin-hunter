@@ -243,6 +243,11 @@ class PaperBot:
             return
         feeds_ok, feeds_reason = self._feeds_ok()
         vet_items, size_items, risk_items, entries = [], [], [], 0
+        if self.cfg.lifecycle and self.cfg.entry_location_gate:
+            # step 2: PULLBACK / SECOND_WAVE (last known location) take the limited entry slots first
+            pref = set(self.cfg.entry_prefer_locations)
+            cands = sorted(cands, key=lambda c: 0 if (self.decisions.get(c[0].mint) or {}).get("entry_location") in pref
+                           else 1)
         try:
             for st, reasons in cands:
                 v = D.vet(st, self.cfg, now)
@@ -649,11 +654,33 @@ class PaperBot:
             "pre_shadow_decision": "WOULD_BUY" if ld.pre_shadow_would_buy else (
                 ld.decision if su is not None and su.setup_type == "PRE_MIGRATION" else None)})
         self._shadow(st, rec, su, ld, h, now)
+        decision = self._entry_location_gate(st, rec, ld.decision, now)
         lq = (ld.es.liquidity if ld.es is not None else None) or {}
         rec.update({"old_liquidity": lq.get("old"), "new_liquidity": lq.get("decision"),
                     "liquidity_model": lq.get("model"), "liquidity_equivalent_usd": lq.get("equivalent_usd"),
                     "liquidity_confidence": lq.get("confidence")})
-        return ld.decision
+        return decision
+
+    def _entry_location_gate(self, st, rec: dict, decision: str, now: float) -> str:
+        """Step 2: a lifecycle TRADE is not bought while the price is extended. Blocked when the 5-min extension is
+        above entry_max_extension_5m_pct or the location is EXTENDED / MID_MOVE (UNKNOWN / EARLY / PULLBACK /
+        SECOND_WAVE pass). Blocked -> WATCH with the reason in blocked_by; re-evaluated every tick."""
+        c = self.cfg
+        if decision != TRADE or not c.entry_location_gate:
+            return decision
+        loc, ext = rec.get("entry_location"), rec.get("entry_extension")
+        why = []
+        if ext is not None and ext > c.entry_max_extension_5m_pct:
+            why.append(f"entry_location: extension_5m {ext:.0f}% > {c.entry_max_extension_5m_pct:.0f}%")
+        if loc in c.entry_block_locations:
+            why.append(f"entry_location: {loc}")
+        if not why:
+            return decision
+        rec.update({"decision": WATCH, "entry_gate_blocked": True,
+                    "blocked_by": (rec.get("blocked_by") or []) + why, "setup_decision": WATCH})
+        if (self.decisions.get(st.mint) or {}).get("entry_gate_blocked") is not True:
+            self.log("BLOCK", "no chasing — " + "; ".join(why), st, now=now)
+        return WATCH
 
     @staticmethod
     def _mobs(st, now: float) -> dict:
