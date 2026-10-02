@@ -35,6 +35,7 @@ SNAPSHOT_FAIL_BLOCK_N = 3            # this many failed snapshots in a row -> no
 DURABILITY_RETRY_S = 60.0            # start-up probe failed on a store error: retry this often
 SHUTDOWN_DEADLINE_S = 80.0           # at SIGTERM the WHOLE snapshot() gets this long, from its first line
 SHUTDOWN_SLOW_TIMEOUT_S = 60.0       # at SIGTERM: research.db gets this long, else the previous copy is kept
+HOURLY_SLOW_TIMEOUT_S = 60.0         # hourly: same — a slow research.db is carried, it does not fail the snapshot
 SHUTDOWN_TOTAL_S = 105.0             # bot stop <= 10 + snapshot <= 80 + lease release <= 15; engine stop uses the slack
 # (render.yaml maxShutdownDelaySeconds 120. 10 + 80 + 15 = 105 < 110 even when every store call is slow.)
 SNAPSHOT_EVERY_S = float(os.environ.get("SNAPSHOT_EVERY_S", "3600") or 3600)
@@ -274,9 +275,12 @@ def snapshot(data_dir: Path, store, commit: str = "", now: float | None = None,
     reads, every file upload and the two final manifest writes. A CRITICAL file (book / epoch / lock / config) not
     written in time aborts the generation (SnapshotError: the previous verified generation stays the restore point,
     never a mix of an old book and a new epoch); any other file not written in time keeps its previous verified copy.
-    The manifest is not switched when the budget runs out, so a late critical file cannot publish a mixed generation."""
+    The manifest is not switched when the budget runs out, so a late critical file cannot publish a mixed generation.
+    With slow_timeout_s set (hourly and shutdown), a non-critical file that errors is carried the same way, so one
+    slow research.db cannot fail the generation."""
     t0 = time.time()
     now = now or t0
+    _log_research_db(data_dir)
     end = None if deadline_s is None else t0 + max(float(deadline_s), 0.0)
 
     def _run(fn, cap: float | None = None, grace: float = 0.0):
@@ -333,6 +337,14 @@ def snapshot(data_dir: Path, store, commit: str = "", now: float | None = None,
                 files[name] = {**old, "carried_from": old.get("carried_from", prev.get("gen"))}
             steps[name + " (timeout, carried)" if old else name + " (timeout, omitted)"] = round(time.time() - ts, 2)
             continue
+        except Exception:
+            if name in CRITICAL or slow_timeout_s is None:
+                raise
+            old = (prev.get("files") or {}).get(name)      # do not fail the generation, and do not overwrite it
+            if old is not None:
+                files[name] = {**old, "carried_from": old.get("carried_from", prev.get("gen"))}
+            steps[name + " (error, carried)" if old else name + " (error, omitted)"] = round(time.time() - ts, 2)
+            continue
         steps[name] = round(time.time() - ts, 2)
     man = {"gen": gen, "slot": slot, "ts": now, "commit": commit, "files": files, "steps": steps,
            "bytes_raw": sum(f["size"] for f in files.values()), "bytes_gz": sum(f["size_gz"] for f in files.values()),
@@ -349,6 +361,25 @@ def snapshot(data_dir: Path, store, commit: str = "", now: float | None = None,
         raise SnapshotError(f"deadline: manifest not switched in {deadline_s}s — generation {gen} discarded, "
                             f"generation {prev.get('gen')} stays the restore point") from None
     return man
+
+
+def _log_research_db(data_dir) -> None:
+    p = Path(data_dir) / "research.db"
+    if p.exists():
+        print(f"[snapshot] research.db {p.stat().st_size} bytes", flush=True)
+    else:
+        print("[snapshot] research.db absent", flush=True)
+
+
+def blocks_entries(exc: BaseException) -> bool:
+    """A snapshot failure counts toward the no-new-orders rule only when a CRITICAL file (or the snapshot as a
+    whole) failed. research.db and the other non-critical files must not block entries."""
+    msg = str(exc)
+    if any(name in msg for name in CRITICAL):
+        return True
+    if any(name in msg for name in FILES if name not in CRITICAL):
+        return False
+    return True
 
 
 def _stage(store, man: dict, staging: Path) -> None:

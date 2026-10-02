@@ -214,3 +214,81 @@ def test_self_fence_is_checked_while_a_renew_hangs(tmp_path, monkeypatch, two_in
             assert st["bot_stop"].is_set()
     finally:
         gate.set()
+
+
+def _research_db(d):
+    import sqlite3
+    db = sqlite3.connect(d / "research.db")
+    db.execute("CREATE TABLE IF NOT EXISTS t (v INT)")
+    db.execute("INSERT INTO t VALUES (1)")
+    db.commit()
+    db.close()
+    return (d / "research.db").stat().st_size
+
+
+def _manifest(store):
+    raw = store.get(S.MANIFEST)
+    return json.loads(raw) if raw else None
+
+
+def test_hourly_snapshot_carries_a_slow_research_db(tmp_path, monkeypatch, capsys):
+    """A slow research.db is carried from the previous generation; it does not fail the snapshot or block orders,
+    and the carried object is not overwritten by the late upload."""
+    store = SlowFile(tmp_path / "store")
+    _setup(tmp_path, monkeypatch, store)
+    size = _research_db(tmp_path / "d")
+    monkeypatch.setattr(S, "SNAPSHOT_EVERY_S", 0.05)
+    monkeypatch.setattr(S, "HOURLY_SLOW_TIMEOUT_S", 0.15)
+    app = _app(tmp_path, "a")
+    with TestClient(app) as c:
+        assert c.get("/healthz").status_code == 200
+        assert _wait(lambda: (_manifest(store) or {}).get("files", {}).get("research.db"))
+        m1 = _manifest(store)
+        obj = m1["files"]["research.db"]["object"]
+        blob = store.get(obj)
+        store.slow, store.delay = "research.db", 1.0
+
+        def carried():
+            m = _manifest(store)
+            meta = (m or {}).get("files", {}).get("research.db") or {}
+            return m and m["gen"] > m1["gen"] and "carried_from" in meta and meta["object"] == obj
+        assert _wait(carried, 4)
+        st = app.state.hunter
+        assert st["snapshot"].get("fails_in_a_row", 0) == 0
+        assert st["bot"].entry_block is None
+        time.sleep(1.2)                                        # the abandoned upload finishes
+        assert store.get(obj) == blob                          # the carried object was not overwritten
+    assert f"[snapshot] research.db {size} bytes" in capsys.readouterr().out
+
+
+class _Boom(S.LocalStore):
+    def __init__(self, root, bad):
+        super().__init__(root)
+        self.bad = bad
+
+    def put(self, name, data):
+        if self.bad in name:
+            raise RuntimeError("upload failed")
+        super().put(name, data)
+
+
+def test_a_failing_research_db_does_not_block_orders_a_critical_file_does(tmp_path, monkeypatch):
+    store = _Boom(tmp_path / "store", "research.db")
+    _setup(tmp_path, monkeypatch, store)
+    _research_db(tmp_path / "d")
+    monkeypatch.setattr(S, "SNAPSHOT_EVERY_S", 0.05)
+    monkeypatch.setattr(S, "HOURLY_SLOW_TIMEOUT_S", 0.2)
+    app = _app(tmp_path, "a")
+    with TestClient(app):
+        st = app.state.hunter
+        assert _wait(lambda: st["snapshot"].get("last") is not None, 3)
+        time.sleep(0.3)
+        assert st["snapshot"].get("fails_in_a_row", 0) == 0
+        assert st["bot"].entry_block is None
+    store2 = _Boom(tmp_path / "store2", "paper_bot")
+    monkeypatch.setattr(S, "store_from_env", lambda: store2)
+    app = _app(tmp_path, "b")
+    with TestClient(app):
+        st = app.state.hunter
+        assert _wait(lambda: st["snapshot"].get("fails_in_a_row", 0) >= S.SNAPSHOT_FAIL_BLOCK_N, 3)
+        assert "snapshots in a row" in (st["bot"].entry_block or "")

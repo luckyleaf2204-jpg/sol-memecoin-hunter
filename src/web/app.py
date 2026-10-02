@@ -202,8 +202,10 @@ def create_app(engine: ScannerEngine | None = None, start_scanner: bool = True,
                   f"{man['target']} in {man['duration_s']} s · steps "
                   + ", ".join(f"{k} {v}s" for k, v in (man.get("steps") or {}).items()), flush=True)
         except Exception as e:                             # never break trading for a backup (type only: no URL)
+            from core.snapshot import blocks_entries
             state["snapshot"]["last_error"] = {"ts": time.time(), "reason": reason, "error": type(e).__name__}
-            state["snapshot"]["fails_in_a_row"] = state["snapshot"].get("fails_in_a_row", 0) + 1
+            if blocks_entries(e):                          # a slow / failed research.db does not count
+                state["snapshot"]["fails_in_a_row"] = state["snapshot"].get("fails_in_a_row", 0) + 1
             _update_entry_block()
             print(f"[snapshot] {reason} FAILED: {type(e).__name__}", flush=True)
 
@@ -213,7 +215,7 @@ def create_app(engine: ScannerEngine | None = None, start_scanner: bool = True,
         while True:
             await asyncio.sleep(snap.SNAPSHOT_EVERY_S)
             try:
-                await _snapshot_now("hourly")
+                await _snapshot_now("hourly", snap.HOURLY_SLOW_TIMEOUT_S)
                 if state["bot"] is not None:
                     print("[sample] " + state["bot"].sample_summary_line(), flush=True)
             except Exception as e:
