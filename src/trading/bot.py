@@ -226,11 +226,9 @@ class PaperBot:
                     else:
                         self.sell_intents.setdefault(p.mint, it)
                     continue                            # filled on a real Jupiter SELL quote in execute_sells()
-                if hard:                                # no Jupiter client at all: never filled near the mark
-                    ex = self.exec.sell_haircut(st, tokens, mark, self._sol(), reason,
-                                                self.cfg.hard_exit_no_quote_haircut_pct / 100, now)
-                else:
-                    ex = self.exec.sell(st, tokens, mark, self._sol(), reason, now)
+                # no Jupiter client at all: no executable quote -> haircut for EVERY exit, never near the mark
+                ex = self.exec.sell_haircut(st, tokens, mark, self._sol(), reason,
+                                            self.cfg.hard_exit_no_quote_haircut_pct / 100, now)
                 self._after_sell(p, st, ex, reason, frac, now)
             self._set("fills", RUN if self.book.executions and now - self.book.executions[-1].ts < 60 else READY,
                       f"{len(self.book.executions)} executions · {self.book.failed} failed",
@@ -1244,8 +1242,8 @@ class PaperBot:
         """Every exit: fresh Jupiter SELL quote right before the fill.
         HARD / SL exits (stop loss, risk, liquidity, whale, holder, identity): filled on the quote whatever its impact;
         no quote -> HAIRCUT fill (reference x (1 - hard_exit_no_quote_haircut_pct)), never near the DexScreener mark.
-        Non-protective exits (TP, trailing, momentum, volume, time): no quote -> liquidity-model fill (an exit is never
-        skipped); impact above the limit -> retry next tick."""
+        Non-protective exits (TP, trailing, momentum, volume, time): no quote -> the same HAIRCUT fill (an exit is
+        never skipped, never priced at the mark); impact above the limit -> retry next tick."""
         from trading.jupiter import WSOL, price_impact
         now = now or time.time()
         states = {s.mint: s for s in (self.engine.published or [])}
@@ -1272,9 +1270,9 @@ class PaperBot:
                              st, now=now)
                     continue
                 ex = self.exec.sell_from_quote(st, tokens, q, sol, reason, now)
-            else:
-                ex = self.exec.sell(st, tokens, it["mark"], sol, reason, now)
-                ex.reason = (ex.reason + " · " if ex.reason else "") + "Jupiter quote unavailable — model fill"
+            else:                                       # no executable quote: haircut, never a mark-price fill
+                ex = self.exec.sell_haircut(st, tokens, it["mark"], sol, reason,
+                                            self.cfg.hard_exit_no_quote_haircut_pct / 100, now)
             self._after_sell(p, st, ex, reason, it["frac"], now)
 
     # ---------------------------------------------------------------- CONFIRM mode

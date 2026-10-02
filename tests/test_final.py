@@ -91,14 +91,16 @@ def test_take_profit_sells_on_a_jupiter_quote():
     assert any(a.kind == "SELL" and "WHY:" in a.text for a in b.activity)
 
 
-def test_sell_falls_back_to_model_when_jupiter_is_down_and_waits_on_high_impact():
+def test_sell_without_quote_takes_the_haircut_and_waits_on_high_impact():
     st, b, p = _held()
     st.market.price_usd *= 1.9
     st.stamps["market"].updated_at = time.time()
     b.jupiter = FakeJupiter(fail=True)
     b.tick()
     asyncio.run(b.execute_sells())
-    assert not b.book.positions and "model fill" in b.book.executions[-1].reason   # exit never skipped
+    sell = b.book.executions[-1]                                   # exit never skipped, never at the mark (fix 5)
+    assert not b.book.positions and sell.model.startswith("PAPER haircut")
+    assert sell.fill_price == pytest.approx(st.market.price_usd * (1 - b.cfg.hard_exit_no_quote_haircut_pct / 100))
     st2, b2, p2 = _held()
     b2.jupiter = FakeJupiter(impact="0.08")                     # exit quote impact 8 % > 3 %
     st2.market.price_usd *= 1.9

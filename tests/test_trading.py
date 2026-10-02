@@ -1,4 +1,5 @@
 """PAPER trading bot: decision pipeline, risk engine, modelled execution, exits, NET P&L, backtest, API, safety."""
+import asyncio
 import json
 import time
 
@@ -240,13 +241,18 @@ def test_take_profit_partial_then_trailing_stop():
     st = good_state()
     b = bot_with([st])
     p = _open(b, st)
-    _move(st, 1.35)
-    b.tick()
+    from test_bot_v2 import FakeJupiter
+    b.jupiter = FakeJupiter()                                 # exits need an executable SELL quote (fix 5)
+
+    def move(f):
+        _move(st, f)
+        b.jupiter.sell_price = st.market.price_usd            # the quote follows the market
+        b.tick()
+        asyncio.run(b.execute_sells())
+    move(1.35)
     assert p.tp1_done and p.tokens < p.initial_tokens and p.stop_price >= p.entry_price
-    _move(st, 1.3)                                            # new high
-    b.tick()
-    _move(st, 0.8)                                            # -20 % from the high > 15 % trailing
-    b.tick()
+    move(1.3)                                                 # new high
+    move(0.8)                                                 # -20 % from the high > 15 % trailing
     assert not b.book.positions and b.book.closed[0].exit_reason == "trailing_stop"
     s = b.book.stats()
     assert s["wins"] == 1 and s["net_pnl"] > 0 and s["profit_factor"] is None and s["avg_win"] > 0
