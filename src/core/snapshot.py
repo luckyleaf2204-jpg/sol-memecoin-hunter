@@ -33,9 +33,10 @@ PROBE = "probe.json"
 NOT_DURABLE = "MẪU KHÔNG BỀN - sẽ mất khi restart"
 SNAPSHOT_FAIL_BLOCK_N = 3            # this many failed snapshots in a row -> no new entries until one succeeds
 DURABILITY_RETRY_S = 60.0            # start-up probe failed on a store error: retry this often
-SHUTDOWN_DEADLINE_S = 80.0           # at SIGTERM the whole snapshot gets this long (maxShutdownDelaySeconds 120)
+SHUTDOWN_DEADLINE_S = 80.0           # at SIGTERM the WHOLE snapshot() gets this long, from its first line
 SHUTDOWN_SLOW_TIMEOUT_S = 60.0       # at SIGTERM: research.db gets this long, else the previous copy is kept
-# (render.yaml maxShutdownDelaySeconds 120: bot stop <= 10 s + book files + this + lease release fit inside it)
+SHUTDOWN_TOTAL_S = 105.0             # bot stop <= 10 + snapshot <= 80 + lease release <= 15; engine stop uses the slack
+# (render.yaml maxShutdownDelaySeconds 120. 10 + 80 + 15 = 105 < 110 even when every store call is slow.)
 SNAPSHOT_EVERY_S = float(os.environ.get("SNAPSHOT_EVERY_S", "3600") or 3600)
 
 
@@ -269,36 +270,60 @@ def snapshot(data_dir: Path, store, commit: str = "", now: float | None = None,
     Files go in priority order (book, epoch, lock first; research.db last). With slow_timeout_s (shutdown), a SLOW
     file that is not written + verified in time keeps the previous generation's verified copy (`carried_from`), so
     the book is never lost waiting for the research DB. `steps` gives the seconds of every file.
-    deadline_s (shutdown): a total time budget. A CRITICAL file (book / epoch / lock / config) not written in time
-    aborts the generation (SnapshotError: the previous verified generation stays the restore point, never a mix of an
-    old book and a new epoch); any other file not written in time keeps its previous verified copy."""
+    deadline_s (shutdown): ONE budget for this whole call, measured from the start — manifest reads, the protected-object
+    reads, every file upload and the two final manifest writes. A CRITICAL file (book / epoch / lock / config) not
+    written in time aborts the generation (SnapshotError: the previous verified generation stays the restore point,
+    never a mix of an old book and a new epoch); any other file not written in time keeps its previous verified copy.
+    The manifest is not switched when the budget runs out, so a late critical file cannot publish a mixed generation."""
     t0 = time.time()
     now = now or t0
-    prev = _manifest(store) or {}
-    gens = [prev.get("gen", 0)]
-    for slot in range(GENERATIONS):                    # an unreadable main manifest must not reuse a live slot
-        raw = store.get(_gen_manifest_name(slot))
-        if raw is not None:
-            try:
-                gens.append(_parse(raw, "generation manifest")["gen"])
-            except SnapshotError:
-                pass
-    gen = max(gens) + 1
-    slot = gen % GENERATIONS
+    end = None if deadline_s is None else t0 + max(float(deadline_s), 0.0)
+
+    def _run(fn, cap: float | None = None, grace: float = 0.0):
+        """Run fn within the time still left in the deadline (and within cap, when given).
+        grace: when the budget is already spent, still wait this long — only for the manifest switch of a
+        generation whose files are already done, so a carried slow file does not throw away the book."""
+        limit = None if end is None else end - time.time()
+        if cap is not None:
+            limit = cap if limit is None else min(limit, cap)
+        if limit is not None and limit <= 0:
+            if grace <= 0:
+                raise TimeoutError
+            limit = grace
+        return _timed(fn, limit)
+
+    try:
+        prev = _run(lambda: _manifest(store) or {}) or {}
+        gens = [prev.get("gen", 0)]
+
+        def _older_gens():
+            found = []
+            for slot_i in range(GENERATIONS):         # an unreadable main manifest must not reuse a live slot
+                raw = store.get(_gen_manifest_name(slot_i))
+                if raw is None:
+                    continue
+                try:
+                    found.append(_parse(raw, "generation manifest")["gen"])
+                except SnapshotError:
+                    pass
+            return found
+
+        gens.extend(_run(_older_gens))
+        gen = max(gens) + 1
+        slot = gen % GENERATIONS
+        protected = _run(lambda: _protected(store, slot))
+    except TimeoutError:
+        raise SnapshotError(f"deadline: snapshot reads not finished in {deadline_s}s — generation discarded, "
+                            f"the previous generation stays the restore point") from None
     files, steps = {}, {}
-    protected = _protected(store, slot)
-    end = None if deadline_s is None else time.time() + deadline_s
     for name in FILES:
         p = Path(data_dir) / name
         if not p.exists():
             continue
         ts = time.time()
-        limit = None if end is None else end - ts
-        if name in SLOW and slow_timeout_s is not None:
-            limit = slow_timeout_s if limit is None else min(limit, slow_timeout_s)
         try:
-            files[name] = _timed(lambda p=p, name=name: _put_verified(store, slot, name, _read(p), gen, protected),
-                                 limit)
+            files[name] = _run(lambda p=p, name=name: _put_verified(store, slot, name, _read(p), gen, protected),
+                               slow_timeout_s if (name in SLOW and slow_timeout_s is not None) else None)
         except TimeoutError:
             if name in CRITICAL:
                 raise SnapshotError(f"deadline: {name} not written in {deadline_s}s — generation {gen} discarded, "
@@ -312,8 +337,17 @@ def snapshot(data_dir: Path, store, commit: str = "", now: float | None = None,
     man = {"gen": gen, "slot": slot, "ts": now, "commit": commit, "files": files, "steps": steps,
            "bytes_raw": sum(f["size"] for f in files.values()), "bytes_gz": sum(f["size_gz"] for f in files.values()),
            "duration_s": round(time.time() - t0, 2), "target": target_of(store), "store": store.kind}
-    store.put(_gen_manifest_name(slot), json.dumps(man).encode())   # this generation's own manifest (fallback)
-    store.put(MANIFEST, json.dumps(man).encode())   # the switch: one object write
+    payload = json.dumps(man).encode()
+
+    def _publish():
+        store.put(_gen_manifest_name(slot), payload)   # this generation's own manifest (fallback)
+        store.put(MANIFEST, payload)                   # the switch: one object write
+
+    try:
+        _run(_publish, grace=1.0)
+    except TimeoutError:
+        raise SnapshotError(f"deadline: manifest not switched in {deadline_s}s — generation {gen} discarded, "
+                            f"generation {prev.get('gen')} stays the restore point") from None
     return man
 
 

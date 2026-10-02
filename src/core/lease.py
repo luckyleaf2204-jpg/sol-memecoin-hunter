@@ -31,11 +31,24 @@ LEASE_RENEW_S = 60.0
 LEASE_POLL_S = 10.0
 ACQUIRE_SETTLE_S = 2.0
 LEASE_IO_TIMEOUT_S = 20.0       # one lease read / write may hang at most this long (the caller stops waiting)
+LEASE_RELEASE_DEADLINE_S = 15.0  # the whole release (lock wait + store I/O) gets this long, separate from the snapshot
 
 
 def fence_after_s() -> float:
     """Self-fence BEFORE the lease can expire for others: TTL - one renew period - one hung I/O."""
     return max(LEASE_TTL_S - LEASE_RENEW_S - LEASE_IO_TIMEOUT_S, 1.0)
+
+
+def _run_bounded(fn, timeout: float):
+    """Run fn in a worker thread, at most `timeout` seconds. Raises TimeoutError (the thread is abandoned)."""
+    import concurrent.futures as cf
+    ex = cf.ThreadPoolExecutor(max_workers=1)
+    try:
+        return ex.submit(fn).result(timeout=max(float(timeout), 0.0))
+    except cf.TimeoutError as e:
+        raise TimeoutError from e
+    finally:
+        ex.shutdown(wait=False)
 
 
 def instance_id() -> str:
@@ -120,14 +133,25 @@ class Lease:
                                                                            else fence_after_s())
 
     def release(self, wait_s: float | None = None) -> None:
-        """Stop renewing FIRST (a renew in flight finishes or is abandoned), then write the release."""
+        """Stop renewing FIRST (a renew in flight finishes or is abandoned), then write the release.
+        The whole call — waiting for that renew and the store read + write — is bounded by `wait_s`
+        (default LEASE_RELEASE_DEADLINE_S). A slow store raises TimeoutError instead of holding SIGTERM."""
+        budget = LEASE_RELEASE_DEADLINE_S if wait_s is None else wait_s
         self._closing = True
-        got = self._io.acquire(timeout=LEASE_IO_TIMEOUT_S if wait_s is None else wait_s)
+        deadline = time.monotonic() + max(float(budget), 0.0)
+        got = self._io.acquire(timeout=max(0.0, deadline - time.monotonic()))
         try:
-            d = self.read()
-            if d and d["owner"] == self.owner:
-                self._write(self.clock(), d.get("acquired_at", self.clock()), released=True)
-                self.status = "RELEASED"
+            left = deadline - time.monotonic()
+            if left <= 0:
+                raise TimeoutError("lease release deadline")
+
+            def do():
+                d = self.read()
+                if d and d["owner"] == self.owner:
+                    self._write(self.clock(), d.get("acquired_at", self.clock()), released=True)
+                    self.status = "RELEASED"
+
+            _run_bounded(do, left)
         finally:
             if got:
                 self._io.release()
