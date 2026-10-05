@@ -1623,6 +1623,20 @@ class PaperBot:
                     self._rec("quote", st, rec, now, "OK", "risk at execution: " + "; ".join(rd.reasons), q, False,
                               int(self.cfg.max_slippage_pct * 100))
                     continue
+                # FINAL validation, after every await (quote, latency probe) and with NO await before the fill:
+                # the engine publishes NEW state copies, so `st` above is the snapshot from before the quote.
+                fresh = next((x for x in (self.engine.published or []) if x.mint == mint), None)
+                rec_now = self.decisions.get(mint, {})
+                why_final = ("token no longer published" if fresh is None else
+                             "no longer a valid Trade Candidate" if not is_trade_candidate(fresh, rec_now) else
+                             "entry_location: ON_CURVE" if self.cfg.entry_location_gate and not self.cfg.entry_allow_curve
+                             and fresh.market is not None and fresh.market.is_curve else
+                             "already holding" if mint in self.book.positions else "")
+                if why_final:
+                    rec_now["state"] = "FINAL_CHECK_FAILED"
+                    self.log("BLOCK", f"BUY cancelled at final validation: {why_final}", fresh or st, now=now)
+                    self.audit.execution("skip", fresh or st, now, why_final, reason="final_validation")
+                    continue
                 ex = self.exec.buy_from_quote(st, usd, q, sol, now)
                 self._rec("quote", st, rec, now, "OK", "filled" if ex.status == "FILLED" else f"paper fill failed: {ex.reason}",
                           q, ex.status == "FILLED", int(self.cfg.max_slippage_pct * 100))

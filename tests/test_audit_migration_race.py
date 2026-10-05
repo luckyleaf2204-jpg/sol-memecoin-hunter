@@ -57,3 +57,76 @@ def test_case_a_stale_blocked_decision_never_executes_after_migration():
     st.market.dex_id = "pumpswap"
     asyncio.run(b.execute_intents())
     assert st.mint not in b.book.positions
+
+
+# ---------------------------------------------------------------- the window DURING the awaits (quote / probe)
+import copy  # noqa: E402
+
+from trading import jupiter as J  # noqa: E402
+
+
+class PublishDuringQuote(FakeJupiter):
+    """The engine publishes a NEW snapshot (copies, like ScannerEngine.publish) while the BUY quote is in flight."""
+    def __init__(self, bot_ref, change):
+        super().__init__()
+        self.bot_ref, self.change = bot_ref, change
+
+    async def quote_result(self, input_mint, output_mint, amount_raw, slippage_bps, **kw):
+        q = await self.quote(input_mint, output_mint, amount_raw, slippage_bps)
+        b = self.bot_ref[0]
+        if output_mint != J.WSOL and b is not None:
+            fresh = []
+            for st in b.engine.published:
+                c = copy.copy(st)
+                c.market = copy.copy(st.market)
+                self.change(b, c)
+                fresh.append(c)
+            b.engine.published = fresh                            # the bot's local `st` is now an old snapshot
+        return J.QuoteResult(J.OK, quote=q, http=200, attempts=1)
+
+
+def _run(change):
+    ref = [None]
+    st = good()
+    b = bot([st], PublishDuringQuote(ref, change))
+    ref[0] = b
+    b.tick()
+    assert st.mint in b.intents and not st.market.is_curve
+    asyncio.run(b.execute_intents())
+    return b, st
+
+
+def test_curve_reported_while_the_quote_is_in_flight_is_not_bought():
+    def to_curve(b, c):
+        c.market.dex_id = "pumpfun"
+    b, st = _run(to_curve)
+    assert st.mint not in b.book.positions
+    assert any("final validation" in a.text and "ON_CURVE" in a.text for a in b.activity)
+
+
+def test_decision_withdrawn_while_the_quote_is_in_flight_is_not_bought():
+    def withdraw(b, c):
+        b.decisions[c.mint] = {**b.decisions[c.mint], "decision": "WATCH"}
+    b, st = _run(withdraw)
+    assert st.mint not in b.book.positions
+
+
+def test_token_gone_from_the_feed_while_quoting_is_not_bought():
+    ref = [None]
+    st = good()
+
+    class Vanish(FakeJupiter):
+        async def quote_result(self, im, om, amount, slip, **kw):
+            q = await self.quote(im, om, amount, slip)
+            ref[0].engine.published = []
+            return J.QuoteResult(J.OK, quote=q, http=200, attempts=1)
+    b = bot([st], Vanish())
+    ref[0] = b
+    b.tick()
+    asyncio.run(b.execute_intents())
+    assert st.mint not in b.book.positions
+
+
+def test_unchanged_market_still_buys():
+    b, st = _run(lambda b, c: None)
+    assert st.mint in b.book.positions
