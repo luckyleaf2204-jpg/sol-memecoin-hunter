@@ -1541,6 +1541,11 @@ class PaperBot:
                     self.log("BLOCK", "BUY cancelled at execution: no longer a valid Trade Candidate", st, now=now)
                     self.audit.execution("skip", st, now, reason="no_longer_candidate")
                     continue
+                if self.cfg.entry_location_gate and not self.cfg.entry_allow_curve and st.market is not None                         and st.market.is_curve:               # same ON_CURVE rule as the gate, at fill time
+                    rec["state"] = "ON_CURVE"                  # (decided on the AMM, the market reports the curve)
+                    self.log("BLOCK", "BUY cancelled at execution: entry_location: ON_CURVE", st, now=now)
+                    self.audit.execution("skip", st, now, reason="on_curve_at_execution")
+                    continue
                 usd = it["usd"]
                 t_req = time.time()
                 m_at_quote = self._mobs(st, t_req)

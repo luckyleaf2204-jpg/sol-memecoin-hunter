@@ -67,3 +67,19 @@ def test_round_trip_cost_at_the_new_floor_off_curve(usd, max_cost):
         if s.status == "FILLED":
             costs.append(100 * (usd + b.network_fee_usd + s.network_fee_usd - s.usd_in) / usd)
     assert statistics.mean(costs) < max_cost                   # was 12-17 % at $15-25 / 14-22 % on the curve
+
+
+def test_round_trip_cost_distribution_not_only_the_mean():
+    """Audit: the $50 off-curve round trip is ~7.6 % on average but has a long tail (dump-time slippage). Guard the
+    whole distribution, not just the mean (fixed seed, tools/cost_benchmark.py)."""
+    import sys
+    from pathlib import Path
+    sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "tools"))
+    from cost_benchmark import run
+    r = run(usd=50.0, n=2000, sol=150.0, seed=1)
+    t = r["total_round_trip"]
+    assert t["mean"] < 8.0 and t["p50"] < 8.0                    # what D1 claimed
+    assert t["p90"] < 11.0 and t["p95"] < 13.5 and t["p99"] < 19.0   # the tail, measured and pinned
+    assert t["max"] < 35.0                                        # dump tail is capped at 25 % + the rest
+    assert r["priority_fee"]["p50"] == pytest.approx(3.0, abs=0.01)  # 2 x 0.005 SOL x $150 / $50
+    assert 5.0 < r["_meta"]["failed_tx_pct"] < 20.0               # failed tx still pay the fee
