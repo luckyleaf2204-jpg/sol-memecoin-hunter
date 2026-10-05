@@ -3,6 +3,8 @@ CASE A decided ON_CURVE -> migration -> execution; CASE B decided on the AMM -> 
 before execution; CASE C curve -> PumpSwap/Raydium transition. A BUY may only fill on a non-curve market."""
 import asyncio
 
+import pytest
+
 from test_bot_v2 import FakeJupiter, bot, good
 from test_step2_chasing import bot as gate_bot, post_tok
 from trading.lifecycle_decision import TRADE, WATCH
@@ -129,4 +131,59 @@ def test_token_gone_from_the_feed_while_quoting_is_not_bought():
 
 def test_unchanged_market_still_buys():
     b, st = _run(lambda b, c: None)
+    assert st.mint in b.book.positions
+
+
+# ---------------------------------------------------------------- the window DURING _latency_probe()
+class PublishDuringProbe(FakeJupiter):
+    """BUY quote OK; the change (a NEW published snapshot, like ScannerEngine.publish) happens on the SECOND quote,
+    i.e. the re-quote made inside _latency_probe() — after the pre-quote checks, before buy_from_quote()."""
+    def __init__(self, bot_ref, change):
+        super().__init__()
+        self.bot_ref, self.change, self.n = bot_ref, change, 0
+
+    async def quote_result(self, input_mint, output_mint, amount_raw, slippage_bps, **kw):
+        q = await self.quote(input_mint, output_mint, amount_raw, slippage_bps)
+        if output_mint != J.WSOL:
+            self.n += 1
+            if self.n == 2:                                       # the latency-probe re-quote is in flight
+                b = self.bot_ref[0]
+                fresh = []
+                for st in b.engine.published:
+                    c = copy.copy(st)
+                    c.market = copy.copy(st.market)
+                    self.change(b, c)
+                    fresh.append(c)
+                b.engine.published = fresh
+        return J.QuoteResult(J.OK, quote=q, http=200, attempts=1)
+
+
+def _run_probe(change):
+    ref = [None]
+    st = good()
+    j = PublishDuringProbe(ref, change)
+    b = bot([st], j, latency_probe=True)
+    ref[0] = b
+    b._probe_rng.uniform = lambda a, c: 0.0                     # no real 0.4-1.5 s wait in the test
+    b.tick()
+    assert st.mint in b.intents
+    asyncio.run(b.execute_intents())
+    assert j.n == 2                                             # the probe really ran (BUY quote + re-quote)
+    return b, st
+
+
+@pytest.mark.parametrize("change", ["curve", "withdrawn"])
+def test_state_change_during_the_latency_probe_cancels_the_buy(change):
+    def apply(b, c):
+        if change == "curve":
+            c.market.dex_id = "pumpfun"                           # the market reports the bonding curve
+        else:
+            b.decisions[c.mint] = {**b.decisions[c.mint], "decision": "WATCH"}   # decision withdrawn
+    b, st = _run_probe(apply)
+    assert st.mint not in b.book.positions
+    assert any("final validation" in a.text for a in b.activity)
+
+
+def test_probe_with_an_unchanged_state_still_buys():
+    b, st = _run_probe(lambda b, c: None)
     assert st.mint in b.book.positions
