@@ -89,7 +89,7 @@ def fetch_ohlcv(api: Api, pool: str, now: datetime, days: int = MAX_DAYS, token:
     before, bars = int(now.timestamp()), {}
     while True:
         d = api.get(f"/networks/solana/pools/{pool}/ohlcv/hour?aggregate=1&limit=1000&currency=usd"
-                    ff"&token={token}&before_timestamp={before}")
+                    f"&token={token}&before_timestamp={before}")
         rows = ((d.get("data") or {}).get("attributes") or {}).get("ohlcv_list") or []
         for ts, o, h, lo, c, v in rows:
             if ts >= start:
