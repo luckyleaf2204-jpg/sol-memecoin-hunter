@@ -63,3 +63,10 @@ and the in-sample mean net return is > 0.
 
 Otherwise REJECT: T1 is not traded (paper or live) and its parameters are NOT tuned on this data.
 If PASS: paper trading only, >= 2-4 weeks on durable infrastructure, before any live consideration.
+
+## Amendment 1 (data plumbing, before ANY price or return was seen)
+
+The first universe build stopped on an unknown mint (HTTP 404) and dropped tokens wrongly: the API returns
+'$WIF' for WIF, and pools where the token is the QUOTE side ("SOL / BONK") were ignored. Fixed: 404 -> token
+dropped; a leading '$' is ignored in the symbol check; both pool orientations are accepted and bars are requested
+for the token's own mint (`token=<mint>`). Rule T1, costs, split and verdict are unchanged.

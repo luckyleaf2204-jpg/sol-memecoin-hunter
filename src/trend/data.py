@@ -48,9 +48,14 @@ class Api:
 def select_pool(api: Api, symbol: str, mint: str, now: datetime) -> dict:
     """Largest pool of the token quoted in SOL / USDC / USDT, reserve >= MIN_RESERVE_USD, age >= MIN_POOL_AGE_DAYS.
     Returns {"symbol", "mint", "pool", ...} or {"dropped": reason}."""
-    tok = api.get(f"/networks/solana/tokens/{mint}")
+    try:
+        tok = api.get(f"/networks/solana/tokens/{mint}")
+    except urllib.error.HTTPError as e:
+        if e.code == 404:
+            return {"symbol": symbol, "mint": mint, "dropped": "mint not found (404)"}
+        raise
     api_symbol = ((tok.get("data") or {}).get("attributes") or {}).get("symbol") or ""
-    if api_symbol.upper() != symbol.upper():
+    if api_symbol.upper().lstrip("$") != symbol.upper():                     # '$WIF' is WIF
         return {"symbol": symbol, "mint": mint, "dropped": f"symbol mismatch (API says {api_symbol!r})"}
     pools = api.get(f"/networks/solana/tokens/{mint}/pools?page=1").get("data") or []
     cut = now - timedelta(days=MIN_POOL_AGE_DAYS)
@@ -59,27 +64,32 @@ def select_pool(api: Api, symbol: str, mint: str, now: datetime) -> dict:
         a, r = p["attributes"], p["relationships"]
         base = r["base_token"]["data"]["id"].split("_", 1)[-1]
         quote = r["quote_token"]["data"]["id"].split("_", 1)[-1]
-        if base != mint or quote not in QUOTES:
+        if base == mint and quote in QUOTES:
+            other = quote
+        elif quote == mint and base in QUOTES:                                # e.g. "SOL / BONK": token is the quote
+            other = base
+        else:
             continue
         reserve = float(a.get("reserve_in_usd") or 0)
         created = datetime.fromisoformat((a.get("pool_created_at") or "2100-01-01T00:00:00Z").replace("Z", "+00:00"))
         if reserve < MIN_RESERVE_USD or created > cut:
             continue
         if best is None or reserve > best["reserve_usd"]:
-            best = {"symbol": symbol, "mint": mint, "pool": a["address"], "quote": QUOTES[quote],
+            best = {"symbol": symbol, "mint": mint, "pool": a["address"], "quote": QUOTES[other],
                     "dex": r["dex"]["data"]["id"], "reserve_usd": reserve, "pool_created_at": a["pool_created_at"]}
     return best or {"symbol": symbol, "mint": mint,
                     "dropped": f"no SOL/USDC/USDT pool with reserve >= ${MIN_RESERVE_USD:,.0f} "
                                f"older than {MIN_POOL_AGE_DAYS} days"}
 
 
-def fetch_ohlcv(api: Api, pool: str, now: datetime, days: int = MAX_DAYS) -> list[tuple]:
-    """Hourly bars (ts, open, high, low, close, volume_usd), ascending, unique, last `days` days."""
+def fetch_ohlcv(api: Api, pool: str, now: datetime, days: int = MAX_DAYS, token: str = "base") -> list[tuple]:
+    """Hourly bars (ts, open, high, low, close, volume_usd) of `token` (a mint, or base) in USD, ascending, unique,
+    last `days` days."""
     start = int((now - timedelta(days=days)).timestamp()) + 3600
     before, bars = int(now.timestamp()), {}
     while True:
         d = api.get(f"/networks/solana/pools/{pool}/ohlcv/hour?aggregate=1&limit=1000&currency=usd"
-                    f"&before_timestamp={before}")
+                    ff"&token={token}&before_timestamp={before}")
         rows = ((d.get("data") or {}).get("attributes") or {}).get("ohlcv_list") or []
         for ts, o, h, lo, c, v in rows:
             if ts >= start:
@@ -126,7 +136,7 @@ def build_dataset(out_dir: Path, now: datetime | None = None, api: Api | None = 
         p = out_dir / f"{t['symbol']}.csv"
         if p.exists():
             continue
-        bars = fetch_ohlcv(api, t["pool"], datetime.fromisoformat(universe["built_at"]))
+        bars = fetch_ohlcv(api, t["pool"], datetime.fromisoformat(universe["built_at"]), token=t["mint"])
         save_csv(p, bars)
         log(f"[bars] {t['symbol']}: {len(bars)} hourly bars")
     return universe

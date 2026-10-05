@@ -126,3 +126,21 @@ def test_ohlcv_pages_backwards_and_dedupes():
     ts = [b[0] for b in bars]
     assert ts == sorted(set(ts)) and ts[-1] == end - 3600 and len(ts) == 100 * 24 - 1
     assert json.dumps(bars[0])
+
+
+def test_pool_where_the_token_is_the_quote_side_is_accepted_and_404_drops():
+    import urllib.error
+    from datetime import datetime, timezone
+    now = datetime(2026, 10, 5, tzinfo=timezone.utc)
+    sol = "So11111111111111111111111111111111111111112"
+    p = {"attributes": {"address": "flip", "reserve_in_usd": "4000000", "pool_created_at": "2024-01-01T00:00:00Z"},
+         "relationships": {"base_token": {"data": {"id": "solana_" + sol}}, "quote_token": {"data": {"id": "solana_MINT"}},
+                           "dex": {"data": {"id": "orca"}}}}
+    api = FakeApi({"/networks/solana/tokens/MINT/pools": {"data": [p]},
+                   "/networks/solana/tokens/MINT": {"data": {"attributes": {"symbol": "$ABC"}}}})
+    sel = select_pool(api, "ABC", "MINT", now)
+    assert sel["pool"] == "flip" and sel["quote"] == "SOL"
+
+    def boom(path):
+        raise urllib.error.HTTPError(path, 404, "nf", {}, None)
+    assert select_pool(FakeApi({"/networks/solana/tokens/": boom}), "X", "BAD", now)["dropped"].startswith("mint not found")
