@@ -7,7 +7,7 @@ import trading.entry_location as EL
 from trading import sample_epoch
 from trading.strategy_constants import constants_hash, strategy_constants
 
-PINNED = {"s7-sellguard-budget": "d61e3a6eb7", "s8-protective-exits": "f8695d45a5", "s9-stale-timeout": "380073928c", "s10-http-sell-priority": "380073928c", "s11-constants-v2": "f61405d482", "s12-stale-healthy-clock": "35b11276a6", "s13-fill-error-haircut": "554d4cdde4"}
+PINNED = {"s7-sellguard-budget": "d61e3a6eb7", "s8-protective-exits": "f8695d45a5", "s9-stale-timeout": "380073928c", "s10-http-sell-priority": "380073928c", "s11-constants-v2": "f61405d482", "s12-stale-healthy-clock": "35b11276a6", "s13-fill-error-haircut": "554d4cdde4", "s14-cost-floor-no-curve": "554d4cdde4"}
 
 
 def test_constants_unchanged_for_this_strategy_version():

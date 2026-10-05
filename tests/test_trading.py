@@ -93,7 +93,7 @@ def test_good_token_vets_scores_and_sizes():
     assert sc.decision == "TRADE" and sc.components["x_alpha"] is None and sc.components["smart_money"] is None
     assert sc.why and sc.invalidate
     sz = D.size(st, sc, TradingConfig(), equity=1000, cash=1000, exposure=0)
-    assert 0 < sz.usd <= 50 and sz.capped_by == "max_position"
+    assert 50 <= sz.usd <= 80                       # D1: floor $50 (fixed fees), cap 8 % of equity
 
 
 def test_tslax_apewif_identity_conflict_is_rejected():
@@ -133,9 +133,12 @@ def test_active_authorities_and_dangerous_token2022_fail():
 def test_size_respects_every_cap():
     st = good_state(liq=1_000)                              # tiny pool: 2 % of liquidity = $20
     sc = D.score(st, D.vet(st, TradingConfig(min_liquidity_usd=500)), TradingConfig(min_liquidity_usd=500))
-    assert D.size(st, sc, TradingConfig(), 1000, 1000, 0).usd == 20.0
+    small = D.size(st, sc, TradingConfig(), 1000, 1000, 0)
+    assert small.usd == 0.0 and "cap allows only $20" in small.reasons[-1]      # D1: a $20 trade is all fees
+    assert D.size(st, sc, TradingConfig(min_position_usd=10), 1000, 1000, 0).usd == 20.0
     sc.confidence, sc.opportunity = 100, 100
-    assert D.size(good_state(), sc, TradingConfig(), 1000, cash=12, exposure=0).usd == 12.0
+    assert D.size(good_state(), sc, TradingConfig(min_position_usd=10), 1000, cash=12, exposure=0).usd == 12.0
+    assert D.size(good_state(), sc, TradingConfig(), 1000, cash=12, exposure=0).usd == 0.0
     assert D.size(good_state(), sc, TradingConfig(), 1000, 1000, exposure=245).usd == 0.0   # < $10 room -> no trade
 
 
@@ -152,7 +155,7 @@ def test_risk_limits():
     assert not _rk(TradingConfig(kill_switch=True)).allowed
     assert not _rk(open_positions=5).allowed
     assert not _rk(equity=940, day_start=1000).allowed                       # -6 % today
-    assert not _rk(usd=60).allowed                                            # > 5 % position
+    assert not _rk(usd=90).allowed                                            # > 8 % position (D1)
     assert not _rk(exposure=230).allowed                                      # exposure > 25 %
     assert not _rk(est_impact=0.05).allowed                                   # slippage > 3 %
     assert not _rk(est_impact=None).allowed

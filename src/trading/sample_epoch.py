@@ -13,8 +13,8 @@ import json
 import time
 from pathlib import Path
 
-STRATEGY_VERSION = "s13-fill-error-haircut"   # C5: a HARD exit whose fill raises SELL_FILL_ERROR_MAX (3) times is filled at the haircut; fill errors back off
-# (previous: s12-stale-healthy-clock, never deployed)
+STRATEGY_VERSION = "s14-cost-floor-no-curve"   # D1: $50 minimum size (fixed fees), 8 % cap, no entry on the Pump.fun bonding curve
+# (previous: s13-fill-error-haircut, never deployed)
 MIN_SAMPLE_COMMIT = "148af2c"            # the server must run this commit or a descendant
 LEGACY = "LEGACY"
 

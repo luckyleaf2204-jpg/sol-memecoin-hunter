@@ -18,7 +18,7 @@ class ModeNotAllowed(ValueError):
 
 def production_config(**over) -> "TradingConfig":
     """The configuration the server trades with (web/app.py env defaults): lifecycle engine with the no-chasing gate,
-    experimental shadow, latency probe, AUTO latency model. Fingerprint 02e5bdcc03 with no overrides."""
+    experimental shadow, latency probe, AUTO latency model. Fingerprint d6bf48c54d with no overrides (D1)."""
     base = dict(experimental=True, latency_probe=True, lifecycle=True, latency_slippage_model="AUTO")
     base.update(over)
     return TradingConfig(**base)
@@ -31,9 +31,11 @@ class TradingConfig:
     starting_balance: float = 1_000.0        # paper USD
     # SIZE
     risk_per_trade_pct: float = 1.0          # % of equity lost if the stop loss is hit
-    max_position_pct: float = 5.0            # hard cap per position (% of equity)
+    max_position_pct: float = 8.0            # hard cap per position (% of equity); was 5 (room for the $50 floor)
     max_liquidity_pct: float = 2.0           # never take more than this % of the pool's liquidity
-    min_position_usd: float = 10.0
+    min_position_usd: float = 50.0           # D1: a smaller size is RAISED to this (caps permitting): the fixed fee
+    # (~0.77 $ per tx at 0.005 SOL priority) stays ~3 % of a round trip instead of 6-15 % at 10-25 $
+    entry_allow_curve: bool = False          # D1: no entry on the Pump.fun bonding curve (1.25 %/side + 2x failures)
     # RISK
     max_open_positions: int = 5
     max_total_exposure_pct: float = 25.0

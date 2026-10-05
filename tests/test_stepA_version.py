@@ -11,10 +11,11 @@ from trading.sample_epoch import MIN_SAMPLE_COMMIT, STRATEGY_VERSION, SampleEpoc
 
 
 def test_strategy_parameters_unchanged_while_counting():
-    """Pinned fingerprints (commit 148af2c). If this fails, a strategy parameter changed: bump the sample epoch."""
-    assert TradingConfig().sample_id() == "78322bacfd"
+    """Pinned fingerprints (D1: $50 floor, 8 % cap, no curve entries). If this fails, a strategy parameter changed:
+    bump the sample epoch."""
+    assert TradingConfig().sample_id() == "30aa15f4a5"
     c = TradingConfig(experimental=True, latency_probe=True, lifecycle=True, latency_slippage_model="AUTO")
-    assert c.sample_id() == "02e5bdcc03"
+    assert c.sample_id() == "d6bf48c54d"
     assert (c.entry_max_extension_5m_pct, c.hard_exit_no_quote_haircut_pct, c.stop_loss_pct, c.tp1_pct, c.tp2_pct) == \
         (40.0, 30.0, 15.0, 30.0, 80.0)
 

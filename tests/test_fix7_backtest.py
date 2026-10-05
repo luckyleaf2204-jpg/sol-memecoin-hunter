@@ -11,7 +11,7 @@ from trading.config import TradingConfig, production_config
 
 def test_production_config_is_the_server_fingerprint():
     c = production_config()
-    assert c.lifecycle and c.entry_location_gate and c.experimental and c.sample_id() == "02e5bdcc03"
+    assert c.lifecycle and c.entry_location_gate and c.experimental and c.sample_id() == "d6bf48c54d"
 
 
 def test_backtest_default_is_the_gated_lifecycle_and_legacy_is_refused():

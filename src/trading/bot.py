@@ -777,6 +777,8 @@ class PaperBot:
             why.append(f"entry_location: extension_5m {ext:.0f}% > {c.entry_max_extension_5m_pct:.0f}%")
         if loc in c.entry_block_locations:
             why.append(f"entry_location: {loc}")
+        if not c.entry_allow_curve and st.market is not None and st.market.is_curve:
+            why.append("entry_location: ON_CURVE")         # D1: Pump.fun curve fees + failures eat the edge
         from trading.gate_stats import record
         record(self.book.gate_seen, st.mint, why, now)  # G8: block rate by reason (unique tokens)
         if not why:

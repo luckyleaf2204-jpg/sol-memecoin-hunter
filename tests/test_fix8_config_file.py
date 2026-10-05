@@ -32,5 +32,5 @@ def test_server_fingerprint_comes_from_code_and_env_only(tmp_path):
     cfg = TradingConfig.load(p)
     cfg.experimental = cfg.latency_probe = cfg.lifecycle = True                 # what web/app.py applies from env
     cfg.latency_slippage_model = "AUTO"
-    assert cfg.sample_id() == production_config().sample_id() == "02e5bdcc03"
+    assert cfg.sample_id() == production_config().sample_id() == "d6bf48c54d"
     assert TradingConfig.load(tmp_path / "missing.json").ignored_file_keys == []

@@ -332,6 +332,11 @@ def size(st: TokenState, sc: Score, cfg: TradingConfig, equity: float, cash: flo
     if capped_by:
         reasons.append(f"capped by {capped_by} (${caps[capped_by]:,.0f})")
     if usd < cfg.min_position_usd:
-        reasons.append(f"below minimum ${cfg.min_position_usd:,.0f} -> no trade")
-        usd = 0.0
+        room = min(min(caps.values()), risk_usd / (stop / 100))   # never above a cap NOR the 1 % risk budget
+        if room >= cfg.min_position_usd:            # D1: raise to the floor (fixed fees)
+            reasons.append(f"raised to the minimum ${cfg.min_position_usd:,.0f} (fixed fees per tx)")
+            usd = cfg.min_position_usd
+        else:
+            reasons.append(f"below minimum ${cfg.min_position_usd:,.0f} and a cap allows only ${room:,.0f} -> no trade")
+            usd = 0.0
     return Size(round(usd, 2), reasons, capped_by)

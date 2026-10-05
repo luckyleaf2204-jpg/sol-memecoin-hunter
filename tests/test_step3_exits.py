@@ -48,7 +48,8 @@ def test_wide_stop_keeps_risk_at_one_percent(stop):
 def test_wide_stop_sets_the_stop_price():
     b, st, p = opened()
     assert p.stop_price == pytest.approx(p.entry_price * 0.85)
-    b2 = bot([good("Wide1111111111111111111111111111111111111")], b.jupiter, wide_stop_pct=22.0)
+    b2 = bot([good("Wide1111111111111111111111111111111111111")], b.jupiter, wide_stop_pct=22.0,
+             min_position_usd=10.0)                    # (stop placement only; a 22 % stop cannot fund the $50 floor)
     st2 = b2.engine.published[0]
     b2.tick()
     asyncio.run(b2.execute_intents())
