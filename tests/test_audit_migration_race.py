@@ -187,3 +187,76 @@ def test_state_change_during_the_latency_probe_cancels_the_buy(change):
 def test_probe_with_an_unchanged_state_still_buys():
     b, st = _run_probe(lambda b, c: None)
     assert st.mint in b.book.positions
+
+
+# ---------------------------------------------------------------- the fill and the entry use the FRESH state
+def test_fill_and_entry_baselines_come_from_the_fresh_state():
+    """Liquidity and price published during the probe: the fill's reference price and the position's entry
+    liquidity / volume (baselines of liquidity_collapse / volume_collapse) are the fresh ones, not the snapshot
+    taken before the BUY quote."""
+    def move(b, c):
+        c.market.liquidity_usd = c.market.liquidity_usd * 3
+        c.market.vol_5m = (c.market.vol_5m or 1000.0) * 2
+        c.market.price_usd = c.market.price_usd * 1.05
+    ref = [None]
+    st = good()
+    old_liq, old_vol, old_px = st.market.liquidity_usd, st.market.vol_5m or 1000.0, st.market.price_usd
+    j = PublishDuringProbe(ref, move)
+    b = bot([st], j, latency_probe=True)
+    ref[0] = b
+    b._probe_rng.uniform = lambda a, c: 0.0
+    b.tick()
+    asyncio.run(b.execute_intents())
+    p = b.book.positions[st.mint]
+    buy = [e for e in b.book.executions if e.side == "BUY"][-1]
+    assert p.entry_liq == old_liq * 3 and p.entry_vol == old_vol * 2
+    assert buy.ref_price == old_px * 1.05
+
+
+def test_risk_rising_during_the_probe_is_seen_by_the_entry_risk_buffer():
+    from trading.config import TradingConfig
+    def riskier(b, c):
+        c.risk = copy.copy(c.risk)
+        c.risk.score = b.cfg.entry_max_risk + 5                   # above the entry risk buffer
+    ref = [None]
+    st = good()
+    j = PublishDuringProbe(ref, riskier)
+    b = bot([st], j, latency_probe=True)
+    b.cfg.experimental = True                                     # the entry risk buffer is part of that engine
+    ref[0] = b
+    b._probe_rng.uniform = lambda a, c: 0.0
+    b.tick()
+    if st.mint not in b.intents:                                  # the experimental engine decides on its own
+        b.decisions[st.mint] = {**b.decisions.get(st.mint, {}), "decision": "TRADE", "engine": "experimental",
+                                "risk_allowed": True}
+        b.intents[st.mint] = {"mint": st.mint, "usd": 50.0, "ts": __import__("time").time()}
+    st.risk.score = min(st.risk.score, b.cfg.entry_max_risk - 10)  # low at quote time
+    asyncio.run(b.execute_intents())
+    assert st.mint not in b.book.positions and any(x["stage"] == "entry" for x in b.buffer_blocks)
+    assert TradingConfig().entry_max_risk == b.cfg.entry_max_risk
+
+
+def test_sell_fill_uses_the_state_published_during_the_sell_quote():
+    import time
+    from test_v12 import MINT, opened
+    b, st, p = opened()
+
+    class PublishDuringSell(FakeJupiter):
+        async def quote_result(self, im, om, amount, slip, **kw):
+            q = await self.quote(im, om, amount, slip)
+            if om == J.WSOL:
+                fresh = []
+                for s0 in b.engine.published:
+                    c = copy.copy(s0)
+                    c.market = copy.copy(s0.market)
+                    c.market.price_usd = s0.market.price_usd * 1.02      # newer print while quoting
+                    fresh.append(c)
+                b.engine.published = fresh
+            return J.QuoteResult(J.OK, quote=q, http=200, attempts=1)
+    b.jupiter = PublishDuringSell(sell_price=p.entry_price * 1.35)
+    st.stamps["market"].updated_at = time.time() + 1
+    st.market.price_usd = p.entry_price * 1.35                         # TP1 (non-HARD: ref = market price)
+    b.tick()
+    asyncio.run(b.execute_sells())
+    sell = [e for e in b.book.executions if e.side == "SELL"][-1]
+    assert sell.ref_price == p.entry_price * 1.35 * 1.02 and MINT in b.book.positions   # half sold at TP1

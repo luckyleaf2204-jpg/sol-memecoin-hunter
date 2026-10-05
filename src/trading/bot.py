@@ -1385,6 +1385,7 @@ class PaperBot:
                 return entry, QuoteResult(API_ERROR, detail=f"client error {type(e).__name__}")
         for fut in asyncio.as_completed([quote(e) for e in due]):     # concurrently, filled as each quote lands:
             (mint, it, p, st, tokens_then), qr = await fut             # one slow quote never delays the others
+            st = next((x for x in (self.engine.published or []) if x.mint == mint), st)   # fresh state for the fill
             try:
                 if self.book.positions.get(mint) is not p or p.tokens != tokens_then or self.sell_intents.get(mint) is not it:
                     continue                                # position / intent changed while quoting: next round
@@ -1597,6 +1598,22 @@ class PaperBot:
                 self.quote_obs_log[-1]["trail"] = self.market_trail[mint]      # later prints validate the discrepancy
                 risk_at_quote = st.risk.score if st.risk else None
                 drift = await self._latency_probe(st, mint, int(usd / sol * 1e9), q)
+                # FINAL validation right after the LAST await (BUY quote, latency probe); nothing below awaits. The
+                # engine publishes NEW state copies, so `st` is the snapshot from before the quote: re-read it and use
+                # the fresh state for everything below (entry risk buffer, risk engine, fill, entry liquidity / volume).
+                fresh = next((x for x in (self.engine.published or []) if x.mint == mint), None)
+                rec_now = self.decisions.get(mint, {})
+                why_final = ("token no longer published" if fresh is None else
+                             "no longer a valid Trade Candidate" if not is_trade_candidate(fresh, rec_now) else
+                             "entry_location: ON_CURVE" if self.cfg.entry_location_gate and not self.cfg.entry_allow_curve
+                             and fresh.market is not None and fresh.market.is_curve else
+                             "already holding" if mint in self.book.positions else "")
+                if why_final:
+                    rec_now["state"] = "FINAL_CHECK_FAILED"
+                    self.log("BLOCK", f"BUY cancelled at final validation: {why_final}", fresh or st, now=now)
+                    self.audit.execution("skip", fresh or st, now, why_final, reason="final_validation")
+                    continue
+                st, rec = fresh, rec_now
                 risk_at_entry = st.risk.score if st.risk else None
                 risk_ctx = {"risk_at_candidate": it.get("risk_at_candidate"), "risk_at_quote": risk_at_quote,
                             "risk_at_entry": risk_at_entry, "entry_risk_buffer": self.cfg.entry_max_risk}
@@ -1622,20 +1639,6 @@ class PaperBot:
                     self.audit.execution("skip", st, now, "; ".join(rd.reasons), reason="risk_at_execution")
                     self._rec("quote", st, rec, now, "OK", "risk at execution: " + "; ".join(rd.reasons), q, False,
                               int(self.cfg.max_slippage_pct * 100))
-                    continue
-                # FINAL validation, after every await (quote, latency probe) and with NO await before the fill:
-                # the engine publishes NEW state copies, so `st` above is the snapshot from before the quote.
-                fresh = next((x for x in (self.engine.published or []) if x.mint == mint), None)
-                rec_now = self.decisions.get(mint, {})
-                why_final = ("token no longer published" if fresh is None else
-                             "no longer a valid Trade Candidate" if not is_trade_candidate(fresh, rec_now) else
-                             "entry_location: ON_CURVE" if self.cfg.entry_location_gate and not self.cfg.entry_allow_curve
-                             and fresh.market is not None and fresh.market.is_curve else
-                             "already holding" if mint in self.book.positions else "")
-                if why_final:
-                    rec_now["state"] = "FINAL_CHECK_FAILED"
-                    self.log("BLOCK", f"BUY cancelled at final validation: {why_final}", fresh or st, now=now)
-                    self.audit.execution("skip", fresh or st, now, why_final, reason="final_validation")
                     continue
                 ex = self.exec.buy_from_quote(st, usd, q, sol, now)
                 self._rec("quote", st, rec, now, "OK", "filled" if ex.status == "FILLED" else f"paper fill failed: {ex.reason}",
