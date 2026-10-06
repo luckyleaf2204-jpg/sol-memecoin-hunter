@@ -1,0 +1,2832 @@
+{
+ "source": "https://kolscan.io/leaderboard?timeframe=1|7|30 (embedded roster), fetched 2026-10-06",
+ "note": "Frozen BEFORE any recorded trade was viewed (docs/kol_plan.md). Do not edit.",
+ "n": 565,
+ "wallets": [
+  {
+   "wallet": "13gj9sYDkj42PsC7koDk2cR9mj2YpVQxWvSBLcJcLkzG",
+   "name": "⚫️",
+   "twitter": "https://x.com/jo5htheboss"
+  },
+  {
+   "wallet": "14HDbSrjCJKgwCXDBXv8PGRGFaLrAqDBq2mCwSA46q5x",
+   "name": "0xMistBlade",
+   "twitter": "https://x.com/0xMistBlade"
+  },
+  {
+   "wallet": "14k7D9HA5zff4EmQD6QTPBqM25CRiEA7ZqTjM3fhypgz",
+   "name": "Charlie",
+   "twitter": "https://x.com/Charlduyomeme"
+  },
+  {
+   "wallet": "215nhcAHjQQGgwpQSJQ7zR26etbjjtVdW74NLzwEgQjP",
+   "name": "OGAntD",
+   "twitter": "https://x.com/0GAntD"
+  },
+  {
+   "wallet": "23Ltopfensg1rSsCdoc1M8rcp5cB5bkqbmogMGmH63yW",
+   "name": "Snatcher",
+   "twitter": "https://x.com/solsnatchinfr"
+  },
+  {
+   "wallet": "23wQ7bodYreW3qhnh2YrW8dMkTYSkHHJqGcsiYEJS3Pr",
+   "name": "Cope",
+   "twitter": "https://x.com/copewifsol"
+  },
+  {
+   "wallet": "274vmGgKuYQp8Fxvb8n3cr9ZeY3SYM6LgeaXM6jS2nD6",
+   "name": "Maurits",
+   "twitter": "https://x.com/mauritsneo"
+  },
+  {
+   "wallet": "2BU3NAzgRA2gg2MpzwwXpA8X4CCRaLgrf6TY1FKfJPX2",
+   "name": "Issa",
+   "twitter": "https://x.com/issathecooker"
+  },
+  {
+   "wallet": "2DG4vs36XHf3V9czMopZufUn8ton4tuf6atuRpP4Kowr",
+   "name": "dns",
+   "twitter": "https://x.com/DNS_ERR"
+  },
+  {
+   "wallet": "2FxiPRPLYX3H84FZkdRiUHDgDm4U5u98etbL4yvZ3qRq",
+   "name": "cnr",
+   "twitter": "https://x.com/cnrHTK"
+  },
+  {
+   "wallet": "2G6CNJqfvGP3KWZXtV8rQHra3kxGK28nvzT6TjyWNtiJ",
+   "name": "arnz",
+   "twitter": "https://x.com/arnzxbt"
+  },
+  {
+   "wallet": "2JptG7VJTuohCNrEE2iVT43UtjTNqRTVMsgNs8xeotbC",
+   "name": "Hako",
+   "twitter": "https://x.com/KriptoHako99"
+  },
+  {
+   "wallet": "2RyUYqX1VFoGdDSKm3brWV5c2bY4thXx1Wctz22uYS1p",
+   "name": "Niners",
+   "twitter": "https://x.com/Niners"
+  },
+  {
+   "wallet": "2T5NgDDidkvhJQg8AHDi74uCFwgp25pYFMRZXBaCUNBH",
+   "name": "Idontpaytaxes",
+   "twitter": "https://x.com/untaxxable"
+  },
+  {
+   "wallet": "2W14ahXD3XBfWJchQ4K5NLXmguWWcTTUTuHDhEzeuvP3",
+   "name": "Veloce",
+   "twitter": "https://x.com/VeloceSVJ"
+  },
+  {
+   "wallet": "2X4H5Y9C4Fy6Pf3wpq8Q4gMvLcWvfrrwDv2bdR8AAwQv",
+   "name": "Orange",
+   "twitter": ""
+  },
+  {
+   "wallet": "2YJbcB9G8wePrpVBcT31o8JEed6L3abgyCjt5qkJMymV",
+   "name": "Al4n",
+   "twitter": "https://x.com/Al4neu"
+  },
+  {
+   "wallet": "2e1w3Xo441Ytvwn54wCn8itAXwCKbiizc9ynGEv14Vis",
+   "name": "prettyover",
+   "twitter": "https://x.com/prettyoverr"
+  },
+  {
+   "wallet": "2fg5QD1eD7rzNNCsvnhmXFm5hqNgwTTG8p7kQ6f3rx6f",
+   "name": "Cupsey",
+   "twitter": "https://x.com/Cupseyy"
+  },
+  {
+   "wallet": "2hN82SXLUffhG3vxpezRmae1sGrCBMqHHBDxjmjpagqk",
+   "name": "lyftical",
+   "twitter": "https://x.com/lyftical"
+  },
+  {
+   "wallet": "2iPgNgss7ow3v5YFkTpzABStfjFSyG3BGvP5sZqADtFM",
+   "name": "Jdn",
+   "twitter": "https://x.com/JadenOnChain"
+  },
+  {
+   "wallet": "2k7Mnf2K3GhpB7hEVN1CFFeV4oNzzuCS5Q6SmcfAoLHd",
+   "name": "Setsu",
+   "twitter": "https://x.com/Setsu2k"
+  },
+  {
+   "wallet": "2kv8X2a9bxnBM8NKLc6BBTX2z13GFNRL4oRotMUJRva9",
+   "name": "Gh0stee",
+   "twitter": "https://x.com/4GH0STEE"
+  },
+  {
+   "wallet": "2me9wCkJYNbDSnvVrcS9pqdczinUpZ3V7PfSWrPxCvad",
+   "name": "Yakuza Daddy",
+   "twitter": "https://x.com/YakuzaDaddy"
+  },
+  {
+   "wallet": "2net6etAtTe3Rbq2gKECmQwnzcKVXRaLcHy2Zy1iCiWz",
+   "name": "rambo",
+   "twitter": "https://x.com/goatedondsticks"
+  },
+  {
+   "wallet": "2pUUZYtokRgDV2YzL6M5pjb1jyoHE367yU1sdQ7ac3ea",
+   "name": "Log",
+   "twitter": "https://x.com/Log100x"
+  },
+  {
+   "wallet": "2vXMy7EdkvU6SVzex1kfSeVhrBApC8WU4m9RQTTt4Ro4",
+   "name": "lucky flash",
+   "twitter": "https://x.com/flashcashy"
+  },
+  {
+   "wallet": "2w3zDW2e1KjYtM2pHTkgh78L8DjMrC6fuB9uhwKNigTs",
+   "name": "Yokai Ryujin",
+   "twitter": "https://x.com/YokaiCapital"
+  },
+  {
+   "wallet": "2ycU6vR2e7XfzuR7SRD5CLQJVMYq7gz4vMsefFJb6FMZ",
+   "name": "Sugus",
+   "twitter": "https://x.com/sugusdaddy"
+  },
+  {
+   "wallet": "2yoJibiZUGB1gs31gvtynRTyx9vmj8VrWoQvXDDzUFHS",
+   "name": "Frags",
+   "twitter": "https://x.com/cryptofrags"
+  },
+  {
+   "wallet": "34ZEH778zL8ctkLwxxERLX5ZnUu6MuFyX9CWrs8kucMw",
+   "name": "Groovy",
+   "twitter": "https://x.com/0xGroovy"
+  },
+  {
+   "wallet": "363sqMFaxZgvCoGzxKjXe1BqMGYkSVoCwmghZUndXuaT",
+   "name": "nad",
+   "twitter": "https://x.com/NADGEMS"
+  },
+  {
+   "wallet": "36A6mEN5rYJdVTb6fMqVvG6ez8g2mTYdr1omWcQ1kDKG",
+   "name": "Mel",
+   "twitter": "https://x.com/melxprt"
+  },
+  {
+   "wallet": "37Y6bz7AXpHHRzMHGMqGRxv8JMuHQCS2FFHrPZkUeRt2",
+   "name": "Laanie",
+   "twitter": "https://x.com/cryptolaanie"
+  },
+  {
+   "wallet": "39q2g5tTQn9n7KnuapzwS2smSx3NGYqBoea11tBjsGEt",
+   "name": "Walta",
+   "twitter": "https://x.com/Walta61"
+  },
+  {
+   "wallet": "3BEtHGzhdWPtxSzqVsBorWpbi4jfMvD5cCZy1Qrtac7E",
+   "name": "KennyLoaded",
+   "twitter": "https://x.com/KennyLoaded"
+  },
+  {
+   "wallet": "3BLjRcxWGtR7WRshJ3hL25U3RjWr5Ud98wMcczQqk4Ei",
+   "name": "Sebastian",
+   "twitter": "https://x.com/Saint_pablo123"
+  },
+  {
+   "wallet": "3H9LVHarjBoZ2YPEsgFbVD1zuERCGwfp4AeyHoHsFSEC",
+   "name": "JADAWGS",
+   "twitter": "https://x.com/10xJDOG"
+  },
+  {
+   "wallet": "3HRospuJFML9mDRYGvtr7Bw2Gewzd8bPPZzAy6Yqcm1T",
+   "name": "Wabsie",
+   "twitter": "https://x.com/wabsiee"
+  },
+  {
+   "wallet": "3L8RAxLkvwkz4CgHivaVRtq19741FAdGLk5DgjRfc1fW",
+   "name": "Inquixit",
+   "twitter": "https://x.com/inquixit"
+  },
+  {
+   "wallet": "3LUfv2u5yzsDtUzPdsSJ7ygPBuqwfycMkjpNreRR2Yww",
+   "name": "Domy",
+   "twitter": "https://x.com/domyxbt"
+  },
+  {
+   "wallet": "3MNu91fiPyCefHL88aBYntpwfraf3dBrqJ8VYjJQyaqt",
+   "name": "ocr",
+   "twitter": "https://x.com/ocrxa"
+  },
+  {
+   "wallet": "3PWGw2AmfR641mLLS1GhGSMcfbDft59EUFuvHf7TpDwU",
+   "name": "dints",
+   "twitter": "https://x.com/dintsfi"
+  },
+  {
+   "wallet": "3QNPyTQRYRtDBm7QZZmVGSAaxdYk63UBee1NaVisKHn6",
+   "name": "leonid.ERD",
+   "twitter": "https://x.com/leonidERD"
+  },
+  {
+   "wallet": "3TsRAE3Pdx4eJAcxbiwi9NY8mNYChEkjV5DbAwazFKSq",
+   "name": "guappy",
+   "twitter": "https://x.com/guappy_eth"
+  },
+  {
+   "wallet": "3ZqnSJisaCptQN6csgmRCuHbgLHHkaFbJexB8cpYSPJF",
+   "name": "MrSamo",
+   "twitter": "https://x.com/mrsamo"
+  },
+  {
+   "wallet": "3ZtwP8peTwTfLUF1rgUQgUxwyeHCxfmoELXghQzKqnAJ",
+   "name": "cxltures",
+   "twitter": "https://x.com/cxlturesvz"
+  },
+  {
+   "wallet": "3cG7d6GmX47HKSX5nWRX9MJpruCojbzUkak92gSXGtG5",
+   "name": "Rektober",
+   "twitter": "https://x.com/rektober"
+  },
+  {
+   "wallet": "3h65MmPZksoKKyEpEjnWU2Yk2iYT5oZDNitGy5cTaxoE",
+   "name": "Jidn",
+   "twitter": "https://x.com/jidn_w"
+  },
+  {
+   "wallet": "3i8akM4xfSX9WKFB5bQ61fmiYkeKQEFqvdMEyu6pSEk9",
+   "name": "MoneyMaykah",
+   "twitter": "https://x.com/moneymaykah_"
+  },
+  {
+   "wallet": "3j5c4aD1aznxQXJ3DWw1b7UD8kKuaqXVbpaVeWPR83TG",
+   "name": "Kaaox",
+   "twitter": "https://x.com/xKaaox"
+  },
+  {
+   "wallet": "3jckt69SiN3aCMbBWJoDS1s4xxGpqNxFFKnwhpRAQmuL",
+   "name": "Pavel",
+   "twitter": "https://x.com/pavelbtc"
+  },
+  {
+   "wallet": "3jzHjoPKaceZjA6AqAWka7Ghw9F3w9k9cvjGTmybdioT",
+   "name": "dxrnelljcl",
+   "twitter": "https://x.com/dxrnell"
+  },
+  {
+   "wallet": "3kebnKw7cPdSkLRfiMEALyZJGZ4wdiSRvmoN4rD1yPzV",
+   "name": "Bastille",
+   "twitter": "https://x.com/BastilleBtc"
+  },
+  {
+   "wallet": "3mPypxb7ViYEdLv4siFmESvY5w5ZKknwgmB4TPcZ77qe",
+   "name": "Carti The Menace",
+   "twitter": "https://x.com/CartiTheMenace"
+  },
+  {
+   "wallet": "3nvC8cSrEBqFEXZjUpKfwZMPk7xYdqcnoxmFBjXiizVX",
+   "name": "Value \\u0026 Time",
+   "twitter": "https://x.com/valueandtime"
+  },
+  {
+   "wallet": "3pcmVZ1DwKbqnjbGbeg3FycThT1AkTpGQYB96jGU6oS1",
+   "name": "Fizzwick Bramblewhistle",
+   "twitter": "https://x.com/fizzwickBW"
+  },
+  {
+   "wallet": "3pfqebV65sHMbF5z86HsPKSiTxwpNhCzjK5X7GUqCbtK",
+   "name": "Rem",
+   "twitter": "https://x.com/yeaitsrem"
+  },
+  {
+   "wallet": "3rwzJNVRrprfTQD3xFgxRK279tVAhNBtGtQk4WdP6Lu2",
+   "name": "Boru",
+   "twitter": "https://x.com/boru_crypto"
+  },
+  {
+   "wallet": "3tnzEgqo6U19ocZbbc49vcGv3mGSoWNFAYjQQk5gF2qP",
+   "name": "Junior",
+   "twitter": "https://x.com/Junior_dot_"
+  },
+  {
+   "wallet": "3uz65G8e463MA5FxcSu1rTUyWRtrRLRZYskKtEHHj7qn",
+   "name": "Felix",
+   "twitter": "https://x.com/Felixonchain"
+  },
+  {
+   "wallet": "3wDWKhxmvHaMwk2vc3aTgeY5oTqUnGhuDJgJfC9uyRKg",
+   "name": "jazz",
+   "twitter": "https://x.com/youngjazzeth"
+  },
+  {
+   "wallet": "3wZ6MfB1DRUvtozvcptvV1qAhQ5FKj3qpZR4Db45G6jk",
+   "name": "B*",
+   "twitter": "https://x.com/BeezyScores"
+  },
+  {
+   "wallet": "3wjyaSegfV7SZzjv9Ut1p6AcY5ZdoZjmu6i6QPCVvnmz",
+   "name": "Donuttcrypto",
+   "twitter": "https://x.com/donuttcrypto"
+  },
+  {
+   "wallet": "41uh7g1DxYaYXdtjBiYCHcgBniV9Wx57b7HU7RXmx1Gg",
+   "name": "Lowskii (believes)",
+   "twitter": "https://x.com/Lowskii_gg"
+  },
+  {
+   "wallet": "42nsEk51owYM3uciuRvFerqK77yhXZyjBLRgkDzJPV2g",
+   "name": ".exe",
+   "twitter": "https://x.com/itoptick"
+  },
+  {
+   "wallet": "4AHgEkTsGqY77qtde4UJn9yZCrbGcM7UM3vjT3qM4G5H",
+   "name": "BagCalls",
+   "twitter": "https://x.com/BagCalls"
+  },
+  {
+   "wallet": "4BdKaxN8G6ka4GYtQQWk4G4dZRUTX2vQH9GcXdBREFUk",
+   "name": "Jijo",
+   "twitter": "https://x.com/jijo_exe"
+  },
+  {
+   "wallet": "4Bdn33fA7LLZQuuXuFLSxtPWGAUnMBcreQHfh9MXuixe",
+   "name": "Key",
+   "twitter": "https://x.com/w3b3k3y"
+  },
+  {
+   "wallet": "4Be9CvxqHW6BYiRAxW9Q3xu1ycTMWaL5z8NX4HR3ha7t",
+   "name": "Mitch",
+   "twitter": "https://x.com/idrawline"
+  },
+  {
+   "wallet": "4CE33zq4XtQwo8WGuBYHdeH68rUkRwYrztGKkzgiuRmk",
+   "name": "PROXY",
+   "twitter": "https://x.com/PXYtrade"
+  },
+  {
+   "wallet": "4DdrfiDHpmx55i4SPssxVzS9ZaKLb8qr45NKY9Er9nNh",
+   "name": "Mr. Frog",
+   "twitter": "https://x.com/TheMisterFrog"
+  },
+  {
+   "wallet": "4Dm3g5goQkaaXM4s7sphZzk8Vqb39j2mjhABrannMGmj",
+   "name": "trisha",
+   "twitter": "https://x.com/trishhxy"
+  },
+  {
+   "wallet": "4ESzFZUWUdr2GsgHBVeQKuzAmBWS5sRSaXw6PZH2EAau",
+   "name": "dash",
+   "twitter": "https://x.com/dashcrypto_"
+  },
+  {
+   "wallet": "4EsY8HQB4Ak65diFrSHjwWhKSGC8sKmnzyusM993gk2w",
+   "name": "prosciutto",
+   "twitter": "https://x.com/prosciuttosol"
+  },
+  {
+   "wallet": "4Ff9dbi9L93qMvevpESY4YLHtdqTd8Yj8jXj3VwCNY4g",
+   "name": "Padre",
+   "twitter": "https://x.com/PadrePrints"
+  },
+  {
+   "wallet": "4JyenL2p8eQZAQuRS8QAASy7TzEcqAeKGha6bhiJXudh",
+   "name": "Boomer",
+   "twitter": "https://x.com/boomerbuilds"
+  },
+  {
+   "wallet": "4NtyFqqRzvHWsTmJZoT26H9xtL7asWGTxpcpCxiKax9a",
+   "name": "Inside Calls",
+   "twitter": "https://x.com/insidecalls"
+  },
+  {
+   "wallet": "4S8YBCt6hhi7Nr1NnKF6jF856LLN8JJFzD1a8nF5UuHA",
+   "name": "shaka",
+   "twitter": "https://x.com/solanashaka"
+  },
+  {
+   "wallet": "4TCMpxeevymUtCemwcVozhBLWq8Fikc1pVpfcW9zp66B",
+   "name": "Yugi",
+   "twitter": "https://x.com/CryptoYugi0"
+  },
+  {
+   "wallet": "4WPTQA7BB4iRdrPhgNpJihGcxKh8T43gLjMn5PbEVfQw",
+   "name": "Oura",
+   "twitter": "https://x.com/Oura456"
+  },
+  {
+   "wallet": "4X199Pq6etVAdmZf5zfbhAu18biucGip3jFZMj3qvCA8",
+   "name": "denzaa",
+   "twitter": "https://x.com/denzzaaa"
+  },
+  {
+   "wallet": "4YPcZBUd3rNFi1nL1PS6DsiZKCv4Z3TxnY1845k3qWea",
+   "name": "Tomci",
+   "twitter": "https://x.com/Tomci88"
+  },
+  {
+   "wallet": "4YzpSZpxDdjNf3unjkCtdWEsz2FL5mok7e5XQaDNqry8",
+   "name": "xunle",
+   "twitter": "https://x.com/xunle111"
+  },
+  {
+   "wallet": "4ZdCpHJrSn4E9GmfP8jjfsAExHGja2TEn4JmXfEeNtyT",
+   "name": "Robo",
+   "twitter": "https://x.com/roboPBOC"
+  },
+  {
+   "wallet": "4cXnf2z85UiZ5cyKsPMEULq1yufAtpkatmX4j4DBZqj2",
+   "name": "WaiterG",
+   "twitter": "https://x.com/Waiter1x"
+  },
+  {
+   "wallet": "4fZFcK8ms3bFMpo1ACzEUz8bH741fQW4zhAMGd5yZMHu",
+   "name": "Rilsio",
+   "twitter": "https://x.com/CryptoRilsio"
+  },
+  {
+   "wallet": "4hGiRipRQHS7c1b5fCHVv4fG7eK4XMtfmQZVkpvSkvoK",
+   "name": "Rozer",
+   "twitter": "https://x.com/Rozer_"
+  },
+  {
+   "wallet": "4jFPYSoUTRaFbFDJp9QpA1J5pXJmMJYo",
+   "name": "MERK",
+   "twitter": "https://x.com/MerkTrading"
+  },
+  {
+   "wallet": "4nvNc7dDEqKKLM4Sr9Kgk3t1of6f8G66kT64VoC95LYh",
+   "name": "M A M B A 🧲",
+   "twitter": "https://x.com/mambatrades_"
+  },
+  {
+   "wallet": "4nwfXw7n98jEQn93VWY7Cuf1jnn1scHXuXCPGVYS9k6T",
+   "name": "Frost",
+   "twitter": "https://x.com/FrostBallin"
+  },
+  {
+   "wallet": "4s2WzRLa35FB58bZY1i4CN3WoywJeuYrGYHnTKFsT23z",
+   "name": "jester",
+   "twitter": "https://x.com/thejester"
+  },
+  {
+   "wallet": "4sAUSQFdvWRBxR8UoLBYbw8CcXuwXWxnN8pXa4mtm5nU",
+   "name": "Scharo",
+   "twitter": "https://x.com/XScharo"
+  },
+  {
+   "wallet": "4skhkn5456RCRDWdhzxeNoWdL52TeqxmpHtUKfJreD3o",
+   "name": "notHidro",
+   "twitter": "https://x.com/notHidro"
+  },
+  {
+   "wallet": "4uCT4g7YHH4xxfmfNfKUDenwGrRNGoZ9Ay1XFxfUGhQG",
+   "name": "Esee06257",
+   "twitter": "https://x.com/Esee06257"
+  },
+  {
+   "wallet": "4uTeAz9TmZ1J5bNkgGLvqAELvCHJwLZgo7Hxar2KAiyu",
+   "name": "Monarch",
+   "twitter": "https://x.com/MonarchBTC"
+  },
+  {
+   "wallet": "4ud45nGBqtBptQPyoVtcLCCCs1Evh1zLsVVLMmDQn2JW",
+   "name": "Bronsi",
+   "twitter": "https://x.com/bronsi"
+  },
+  {
+   "wallet": "4vw54BmAogeRV3vPKWyFet5yf8DTLcREzdSzx4rw9Ud9",
+   "name": "decu",
+   "twitter": "https://x.com/notdecu"
+  },
+  {
+   "wallet": "4xHGhy4r41XNEgeHpKSC725aZjy6tR5E92xNjs4odBPR",
+   "name": "bruce",
+   "twitter": "https://x.com/onchainscammer"
+  },
+  {
+   "wallet": "4xUEz1saHSQv1yvo4MhFL3bYM7AVgp7Jq5HhLQwdUeBy",
+   "name": "AdamJae",
+   "twitter": "https://x.com/Adam_JAE"
+  },
+  {
+   "wallet": "4xY9T1Q7foJzJsJ6YZDSsfp9zkzeZsXnxd45SixduMmr",
+   "name": "zeropnl",
+   "twitter": "https://x.com/im0pnl"
+  },
+  {
+   "wallet": "4yo9CUuTBbds9NFhZd4MzPiZZkUvveXdTnAH8qMsE8ku",
+   "name": "Gfree",
+   "twitter": "https://x.com/G_free9"
+  },
+  {
+   "wallet": "4z3WtX32eehkmnaNNstZWyAuVBhj6cgpk5JtkdTa4m4A",
+   "name": "J Spizzle",
+   "twitter": "https://x.com/JSpizzleCrypto"
+  },
+  {
+   "wallet": "525LueqAyZJueCoiisfWy6nyh4MTvmF4X9jSqi6efXJT",
+   "name": "Joji",
+   "twitter": "https://x.com/metaversejoji"
+  },
+  {
+   "wallet": "53BnNc49Ajgstciq3CRoyxuBpkkW1r8pgPyvr7JGYnsh",
+   "name": "Monki",
+   "twitter": "https://x.com/m0nkicrypto"
+  },
+  {
+   "wallet": "55zdqS3Y174qSAowPbhSC3WYWvy98neZraQqPUm7xksy",
+   "name": "Oaktastic",
+   "twitter": "https://x.com/Oaktastic1"
+  },
+  {
+   "wallet": "57rXqaQsvgyBKwebP2StfqQeCBjBS4jsrZFJN5aU2V9b",
+   "name": "ram",
+   "twitter": "https://x.com/ramonos"
+  },
+  {
+   "wallet": "5AyJw1VNDgTho2chipbVmuGqTuX1fCvVkLneChQkQrw8",
+   "name": "Bolivian",
+   "twitter": "https://x.com/_bolivian"
+  },
+  {
+   "wallet": "5B52w1ZW9tuwUduueP5J7HXz5AcGfruGoX6YoAudvyxG",
+   "name": "Yenni",
+   "twitter": "https://x.com/Yennii56"
+  },
+  {
+   "wallet": "5B79fMkcFeRTiwm7ehsZsFiKsC7m7n1Bgv9yLxPp9q2X",
+   "name": "bandit",
+   "twitter": "https://x.com/bandeez"
+  },
+  {
+   "wallet": "5M8ACGKEXG1ojKDTMH3sMqhTihTgHYMSsZc6W8i7QW3Y",
+   "name": "Unipcs (aka 'Bonk Guy')",
+   "twitter": "https://x.com/theunipcs"
+  },
+  {
+   "wallet": "5Pe7HtNfYYU2HC4JWAEhiZPVooFwUXAndvsJhSV5L5s4",
+   "name": "passit (creed arc)",
+   "twitter": "https://x.com/passitome"
+  },
+  {
+   "wallet": "5RQEcWJZdhkxRMbwjSq32RaocgYPaWDhi3ztimWUcrwo",
+   "name": "EvansOfWeb",
+   "twitter": "https://x.com/EvansOfWeb3"
+  },
+  {
+   "wallet": "5S9qzJhSooakBaA9qZT6vWtoSy8FvyfxJ4t1vXvEK9G7",
+   "name": "Thesis ✍️",
+   "twitter": "https://x.com/Theeesis"
+  },
+  {
+   "wallet": "5T229oePmJGE5Cefys8jE9Jq8C7qfGNNWy3RVA7SmwEP",
+   "name": "Tuults",
+   "twitter": "https://x.com/tuults69"
+  },
+  {
+   "wallet": "5XVKfruE4Zzeoz3aqBQfFMb5aSscY5nSyc6VwtQwNiid",
+   "name": "I̶l̷y̶",
+   "twitter": "https://x.com/ilyunow"
+  },
+  {
+   "wallet": "5YRgrP3mjGzrzirYYN5HAQH19cTYREYwGxW6XRJQUzij",
+   "name": "slingoor",
+   "twitter": "https://x.com/slingoorio"
+  },
+  {
+   "wallet": "5ZuV8eqkvzYFVEKbLvGBdexL2tFv7E5BCd2HZpjqbdg",
+   "name": "Doji",
+   "twitter": "https://x.com/Humanevolvd"
+  },
+  {
+   "wallet": "5aBoXfRAEcAn1xBRGxCceicLF5Wst3CMS4rpaCrUTX4F",
+   "name": "navi 🧃",
+   "twitter": "https://x.com/navi9000x"
+  },
+  {
+   "wallet": "5d3jQcuUvsuHyZkhdp78FFqc7WogrzZpTtec1X9VNkuE",
+   "name": "tech",
+   "twitter": "https://x.com/technoviking46"
+  },
+  {
+   "wallet": "5dhKiVtynZVDWGgvAFrz9mPPU1VNKkaMrcbrjKMtoANw",
+   "name": "Obijai",
+   "twitter": "https://x.com/Obijai"
+  },
+  {
+   "wallet": "5dzH7gh5FjtrxUwtfBufJyTBA4fyCUGheZsdYQsE9vag",
+   "name": "Hermes",
+   "twitter": "https://x.com/coinsolmaxi"
+  },
+  {
+   "wallet": "5fHJszey2UdB2nETS1y6NS2wSG4ic9byKtbgJzaYzGeV",
+   "name": "k4ye",
+   "twitter": "https://x.com/k4yeSol"
+  },
+  {
+   "wallet": "5fM9cY5GMo8QtTmxuvNx7bWFUoNhdQ1H5w8bMdXGVtaH",
+   "name": "Alpha wallet 4",
+   "twitter": "https://x.com/quarsays"
+  },
+  {
+   "wallet": "5hAgYC8TJCcEZV7LTXAzkTrm7YL29YXyQQJPCNrG84zM",
+   "name": "Schoen",
+   "twitter": "https://x.com/Schoen_xyz"
+  },
+  {
+   "wallet": "5o3kAZLwEzNF1kfVv8JSEqv6sSB88pZbHxF1oYTxgXzG",
+   "name": "neo.",
+   "twitter": "https://x.com/neodot"
+  },
+  {
+   "wallet": "5ruP877fu8sBshx9inDeHsVLjnJtgVBTbjnbupeDHYHH",
+   "name": "Sanity",
+   "twitter": "https://x.com/Sanity100x"
+  },
+  {
+   "wallet": "5sNnKuWKUtZkdC1eFNyqz3XHpNoCRQ1D1DfHcNHMV7gn",
+   "name": "cryptovillain26",
+   "twitter": "https://x.com/cryptovillain26"
+  },
+  {
+   "wallet": "5t9xBNuDdGTGpjaPTx6hKd7sdRJbvtKS8Mhq6qVbo8Qz",
+   "name": "Smokez",
+   "twitter": "https://x.com/SmokezXBT"
+  },
+  {
+   "wallet": "5vg7he5HibvsAW86wfiuP6jw7VwKmUAnP6P93mVCdpJu",
+   "name": "blixze ♱",
+   "twitter": "https://x.com/blixze"
+  },
+  {
+   "wallet": "5wcc13mXoyqe6qh2iHH5GFknojoJ7y13ZPx9K4NXTuo3",
+   "name": "Dolo",
+   "twitter": "https://x.com/doloxbt"
+  },
+  {
+   "wallet": "5xmDQxSFf9HsRi2CKfLr5R37gnDJc4KGxDAZJR9Yp69x",
+   "name": "💎⚡¢®¥ptø ¥êêzü$⚡💎",
+   "twitter": "https://x.com/CryptoYeezussss"
+  },
+  {
+   "wallet": "62N1K57D37AUDGp68tnDYKPjGDsaAAtmo357nBtEtuR",
+   "name": "set",
+   "twitter": "https://x.com/Setuhx"
+  },
+  {
+   "wallet": "64ymeD9XTAkNJgHtXgrG6JCNZmBC9fSVcmgkL54pFikE",
+   "name": "Phineas.SOL",
+   "twitter": "https://x.com/Phineas_Sol"
+  },
+  {
+   "wallet": "65paNEG8m7mCVoASVF2KbRdU21aKXdASSB9G3NjCSQuE",
+   "name": "Pullup 🗡️🧣✨",
+   "twitter": "https://x.com/pullupso"
+  },
+  {
+   "wallet": "67Nwfi9hgwqhxGoovT2JGLU67uxfomLwQAWncjXXzU6U",
+   "name": "Silver",
+   "twitter": "https://x.com/0xSilver"
+  },
+  {
+   "wallet": "69z4qTgQ5DBRTJvnQzx2h8jZhNsv5UgADotEwwKUm2JS",
+   "name": "King",
+   "twitter": "https://x.com/thekryptoking_"
+  },
+  {
+   "wallet": "6EDaVsS6enYgJ81tmhEkiKFcb4HuzPUVFZeom6PHUqN3",
+   "name": "Cowboy🔶BNB",
+   "twitter": "https://x.com/feibo03"
+  },
+  {
+   "wallet": "6HJetMbdHBuk3mLUainxAPpBpWzDgYbHGTS2TqDAUSX2",
+   "name": "LJC",
+   "twitter": "https://x.com/OnlyLJC"
+  },
+  {
+   "wallet": "6HvULpyYig7nHjNsw4rJR5CPMRJydcXg1w3a6Xoz2bNf",
+   "name": "Unemployed",
+   "twitter": "https://x.com/xUnemployedx"
+  },
+  {
+   "wallet": "6KR7SorsUQtNH6CB6JpAnWCAKeTysa95iyXeWihdNeGT",
+   "name": "KOREAN",
+   "twitter": "https://x.com/Korean_bags"
+  },
+  {
+   "wallet": "6LChaYRYtEYjLEHhzo4HdEmgNwu2aia8CM8VhR9wn6n7",
+   "name": "Assasin.eth",
+   "twitter": "https://x.com/assasin_eth"
+  },
+  {
+   "wallet": "6MrVEEBypwJuakxLQTeEvidCgM6LDLtfMQeWdnrjpobM",
+   "name": "Zoke",
+   "twitter": "https://x.com/z0ke"
+  },
+  {
+   "wallet": "6NGN6KyYdzptusgeg3fWSC1CKMDz3b9nSGDrxYAjzUWa",
+   "name": "fawi",
+   "twitter": "https://x.com/freakyfawi"
+  },
+  {
+   "wallet": "6Qs6joB349h7zu1z9xRgPgMSmpBYLDQb2wtAecY4LysH",
+   "name": "Chefin",
+   "twitter": "https://x.com/Chefin100x"
+  },
+  {
+   "wallet": "6S8GezkxYUfZy9JPtYnanbcZTMB87Wjt1qx3c6ELajKC",
+   "name": "Nyhrox",
+   "twitter": "https://x.com/nyhrox"
+  },
+  {
+   "wallet": "6SYhd67FqypKyNqd5iFikRhrmKAKcCwwurSYUAMNSH4r",
+   "name": "Dragon",
+   "twitter": "https://x.com/DragonOnSol"
+  },
+  {
+   "wallet": "6TAHDM5Tod7dBTZdYQxzgJZKxxPfiNV9udPHMiUNumyK",
+   "name": "Bluey",
+   "twitter": "https://x.com/Blueycryp"
+  },
+  {
+   "wallet": "6UwCF9JCEPRFfBKibwAoyuEZukLwzATiWRjiGnH1Eass",
+   "name": "BULLZ 🐂",
+   "twitter": "https://x.com/BullzCalls1"
+  },
+  {
+   "wallet": "6ViEwUVtnMtBh2TAvyiQ2wg56tC1czSDQWayngEPvnLi",
+   "name": "IZ",
+   "twitter": "https://x.com/IzCryptoG"
+  },
+  {
+   "wallet": "6aXFYXbFob1ZKAEDCcqZnX2vooA3TgEqDoy5dAQbeWoV",
+   "name": "Flames",
+   "twitter": "https://x.com/FlamesOnSol"
+  },
+  {
+   "wallet": "6hcX7fVMzeRpW3d7XhFsxYw2CuePfgSMmouZxSiNLj1U",
+   "name": "Ataberk 🧙‍♂️",
+   "twitter": "https://x.com/ataberk"
+  },
+  {
+   "wallet": "6m5sW6EAPAHncxnzapi1ZVJNRb9RZHQ3Bj7FD84X9rAF",
+   "name": "ShockedJS",
+   "twitter": "https://x.com/ShockedJS"
+  },
+  {
+   "wallet": "6nhskL8RVpXzWXC7mcC1UXpe3ze2p6P6og1jXVGUW88s",
+   "name": "PattyIce",
+   "twitter": "https://x.com/patty_fi"
+  },
+  {
+   "wallet": "6uwzmiSnR2vVwrh6EsQfuwSVk8ScqsfYkJPQQ2eydU2M",
+   "name": "Lucas",
+   "twitter": "https://x.com/LockedInLucas"
+  },
+  {
+   "wallet": "6vZenwrWzCE4aU59CP2SuAotjMHDU9FFcaNNkGXrnPoZ",
+   "name": "PRINCESS",
+   "twitter": "https://x.com/lifebyprincess"
+  },
+  {
+   "wallet": "6yVb4pxNwDfr6rovwNnBg3SyKSvDcHGD4WdFPN1JJBqm",
+   "name": "0xEthan",
+   "twitter": "https://x.com/0xEthan"
+  },
+  {
+   "wallet": "719sfKUjiMThumTt2u39VMGn612BZyCcwbM5Pe8SqFYz",
+   "name": "Fashr",
+   "twitter": "https://x.com/FASHRCrypto"
+  },
+  {
+   "wallet": "71PCu3E4JP5RDBoY6wJteqzxkKNXLyE1byg5BTAL9UtQ",
+   "name": "Ramset ✟",
+   "twitter": "https://x.com/Ramsetx"
+  },
+  {
+   "wallet": "722tXm5uB5uuG2tC43uKHXQ7Pbyz75pTokEAJv9x5VTx",
+   "name": "sp",
+   "twitter": "https://x.com/SolanaPlays"
+  },
+  {
+   "wallet": "72YiE4crBv2UhxRgRYKs4GaTGT2avbacfL4HNCfQLqsm",
+   "name": "kyz",
+   "twitter": "https://x.com/kyzenill"
+  },
+  {
+   "wallet": "75oEqXZC569dY1G6UweXviPz4pm8zkhKDSk2FT9Dug5i",
+   "name": "boogie",
+   "twitter": "https://x.com/boogiepnl"
+  },
+  {
+   "wallet": "78N177fzNJpp8pG49xDv1efYcTMSzo9tPTKEA9mAVkh2",
+   "name": "Sheep",
+   "twitter": "https://x.com/imsheepsol"
+  },
+  {
+   "wallet": "7ABz8qEFZTHPkovMDsmQkm64DZWN5wRtU7LEtD2ShkQ6",
+   "name": "Red",
+   "twitter": "https://x.com/redwithbag"
+  },
+  {
+   "wallet": "7EQjTHVNHunhQHT7iRQDCR99mjDm2GvHyGKHVGzX8jv2",
+   "name": "neko ≈💧🌸",
+   "twitter": "https://x.com/n_ekox"
+  },
+  {
+   "wallet": "7Gi4H4wugm2n3rRWa6BijsQPJV7sMardawTi2tXDL9zM",
+   "name": "Ricco 🥀",
+   "twitter": "https://x.com/RiccoRosas"
+  },
+  {
+   "wallet": "7Js5gmq57y9jG2sseKrAeJt3vbncSWSFFHDEsyJDnyVm",
+   "name": "Yami 𓃵",
+   "twitter": "https://x.com/YamiPNL"
+  },
+  {
+   "wallet": "7K7itu678xAaUcuPQ2f3c2DcjirRjBY4HMTW1dx6hiL6",
+   "name": "DRT 🐂",
+   "twitter": "https://x.com/pepeDRT"
+  },
+  {
+   "wallet": "7NnaXghjuU92gM9kmwXysqa5HboyZuR2LTaBnvazFxSH",
+   "name": "Pavlo",
+   "twitter": "https://x.com/pavlotrading"
+  },
+  {
+   "wallet": "7PuHVAKDZ96s9P5FAt2eEdE8EYKxy9iUhvaLaMFqfCyj",
+   "name": "jitter",
+   "twitter": "https://x.com/jitterxyz"
+  },
+  {
+   "wallet": "7SDs3PjT2mswKQ7Zo4FTucn9gJdtuW4jaacPA65BseHS",
+   "name": "Insentos",
+   "twitter": "https://x.com/insentos"
+  },
+  {
+   "wallet": "7VBTpiiEjkwRbRGHJFUz6o5fWuhPFtAmy8JGhNqwHNnn",
+   "name": "Brox",
+   "twitter": "https://x.com/ohbrox"
+  },
+  {
+   "wallet": "7bsTkeWcSPG6nzsbXucxV89YUULoSExNJdX2WqfLHwZ4",
+   "name": "BIGWARZ",
+   "twitter": "https://x.com/bigwarzeth"
+  },
+  {
+   "wallet": "7cQjAvzJsmdePPMk8TiW8hYHHhCfdNtEaaNK3o46YP12",
+   "name": "parsiiix",
+   "twitter": "https://x.com/parsiiix"
+  },
+  {
+   "wallet": "7dP8DmRka5rmQti4zEEDjdAyaQyvFsPkcXMjEKJucqCu",
+   "name": "JB",
+   "twitter": "https://x.com/Jeetburner"
+  },
+  {
+   "wallet": "7i7vHEv87bs135DuoJVKe9c7abentawA5ydfWcWc8iY2",
+   "name": "ChartFu",
+   "twitter": "https://x.com/ChartFuMonkey"
+  },
+  {
+   "wallet": "7j7AA3HZR2zEjwAQEKPFh2qucLY4fqZpB9iodf39w8xW",
+   "name": "Maze",
+   "twitter": "https://x.com/MazeCCC"
+  },
+  {
+   "wallet": "7mHqL9GzGnbsYLoHLDzB7FiHAZbND2CZCJYFvU9PU1d3",
+   "name": "Kimba",
+   "twitter": "https://x.com/Kimbazxz"
+  },
+  {
+   "wallet": "7pDhG6NqfzQzw5KvtGXJbVRUh4iTBgYAn68BSKjdMNC1",
+   "name": "Degenerate Brian",
+   "twitter": "https://x.com/Brian_Degens"
+  },
+  {
+   "wallet": "7s98K37yqAc22rxNJK5YwaDkcDsHFKMqNH1EnG8fJBVW",
+   "name": "MoneyMike",
+   "twitter": "https://x.com/Moneymike_813"
+  },
+  {
+   "wallet": "7sA5em1nTKmLvGm8H85cpgA9hM9YvCoPp729mwe6akhh",
+   "name": "bilo",
+   "twitter": "https://x.com/chargememan"
+  },
+  {
+   "wallet": "7w7f4P284zJhv3zotjCUmaNsZSsrHQKtpXGBJFq8gdzq",
+   "name": "eq",
+   "twitter": "https://x.com/404flipped"
+  },
+  {
+   "wallet": "7wc98B9PgZEmbaidybNYeyaBeKorzaN8DykMZ8nZiZ1m",
+   "name": "sonder손더",
+   "twitter": "https://x.com/zsonderfv"
+  },
+  {
+   "wallet": "7wr4Hf1v72q9eYXRYYg4jpfud3QPL3xLQHFYkZqRMdo4",
+   "name": "Cesco.Sol",
+   "twitter": "https://x.com/Cesco_Sol"
+  },
+  {
+   "wallet": "7xwDKXNG9dxMsBSCmiAThp7PyDaUXbm23irLr7iPeh7w",
+   "name": "shah",
+   "twitter": "https://x.com/shahh"
+  },
+  {
+   "wallet": "7zTnUTHMd5qFUpZrrbXazpvGwC1Hvb3g5rFjnFAygLSo",
+   "name": "Apollo",
+   "twitter": "https://x.com/Apollopixel"
+  },
+  {
+   "wallet": "831yhv67QpKqLBJjbmw2xoDUeeFHGUx8RnuRj9imeoEs",
+   "name": "Trey",
+   "twitter": "https://x.com/treysocial"
+  },
+  {
+   "wallet": "862TYSvRYoiHAK3F3WwTRYAfuGiQaGdxedN9AGvRGWo2",
+   "name": "Wugi",
+   "twitter": "https://x.com/xWugi_wara"
+  },
+  {
+   "wallet": "86AEJExyjeNNgcp7GrAvCXTDicf5aGWgoERbXFiG1EdD",
+   "name": "Publix",
+   "twitter": "https://x.com/Publixplayz"
+  },
+  {
+   "wallet": "87rRdssFiTJKY4MGARa4G5vQ31hmR7MxSmhzeaJ5AAxJ",
+   "name": "Dior",
+   "twitter": "https://x.com/Dior100x"
+  },
+  {
+   "wallet": "88e2kBDJoN7eQCBj2sxT15etUZ3jPNzD4ijCs1TNySWJ",
+   "name": "yeekidd",
+   "twitter": "https://x.com/yeekiddd"
+  },
+  {
+   "wallet": "89HbgWduLwoxcofWpmn1EiF9wEdpgkNDEyPjzZ72mkDi",
+   "name": "AlxCooks",
+   "twitter": "https://x.com/AlxCooks_off"
+  },
+  {
+   "wallet": "8AtQ4ka3dgtrH1z4Uq3Tm4YdMN3cK5RRj1eKuGNnvenm",
+   "name": "peacefuldestroy",
+   "twitter": "https://x.com/peacefuldestroy"
+  },
+  {
+   "wallet": "8CLkTAHZt1joF4Swh7YKjGAA8qge1T1SZdoWJJsoGgys",
+   "name": "RaidzQT",
+   "twitter": "https://x.com/RaidzTrades"
+  },
+  {
+   "wallet": "8DGbkGgQewL9mx4aXzZCUChr7hBVXvPK9fYqSqc7Ajpn",
+   "name": "Ban",
+   "twitter": "https://x.com/Bancrypto__"
+  },
+  {
+   "wallet": "8Dg8J8xSeKqtBvL1nBe9waX348w5FSFjVnQaRLMpf7eV",
+   "name": "bradjae",
+   "twitter": "https://x.com/bradjae"
+  },
+  {
+   "wallet": "8JuRx7WEtgEwP6KqJ8s8FuaMfwbKUwthqFVhRQtP6Ehn",
+   "name": "Ron",
+   "twitter": "https://x.com/ronpf_"
+  },
+  {
+   "wallet": "8MaVa9kdt3NW4Q5HyNAm1X5LbR8PQRVDc1W8NMVK88D5",
+   "name": "Daumen",
+   "twitter": "https://x.com/daumenxyz"
+  },
+  {
+   "wallet": "8RrMaJXYwANd4zEskfPQuSYE35dTzaYtuwyKz3ewcZQx",
+   "name": "Te'",
+   "twitter": "https://x.com/TeTheGamer"
+  },
+  {
+   "wallet": "8T1HF5gr2fcULHv3j3nu4koGALCmc8pu",
+   "name": "buka ᚠ ᛏ ᚲ",
+   "twitter": "https://x.com/bukasphere"
+  },
+  {
+   "wallet": "8T1HF5gr2fcULHv3j3nu4koGALCmc8puG",
+   "name": "buka ᚠ ᛏ ᚲ",
+   "twitter": "https://x.com/bukasphere"
+  },
+  {
+   "wallet": "8WN7tkp8WcZEYX2cSXJQY8u3q5QHEtykrZqJmFP7NYcf",
+   "name": "Netti",
+   "twitter": "https://x.com/Netti_kun"
+  },
+  {
+   "wallet": "8YYDiCbPd4nM8TxrQEVdPA4aG8jys8R7Z1kKsgPL4pwh",
+   "name": "Michi",
+   "twitter": "https://x.com/michibets"
+  },
+  {
+   "wallet": "8ZY816Q2gP45iTQKvjDhR9qLa1aGVPUxWhvjcnB7k6c1",
+   "name": "s",
+   "twitter": "https://x.com/sellout"
+  },
+  {
+   "wallet": "8Zdp8ohGYGtfz2bYPrQW5oCs3krYgSGdviDaScAcKLqK",
+   "name": "Souly",
+   "twitter": "https://x.com/soulycrypto"
+  },
+  {
+   "wallet": "8deJ9xeUvXSJwicYptA9mHsU2rN2pDx37KWzkDkEXhU6",
+   "name": "Cooker",
+   "twitter": "https://x.com/CookerFlips"
+  },
+  {
+   "wallet": "8eioZubsRjFkNEFcSHKDbWa8MkpmXMBvQcfarGsLviuE",
+   "name": "0xJumpman",
+   "twitter": "https://x.com/0xjumpman"
+  },
+  {
+   "wallet": "8fsKLLtvKNanL4ginCaiRS6UfeemY11rSf8U8fN1dJw4",
+   "name": "Stigman",
+   "twitter": "https://x.com/Stigman__"
+  },
+  {
+   "wallet": "8ggkt7Y1SZzmsdcy6ZHTif6HvgAUv2dxJCbTFTGD67MV",
+   "name": "fa1r",
+   "twitter": "https://x.com/fa1rtrade"
+  },
+  {
+   "wallet": "8hKZKqCgZWxnvRz1XAvmbuzCAfqo5xFjH17vM2J2HTe1",
+   "name": "Exy",
+   "twitter": "https://x.com/eth_exy"
+  },
+  {
+   "wallet": "8mp548ZBaSavzpTHVeytQ4XGpVpbVZx9p2UxVyAJvRxV",
+   "name": "Crypto Pirate",
+   "twitter": "https://x.com/Crypt0Pirate_"
+  },
+  {
+   "wallet": "8nqtxpFpuXwfXG4pBLsDkkuMMPK9FjSkBMCn542HiM3v",
+   "name": "dov 7",
+   "twitter": "https://x.com/dovvvv7"
+  },
+  {
+   "wallet": "8oQoMhfBQnRspn7QtNAq2aPThRE4q94kLSTwaaFQvRgs",
+   "name": "big bags bobby",
+   "twitter": "https://x.com/bigbagsbobby"
+  },
+  {
+   "wallet": "8rvAsDKeAcEjEkiZMug9k8v1y8mW6gQQiMobd89Uy7qR",
+   "name": "Casino",
+   "twitter": "https://x.com/casino616"
+  },
+  {
+   "wallet": "8tP391aDbKKpQS7eKnCEfnJ8Cmek6jatEe2LFkdJ2PRP",
+   "name": "JinMu",
+   "twitter": "https://x.com/LongzuAlpha"
+  },
+  {
+   "wallet": "8vPVTTpVamqRJKLhEQdupHTzGEJq23HE1pdC2Lic157t",
+   "name": "Basel de’ Medici",
+   "twitter": "https://x.com/bassel_amin"
+  },
+  {
+   "wallet": "8zFZHuSRuDpuAR7J6FzwyF3vKNx4CVW3DFHJerQhc7Zd",
+   "name": "Pow",
+   "twitter": "https://x.com/traderpow"
+  },
+  {
+   "wallet": "91sP85Ds9A4EXJ3gU3iHyLtUNJimxz8LrxRb2qhBNod9",
+   "name": "hood",
+   "twitter": "https://x.com/hoodscall"
+  },
+  {
+   "wallet": "922VvmmYDHV9KMTJJ71Y5Yd3Vn7cfJuFasLNSsZPygrG",
+   "name": "Zuki",
+   "twitter": "https://x.com/zukiweb3"
+  },
+  {
+   "wallet": "951wq3qDowjKHaycrNaiRB5WpovYVKXnqhnrcKPh46zt",
+   "name": "jrus",
+   "twitter": "https://x.com/savemejrus"
+  },
+  {
+   "wallet": "95TWoKkvv2z85EXBzd2z6NwbxH2f54AvwuCA9x3NoKep",
+   "name": "Killua",
+   "twitter": "https://x.com/cryptokillua99"
+  },
+  {
+   "wallet": "98T65wcMEjoNLDTJszBHGZEX75QRe8QaANXokv4yw3Mp",
+   "name": "Leck",
+   "twitter": "https://x.com/LeckSol"
+  },
+  {
+   "wallet": "99gq72QFXLsqiTJxoSmwsNPym1nftFsYkwibunek1jWr",
+   "name": "Badabeep",
+   "twitter": "https://x.com/badabeepp"
+  },
+  {
+   "wallet": "99i9uVA7Q56bY22ajKKUfTZTgTeP5yCtVGsrG9J4pDYQ",
+   "name": "Zrool",
+   "twitter": "https://x.com/TheRealZrool"
+  },
+  {
+   "wallet": "99xnE2zEFi8YhmKDaikc1EvH6ELTQJppnqUwMzmpLXrs",
+   "name": "Coler",
+   "twitter": "https://x.com/ColerCooks"
+  },
+  {
+   "wallet": "9BkauJdFYUyBkNBZwV4mNNyfeVKhHvjULb7cL4gFQaLt",
+   "name": "goob",
+   "twitter": "https://x.com/goobfarmedyou"
+  },
+  {
+   "wallet": "9Bs2XgZynPdMfbpn3HQX8NKWLToPDwGrMHRbZruwbyPD",
+   "name": "woopig",
+   "twitter": "https://x.com/crypto_woopig"
+  },
+  {
+   "wallet": "9EfTigVxHuNjqzxiv3BQ7wD2v7uFvdRQbrrnDEPr8pTk",
+   "name": "Seee",
+   "twitter": "https://x.com/tstar_frr1"
+  },
+  {
+   "wallet": "9EyPAMyQvXaUWFxd2uQHvG8vpkKs33YdXvDvwmRXrUiH",
+   "name": "Connor",
+   "twitter": "https://x.com/Connoreo_"
+  },
+  {
+   "wallet": "9FEHWFjgbYnFCRRHkesJNq6znHjc5Aaq7TiKi1rCVSnH",
+   "name": "fomo 🧠",
+   "twitter": "https://x.com/fomomofosol"
+  },
+  {
+   "wallet": "9FNz4MjPUmnJqTf6yEDbL1D4SsHVh7uA8zRHhR5K138r",
+   "name": "Danny",
+   "twitter": "https://x.com/0xSevere"
+  },
+  {
+   "wallet": "9K18MstUaXmSFSBoa9qDTqWTnYhTZqdgEhuKRTVRgh6g",
+   "name": "Sabby",
+   "twitter": "https://x.com/sabby_eth"
+  },
+  {
+   "wallet": "9L3g3MTQ613HV6DKqK8xZRQ1oXZCJynkwKjzt6Tk4TAZ",
+   "name": "xeno",
+   "twitter": "https://x.com/xeno100x"
+  },
+  {
+   "wallet": "9NL6thsiaoyDnm7XF8hEbMoqeG172WmG7iKYpygvjfgo",
+   "name": "Scooter",
+   "twitter": "https://x.com/imperooterxbt"
+  },
+  {
+   "wallet": "9RrKUhRpbPDNxR7x88ZsCgdtqPHUfwYPjj4JdpV4FBj9",
+   "name": "Pocket Hitlers",
+   "twitter": "https://x.com/pockethitlers"
+  },
+  {
+   "wallet": "9St6ETbe3CFitw6UNSd8kg7kZ6STXy71wEGiERqQj89U",
+   "name": "Trench Guerilla",
+   "twitter": "https://x.com/trenchguerilla"
+  },
+  {
+   "wallet": "9THzoX5yGNSgPBAjCF4Lgqc1wLXoFkMQit4XWbhhRnqE",
+   "name": "Dedmeow5",
+   "twitter": "https://x.com/dedmeow5"
+  },
+  {
+   "wallet": "9Vk7pkBZ9KFJmzaPzNYjGedyz8qoKMQtnYyYi2AehNMT",
+   "name": "Xelf",
+   "twitter": "https://x.com/xelf_sol"
+  },
+  {
+   "wallet": "9Wagwcs6HVtMHaaxBjUbE7AKmxeg9nzEDcvXhN8bydUG",
+   "name": "killz",
+   "twitter": "https://x.com/KillzzSol"
+  },
+  {
+   "wallet": "9X5n5i1mugTjgGPhqf1KJDt8r4kD8TF3s62ttbxKzFHa",
+   "name": "dingaling",
+   "twitter": "https://x.com/dingalingts"
+  },
+  {
+   "wallet": "9cdZg6xR4c9kZiqKSzqjn4QHCXNQuC9HEWBzzMJ3mzqw",
+   "name": "Pikalosi",
+   "twitter": "https://x.com/pikalosi"
+  },
+  {
+   "wallet": "9f5ywdCDA4QhSktBomozpHmZfSLqS6J9VqCrRehYWh1p",
+   "name": "matsu",
+   "twitter": "https://x.com/matsu_sol"
+  },
+  {
+   "wallet": "9iUoZ3NHbfQqjjyLSXEjVCobiuRdoKC1rT8r2oPX5J3d",
+   "name": "lucky",
+   "twitter": "https://x.com/luckluckluck111"
+  },
+  {
+   "wallet": "9iaawVBEsFG35PSwd4PahwT8fYNQe9XYuRdWm872dUqY",
+   "name": "Meechie",
+   "twitter": "https://x.com/973Meech"
+  },
+  {
+   "wallet": "9jyqFiLnruggwNn4EQwBNFXwpbLM9hrA4hV59ytyAVVz",
+   "name": "Nach",
+   "twitter": "https://x.com/NachSOL"
+  },
+  {
+   "wallet": "9pgKiUsNHXMe5p4DoGwzT9i6of7XympnNJ5TgbrZVqk6",
+   "name": "staticc",
+   "twitter": "https://x.com/staticctrades"
+  },
+  {
+   "wallet": "9qdiDGhXrGqPN4CTGvyKwFKHrgJSGn836cjkVcGfPd6N",
+   "name": "Aymory ⚡️",
+   "twitter": "https://x.com/Aymoryfun"
+  },
+  {
+   "wallet": "9r1BenK1nPvkZyD88q3e6bTKjfqDcLjxnXn9ovreDL52",
+   "name": "Mazino",
+   "twitter": "https://x.com/Mazinotrenches"
+  },
+  {
+   "wallet": "9tRff7L6Mx3ZDNBoGPffdjD3c9JNzLc3nxzadYH4TnAp",
+   "name": "Woozy",
+   "twitter": "https://x.com/woozy2so"
+  },
+  {
+   "wallet": "9tY7u1HgEt2RDcxym3RJ9sfvT3aZStiiUwXd44X9RUr8",
+   "name": "Solana degen",
+   "twitter": "https://x.com/Solanadegen"
+  },
+  {
+   "wallet": "9v9Xsxxu2pi4cDkTHtyL1Rg417uga48R2VcCP4L1Pe9R",
+   "name": "fl0wjoe",
+   "twitter": "https://x.com/fl0wjoe"
+  },
+  {
+   "wallet": "9vWutdTBs66hWkeCmxaLFpkKy4q5RSe8DsFjfdxj5yFA",
+   "name": "Dutch",
+   "twitter": "https://x.com/0xDutch_"
+  },
+  {
+   "wallet": "9yGxZ43ngT7LvwquVdUAYPvJzVyY65cS6mQvuJXjTEUc",
+   "name": "xet",
+   "twitter": "https://x.com/xet"
+  },
+  {
+   "wallet": "9yYya3F5EJoLnBNKW6z4bZvyQytMXzDcpU5D6yYr4jqL",
+   "name": "Loopierr",
+   "twitter": "https://x.com/Loopierr"
+  },
+  {
+   "wallet": "A38dM3RtNpewkwkWJeyj8C9c8yWtgaaAdh4Rdj1SXg3M",
+   "name": "TMH メタ",
+   "twitter": "https://x.com/thememeshunterx"
+  },
+  {
+   "wallet": "A3W8psibkTUvjxs4LRscbnjux6TFDXdvD4m4GsGpQ2KJ",
+   "name": "Numer0 (trench/arc)",
+   "twitter": "https://x.com/Numerooo0"
+  },
+  {
+   "wallet": "A4KxLRntS2V6giboMyfDtwoysmsKPaz8Juw6CwHYxVXn",
+   "name": "leviilol",
+   "twitter": "https://x.com/leviixbt"
+  },
+  {
+   "wallet": "A5uxHmjTVyBd1Aj4BFUAekujpPjaWnCrLSRJhjAyvjH4",
+   "name": "Owl",
+   "twitter": "https://x.com/OwlFN_"
+  },
+  {
+   "wallet": "A8i6J8B1DgVdQaoeyrCmc18473EzYocEtZGavHT4sXzw",
+   "name": "Mike",
+   "twitter": "https://x.com/mike8pump"
+  },
+  {
+   "wallet": "A9aTuBuxoVY547n6hUBCq9oZm36LTJX9Kvn4NZXffXvp",
+   "name": "Burixx 🇮🇹",
+   "twitter": "https://x.com/Burix_sol"
+  },
+  {
+   "wallet": "AAMnoNo3TpezKcT7ah9puLFZ4D59muEhQHJJqpX16ccg",
+   "name": "sarah milady",
+   "twitter": "https://x.com/saracrypto_eth"
+  },
+  {
+   "wallet": "ADC1QV9raLnGGDbnWdnsxazeZ4Tsiho4vrWadYswA2ph",
+   "name": "Ducky",
+   "twitter": "https://x.com/zXDuckyXz"
+  },
+  {
+   "wallet": "AE3tJDEyUdwBM8ZoUb3iCo563gMbq26JtckfvjcVZbSa",
+   "name": "Roxo",
+   "twitter": "https://x.com/ignRoxo"
+  },
+  {
+   "wallet": "AEeJUPCiGR3yCoukTh1G58o4LYsUEyzrXtfmfMc2kJMX",
+   "name": "Damian Prosalendis",
+   "twitter": "https://x.com/DamianProsa"
+  },
+  {
+   "wallet": "AGnd5WTHMUbyK3kjjQPdQFM3TbWcuPTtkwBFWVUwiCLu",
+   "name": "Angi",
+   "twitter": "https://x.com/angitradez"
+  },
+  {
+   "wallet": "AGqjivJr1dSv73TVUvdtqAwogzmThzvYMVXjGWg2FYLm",
+   "name": "noob mini",
+   "twitter": "https://x.com/noobmini_"
+  },
+  {
+   "wallet": "AJ6MGExeK7FXmeKkKPmALjcdXVStXYokYNv9uVfDRtvo",
+   "name": "Tim",
+   "twitter": "https://x.com/timmpix1"
+  },
+  {
+   "wallet": "ALauG4FwEYDgSXd5Hen6kvuWSCdUi2fYNSNqM1Ci31wE",
+   "name": "Thurston (zapped arc)",
+   "twitter": "https://x.com/itsthurstxn"
+  },
+  {
+   "wallet": "ASVzakePP6GNg9r95d4LPZHJDMXun6L6E4um4pu5ybJk",
+   "name": "Naruza",
+   "twitter": "https://x.com/0xNaruza"
+  },
+  {
+   "wallet": "ATpSExwhE2x1H7rv6Uoi4TJdzGz15LjDXNzhV6pjDVYi",
+   "name": "merky",
+   "twitter": "https://x.com/Merkytrades"
+  },
+  {
+   "wallet": "AUEQxhkAVz71w2WBa9BYSoZrydhYNJaKmfNomoNs9E4t",
+   "name": "rise_crypt",
+   "twitter": "https://x.com/rise_crypt"
+  },
+  {
+   "wallet": "AVjEtg2ECYKXYeqdRQXvaaAZBjfTjYuSMTR4WLhKoeQN",
+   "name": "Putrick",
+   "twitter": "https://x.com/Putrickk"
+  },
+  {
+   "wallet": "AVmFMbuehLbCWB6sPdZGComwyrHtxJETZVktdA65j3Gq",
+   "name": "dyor ( revenge arc )",
+   "twitter": "https://x.com/dyorwgmi"
+  },
+  {
+   "wallet": "AXwssg5NjQodKofcLV6ypJL4R5usvysYt9q7YVwjEgAH",
+   "name": "Sue",
+   "twitter": "https://x.com/sue_xbt"
+  },
+  {
+   "wallet": "Aa5LycwALUjaGeLyqe7y2jLZX3QetYnZqyvW2bLpwc2Q",
+   "name": "Nuotrix",
+   "twitter": "https://x.com/Nuotrix"
+  },
+  {
+   "wallet": "Ab2baaggUWJMsVUtCvpRjq6iBRDk2Lxr5qzicHueHxM1",
+   "name": "leyko",
+   "twitter": "https://x.com/0xleyko"
+  },
+  {
+   "wallet": "AeLaMjzxErZt4drbWVWvcxpVyo8p94xu5vrg41eZPFe3",
+   "name": "^1s1mple",
+   "twitter": "https://x.com/s1mple_s1mple"
+  },
+  {
+   "wallet": "AeLb2RpVwrqKZJ87PEiFdReiEXJXACQn17c8APQS1FHx",
+   "name": "oscar",
+   "twitter": "https://x.com/oscarexitliq"
+  },
+  {
+   "wallet": "Aen6LKc7sGVPTyjMd5cu9B9XVjL7m9pnvAiP2ZNJC4GZ",
+   "name": "Aroa",
+   "twitter": "https://x.com/AroaOnSol"
+  },
+  {
+   "wallet": "Ajfy5BPGhDpBgfjEGQFN8Y9sfQBXWSMMjzHXfdyT5EDk",
+   "name": "Golden",
+   "twitter": "https://x.com/Goldencrypt0x"
+  },
+  {
+   "wallet": "Akht8EBJqFSLmhNR7Wdr53YmWjmb9URzbZYWY7FAJKeH",
+   "name": "wuzie",
+   "twitter": "https://x.com/crypt0wu"
+  },
+  {
+   "wallet": "AmofvGJ59dgf5P85Pofip83pk7nZqrQRmSZvv5rRFVtf",
+   "name": "7xNickk",
+   "twitter": "https://x.com/7xNickk"
+  },
+  {
+   "wallet": "An68XCxJvfXc9NRWjNXGSFY55dyFVKjfgtpt8AKGJ2dE",
+   "name": "bihoz",
+   "twitter": "https://x.com/bihozNFTs"
+  },
+  {
+   "wallet": "ApRnQN2HkbCn7W2WWiT2FEKvuKJp9LugRyAE1a9Hdz1",
+   "name": "S",
+   "twitter": "https://x.com/runitbackghost"
+  },
+  {
+   "wallet": "As7HjL7dzzvbRbaD3WCun47robib2kmAKRXMvjHkSMB5",
+   "name": "Otta",
+   "twitter": "https://x.com/ottabag"
+  },
+  {
+   "wallet": "AstaWuJuQiAS3AfqmM3xZxrJhkkZNXtW4VyaGQfqV6JL",
+   "name": "asta",
+   "twitter": "https://x.com/astaso1"
+  },
+  {
+   "wallet": "AtmeWwb6Y6KNDgu2dPJT5dsar84bFCbNxLiW2DyYfm8p",
+   "name": "Sizeab1e",
+   "twitter": "https://x.com/sizeab1e"
+  },
+  {
+   "wallet": "Au1GUWfcadx7jMzhsg6gHGUgViYJrnPfL1vbdqnvLK4i",
+   "name": "Hugo Fartingale",
+   "twitter": "https://x.com/HugoMartingale"
+  },
+  {
+   "wallet": "AuPp4YTMTyqxYXQnHc5KUc6pUuCSsHQpBJhgnD45yqrf",
+   "name": "Dani",
+   "twitter": "https://x.com/DaniWorldwide"
+  },
+  {
+   "wallet": "Av3xWHJ5EsoLZag6pr7LKbrGgLRTaykXomDD5kBhL9YQ",
+   "name": "Heyitsyolo",
+   "twitter": "https://x.com/Heyitsyolotv"
+  },
+  {
+   "wallet": "AzXDG1LSULfMai1Rpw9uzMtk3osdK2vmeBWFYKjymSAo",
+   "name": "Canis",
+   "twitter": "https://x.com/Canissolana"
+  },
+  {
+   "wallet": "B32QbbdDAyhvUQzjcaM5j6ZVKwjCxAwGH5Xgvb9SJqnC",
+   "name": "Kadenox",
+   "twitter": "https://x.com/kadenox"
+  },
+  {
+   "wallet": "B3JyPD3t9ufZWfL3namyvoc258KH74JojSxxurUg9jCT",
+   "name": "jakey",
+   "twitter": "https://x.com/jak"
+  },
+  {
+   "wallet": "B3beyovNKBo4wF1uFrfGfpVeyEHjFyJPmEBciz7kpnoS",
+   "name": "CC2",
+   "twitter": "https://x.com/CC2Ventures"
+  },
+  {
+   "wallet": "B3wagQZiZU2hKa5pUCj6rrdhWsX3Q6WfTTnki9PjwzMh",
+   "name": "xander",
+   "twitter": "https://x.com/xandereef"
+  },
+  {
+   "wallet": "B57ChV7Sa7FToRFsKWRWi5QPJJUn6cv4CuMQCzgw4VY2",
+   "name": "ִֶָ",
+   "twitter": "https://x.com/fshmatt"
+  },
+  {
+   "wallet": "B6Jx8R9VQDAbwq4rkxsgsWgiJ6GKgWm4ZgCtat2BaHni",
+   "name": "Fey",
+   "twitter": "https://x.com/fey_xbt"
+  },
+  {
+   "wallet": "B6qiu5WCzrLniG3LKt7fReNQ1qgKkkqoBzWP4PcxxiZW",
+   "name": "dints",
+   "twitter": "https://x.com/dintsfi"
+  },
+  {
+   "wallet": "B799XD2RtgkxYRvv5Q9CFnSpVifrsJErWz6MpvBdYFdR",
+   "name": "Dusty",
+   "twitter": "https://x.com/guidustyy"
+  },
+  {
+   "wallet": "B8kdogV1a39GPVpSiPjPdUGfFf8nx6EVexRMvdeiXB64",
+   "name": "Jakey",
+   "twitter": "https://x.com/SolJakey"
+  },
+  {
+   "wallet": "B9K2wTQcRDLRLhMKFyRh2hPqHrr6VKiCC9yNGpkMUXrh",
+   "name": "Xanse.",
+   "twitter": "https://x.com/Xanse_crypto"
+  },
+  {
+   "wallet": "B9oKseVKRntTvfADyaUoH7oVmoyVbBfUf4NKyQc4KK2D",
+   "name": "Fozzy",
+   "twitter": "https://x.com/fozzycapone"
+  },
+  {
+   "wallet": "BAr5csYtpWoNpwhUjixX7ZPHXkUciFZzjBp9uNxZXJPh",
+   "name": "Jack Duval🌊",
+   "twitter": "https://x.com/jackduvalstocks"
+  },
+  {
+   "wallet": "BCagckXeMChUKrHEd6fKFA1uiWDtcmCXMsqaheLiUPJd",
+   "name": "dv",
+   "twitter": "https://x.com/vibed333"
+  },
+  {
+   "wallet": "BCnqsPEtA1TkgednYEebRpkmwFRJDCjMQcKZMMtEdArc",
+   "name": "kreo",
+   "twitter": "https://x.com/kreo444"
+  },
+  {
+   "wallet": "BHREKFkPQgAtDs8Vb1UfLkUpjG6ScidTjHaCWFuG2AtX",
+   "name": "Risk",
+   "twitter": "https://x.com/risk100x"
+  },
+  {
+   "wallet": "BJXjRq566xt66pcxCmCMLPSuNxyUpPNBdJGP56S7fMda",
+   "name": "h14",
+   "twitter": "https://x.com/H14onX"
+  },
+  {
+   "wallet": "BJeWdzF9HVeWHktxwS9u8FbCrdSDRrDoS3S9stLafdQJ",
+   "name": "voyage",
+   "twitter": "https://x.com/voyage940"
+  },
+  {
+   "wallet": "BPWsae36tY6oFz7f5MjsfTGqzi3ttM1AsAtjMvUb91tT",
+   "name": "Rizz",
+   "twitter": "https://x.com/sollrizz"
+  },
+  {
+   "wallet": "BQVz7fQ1WsQmSTMY3umdPEPPTm1sdcBcX9sP7o6kPRmB",
+   "name": "Limfork.eth",
+   "twitter": "https://x.com/Limfork"
+  },
+  {
+   "wallet": "BTeqNydtKyDaSxQNRm8ByaUDPK3cpQ1FsXMtaF1Hfaom",
+   "name": "FINN",
+   "twitter": "https://x.com/finnbags"
+  },
+  {
+   "wallet": "BTf4A2exGK9BCVDNzy65b9dUzXgMqB4weVkvTMFQsadd",
+   "name": "Kev",
+   "twitter": "https://x.com/Kevsznx"
+  },
+  {
+   "wallet": "BWQPaFCn5Fp5ok2x5W69wspbsgiRXuPPUYX8Zgnm7XeQ",
+   "name": "SatsBuyer",
+   "twitter": "https://x.com/Satsbuyer"
+  },
+  {
+   "wallet": "BXNiM7pqt9Ld3b2Hc8iT3mA5bSwoe9CRrtkSUs15SLWN",
+   "name": "Absol",
+   "twitter": "https://x.com/absolquant"
+  },
+  {
+   "wallet": "BY58Z7N5Adarkx5ed78AzKvR7Kxrq795aa1boZsYyVBT",
+   "name": "JB",
+   "twitter": "https://x.com/quantJB"
+  },
+  {
+   "wallet": "BaLxyjXzATAnfm7cc5AFhWBpiwnsb71THcnofDLTWAPK",
+   "name": "peely 🍌",
+   "twitter": "https://x.com/0xpeely"
+  },
+  {
+   "wallet": "Be24Gbf5KisDk1LcWWZsBn8dvB816By7YzYF5zWZnRR6",
+   "name": "Chairman ²",
+   "twitter": "https://x.com/Chairman_DN"
+  },
+  {
+   "wallet": "BgKk5FU653RF36NXQZNZovitaCoCfHDUbyxpKwgfCq9A",
+   "name": "skill",
+   "twitter": "https://x.com/skillnsol"
+  },
+  {
+   "wallet": "BgYHLmSxRaypCcaQQGGyCmGv5F8SYJYC9VYEoTxVJZ3V",
+   "name": "9",
+   "twitter": "https://x.com/Camexbt"
+  },
+  {
+   "wallet": "Bi4rd5FH5bYEN8scZ7wevxNZyNmKHdaBcvewdPFxYdLt",
+   "name": "theo",
+   "twitter": "https://x.com/theonomix"
+  },
+  {
+   "wallet": "Bi8gjp6g7hYmLJ2gsHbtdMwHyin4js1efTzDdJSQ6m4T",
+   "name": "︎",
+   "twitter": "https://x.com/scriwy"
+  },
+  {
+   "wallet": "Bic8AqrFVkoRjPEvBgkYEWdFu7cFS58nYCGcFyP6kDzt",
+   "name": "Bruda",
+   "twitter": "https://x.com/heybruda"
+  },
+  {
+   "wallet": "BjNueAZDxLpwHnpMVZrB5b8DTTBHdmXtg1ZaRPCJ1yYJ",
+   "name": "Affu (aura farming)",
+   "twitter": "https://x.com/lethal_affu"
+  },
+  {
+   "wallet": "BjYxVF81MgahqgahDTUEGzxzP7bZrA4p5Dg67Y4e3bXZ",
+   "name": "0xBossman",
+   "twitter": "https://x.com/0xBossman"
+  },
+  {
+   "wallet": "BoYHJoKntk3pjkaV8qFojEonSPWmWMfQocZTwDd1bcGG",
+   "name": "Betman",
+   "twitter": "https://x.com/ImTheBetman"
+  },
+  {
+   "wallet": "BrT5kYQ125u6NaRKFKNiBnHak6X7MvcZSQ3LfQCB3sqg",
+   "name": "zoru",
+   "twitter": "https://x.com/zoruuuuu"
+  },
+  {
+   "wallet": "BtMBMPkoNbnLF9Xn552guQq528KKXcsNBNNBre3oaQtr",
+   "name": "Letterbomb",
+   "twitter": "https://x.com/ihateoop"
+  },
+  {
+   "wallet": "BtUBxH7bEjmDJbgVLxjEK7ZX72XPeDKaeXFufXnGATna",
+   "name": "Bottom Seller",
+   "twitter": "https://x.com/bottomseller"
+  },
+  {
+   "wallet": "Bu8iZsGvS5dwuY3GiEDjUSDayEME7LthH4x7TRGTnMXA",
+   "name": "printer",
+   "twitter": "https://x.com/prxnterr"
+  },
+  {
+   "wallet": "BuhkHhM3j4viF71pMTd23ywxPhF35LUnc2QCLAvUxCdW",
+   "name": "Saif",
+   "twitter": "https://x.com/degensaif"
+  },
+  {
+   "wallet": "By5huc2NCHjiA293DvstgNiQEEnmta2fkoyx86hsReTj",
+   "name": "Jays",
+   "twitter": "https://x.com/JaysOnEBT"
+  },
+  {
+   "wallet": "C4Svaa7djC8d3CVxaohrsedccaKqimNoJrWe9iNPdix5",
+   "name": "edward",
+   "twitter": "https://x.com/jeetassassin"
+  },
+  {
+   "wallet": "C4eZg1rJX6v1u7LzqermPrA1pDNNxQe6g3vyY5cHHoWq",
+   "name": "SKX 🔶",
+   "twitter": "https://x.com/SKXonSol"
+  },
+  {
+   "wallet": "CA4keXLtGJWBcsWivjtMFBghQ8pFsGRWFxLrRCtirzu5",
+   "name": "old",
+   "twitter": "https://x.com/old"
+  },
+  {
+   "wallet": "CAPn1yH4oSywsxGU456jfgTrSSUidf9jgeAnHceNUJdw",
+   "name": "cap",
+   "twitter": "https://x.com/himothy"
+  },
+  {
+   "wallet": "CATk62cYqDFXTh3rsRbS1ibCyzBeovc2KXpXEaxEg3nB",
+   "name": "Coasty",
+   "twitter": "https://x.com/coasty_sol"
+  },
+  {
+   "wallet": "CCUcjek5p6DLoH2YNtjizxYhAnStXAQAGVxhp1cYJF7w",
+   "name": "el charto",
+   "twitter": "https://x.com/elchartox"
+  },
+  {
+   "wallet": "CCc5m84JvEoe5cCPV5dYHqiXCuvNHpFpAuUB6ggsCRUg",
+   "name": "Suso",
+   "twitter": "https://x.com/susocrypto"
+  },
+  {
+   "wallet": "CDp8H7appttPykZGthR8orkPvyzc53RvQDwnFskYFNU8",
+   "name": "Splinter",
+   "twitter": "https://x.com/Splinter_Sol"
+  },
+  {
+   "wallet": "CECN4BW4DKnbyddkd9FhWVR5dotzKhQr5p7DUPhQ55Du",
+   "name": "Megz 🦉",
+   "twitter": "https://x.com/DeltaXtc"
+  },
+  {
+   "wallet": "CEUA7zVoDRqRYoeHTP58UHU6TR8yvtVbeLrX1dppqoXJ",
+   "name": "Tom",
+   "twitter": "https://x.com/tdmilky"
+  },
+  {
+   "wallet": "CM1dn5LZ21o6PQv3NQpQeEFPGGo9dNpSQ4eWQctmp17g",
+   "name": "racks",
+   "twitter": "https://x.com/rackstm_"
+  },
+  {
+   "wallet": "CQervCdE3WAUGRmaTj9NHdbNrNGVsxJb68t3QggcntM2",
+   "name": "marker",
+   "twitter": "https://x.com/m4rk3r"
+  },
+  {
+   "wallet": "CUHBzSPSaNS3tArEtM3maSV6pNdJhHJFYZpurPPK9P7H",
+   "name": "samsrep",
+   "twitter": "https://x.com/samsrepx"
+  },
+  {
+   "wallet": "CUKFKdJw7F91bZBbtAJMrLLxqtVigVSJhx644EFnCnw",
+   "name": "Baraka",
+   "twitter": "https://x.com/baraka_wins"
+  },
+  {
+   "wallet": "CVvJnDPcWdmUJN6YC4cHwBS2cJ9T8KoVh3xEwGquHYz1",
+   "name": "Purps",
+   "twitter": "https://x.com/Purps911"
+  },
+  {
+   "wallet": "CWvdyvKHEu8Z6QqGraJT3sLPyp9bJfFhoXcxUYRKC8ou",
+   "name": "Rice",
+   "twitter": "https://x.com/Ricecooker38"
+  },
+  {
+   "wallet": "CXVJewdc79TYR55sz4SGLSWUPz3r4LBJ9Mn93bZ8ZyAz",
+   "name": "Swan",
+   "twitter": "https://x.com/swonzon"
+  },
+  {
+   "wallet": "CXnf4Tt7qFz3KZNwn3Yve5MKaRyxGoAy2eDX3QT8e99m",
+   "name": "trav",
+   "twitter": "https://x.com/travonsol"
+  },
+  {
+   "wallet": "CgaA9a1JwAXJyfHuvZ7VW8YfTVRkdiT5mjBBSKcg7Rz5",
+   "name": "Art",
+   "twitter": "https://x.com/ArtCryptoz"
+  },
+  {
+   "wallet": "CkPFGv2Wv1vwdWjtXioEgb8jhZQfs3eVZez3QCetu7xD",
+   "name": "Lynk",
+   "twitter": "https://x.com"
+  },
+  {
+   "wallet": "CtUzwARj8A13M3hdJAXvsLkqJUfmFKqWzFXJPcq4MiMx",
+   "name": "Chris ☕️",
+   "twitter": "https://x.com/ChrisCoffeeEth"
+  },
+  {
+   "wallet": "Cv4JVc25RZ7JV8HhEXrnxJjzebMBCqN5prB5ec43aJSz",
+   "name": "juicyfruity",
+   "twitter": "https://x.com/juicyfruityy2"
+  },
+  {
+   "wallet": "Cv5GgkpXvtXcsrMcKCJvx46BpMjiM61mpPU1j8RbbbVL",
+   "name": "R4",
+   "twitter": "https://x.com/r4yancore"
+  },
+  {
+   "wallet": "CvNiezB8hofusHCKqu8irJ6t2FKY7VjzpSckofMzk5mB",
+   "name": "Dali",
+   "twitter": "https://x.com/SolanaDali"
+  },
+  {
+   "wallet": "Cxe1d5zFifK4a4UZoHQaCK7sfqd84XjcKy1qtjnz3bge",
+   "name": "DJ.Σn",
+   "twitter": "https://x.com/thisisdjen"
+  },
+  {
+   "wallet": "CxgPWvH2GoEDENELne2XKAR2z2Fr4shG2uaeyqZceGve",
+   "name": "narc",
+   "twitter": "https://x.com/narracanz"
+  },
+  {
+   "wallet": "CyaE1VxvBrahnPWkqm5VsdCvyS2QmNht2UFrKJHga54o",
+   "name": "Cented",
+   "twitter": "https://x.com/Cented7"
+  },
+  {
+   "wallet": "D1H83ueSw5Nxy5okxH7VBfV4jRnqAK5Mm1tm3JAj3m5t",
+   "name": "Jeets",
+   "twitter": "https://x.com/ieatjeets"
+  },
+  {
+   "wallet": "D2aXNmQgLnZFFoE8aSCZq1dBXKRDw29NoGY79jCscUmj",
+   "name": "waste management",
+   "twitter": "https://x.com/wastemanagem3nt"
+  },
+  {
+   "wallet": "D52tmCnycFovhx2ueMuEnxq5LCdwfZrU9u8ECE5foCW5",
+   "name": "Zachary",
+   "twitter": "https://x.com/Zakidge"
+  },
+  {
+   "wallet": "DAEdBmTPEKM6xkwfzC3d411QUe6coKpkND6UURa4CvHC",
+   "name": "Fox 🦊",
+   "twitter": "https://x.com/fox09_09"
+  },
+  {
+   "wallet": "DBmRHNbSsVX8F6NyVaaaiuGdwo1aYGawiy3jfNcvXYSC",
+   "name": "Bobby",
+   "twitter": "https://x.com/retardmode"
+  },
+  {
+   "wallet": "DEU4Hk9VNGdXbpGRGx7uyYEmBzVWimf6GqtzD1Kn14iv",
+   "name": "Pati",
+   "twitter": "https://x.com/moblovessolana"
+  },
+  {
+   "wallet": "DEdEW3SMPU2dCfXEcgj2YppmX9H3bnMDJaU4ctn2BQDQ",
+   "name": "King Solomon",
+   "twitter": "https://x.com/0xsolomon"
+  },
+  {
+   "wallet": "DKgvpfttzmJqZXdavDwTxwSVkajibjzJnN2FA99dyciK",
+   "name": "R💫WDY",
+   "twitter": "https://x.com/RowdyCrypto"
+  },
+  {
+   "wallet": "DN7pYLSGYqHXwvPLh8tJM2zoJjhMSsNGVRVkMWVpredr",
+   "name": "Fabix",
+   "twitter": "https://x.com/Fabix_R"
+  },
+  {
+   "wallet": "DNfuF1L62WWyW3pNakVkyGGFzVVhj4Yr52jSmdTyeBHm",
+   "name": "Gake",
+   "twitter": "https://x.com/Ga__ke"
+  },
+  {
+   "wallet": "DNsh1UfJdxmze6T6GV9QK5SoFm7HsM5TRNxVuwVgo8Zj",
+   "name": "Hash",
+   "twitter": "https://x.com/Hashbergers"
+  },
+  {
+   "wallet": "DTS6KBsfaveqP5WUuWpmk4Mac14nanwwnBaraUAWsrYJ",
+   "name": "Peenuts",
+   "twitter": "https://x.com/Peenutslmao"
+  },
+  {
+   "wallet": "DTdHa4auX68jFtXv9wkzMYCahg295AnRuwvm6moW6meZ",
+   "name": "sadizmed",
+   "twitter": "https://x.com/sadizmed"
+  },
+  {
+   "wallet": "DU323DieHUGPmYamp6A4Ai1V4YSYgRi35mGpzJGrjf7k",
+   "name": "Toxic weast",
+   "twitter": "https://x.com/Toxic_weast"
+  },
+  {
+   "wallet": "DUTpdjVjZ3XKqeU5WFE3HbkQ77ZSaSi3CseMkr9zkC6T",
+   "name": "Zeek",
+   "twitter": "https://x.com/zeekbased"
+  },
+  {
+   "wallet": "DVM5U7yTFUT8TwerBq1afLopuSuFs1rRVCu3KpTJbHUa",
+   "name": "YOUNIZ",
+   "twitter": "https://x.com/YOUNIZ_XLZ"
+  },
+  {
+   "wallet": "DYAn4XpAkN5mhiXkRB7dGq4Jadnx6XYgu8L5b3WGhbrt",
+   "name": "The Doc",
+   "twitter": "https://x.com/KayTheDoc"
+  },
+  {
+   "wallet": "DYmsQudNqJyyDvq86XmzAvrU9T7xwfQEwh6gPQw9TPNF",
+   "name": "unprofitable",
+   "twitter": "https://x.com/exitliquid1ty"
+  },
+  {
+   "wallet": "DZAa55HwXgv5hStwaTEJGXZz1DhHejvpb7Yr762urXam",
+   "name": "ozark",
+   "twitter": "https://x.com/ohzarke"
+  },
+  {
+   "wallet": "DemfvB4iwd3NmVquvWqWbB92yVZWFFqybqBeJGdyEeM6",
+   "name": "japbitch",
+   "twitter": "https://x.com/bigjapbitch"
+  },
+  {
+   "wallet": "DfMxre4cKmvogbLrPigxmibVTTQDuzjdXojWzjCXXhzj",
+   "name": "Euris",
+   "twitter": "https://x.com/Euris_JT"
+  },
+  {
+   "wallet": "Dgehc8YMv6dHsiPJVoumvq4pSBkMVvrTgTUg7wdcYJPJ",
+   "name": "omar",
+   "twitter": "https://x.com/maghrrebi"
+  },
+  {
+   "wallet": "Di75xbVUg3u1qcmZci3NcZ8rjFMj7tsnYEoFdEMjS4ow",
+   "name": "N’o",
+   "twitter": "https://x.com/Nosa1x"
+  },
+  {
+   "wallet": "DiDbxfveAcnescZWYjkVJzXiEWjskZKAFVTq2hrfHNjN",
+   "name": "eezzyLIVE 🧸",
+   "twitter": "https://x.com/notEezzy"
+  },
+  {
+   "wallet": "DiYAbefobb98Dw5CjAB76NTEG1YGhiCoP6r4Y2bAkeK8",
+   "name": "Trench",
+   "twitter": "https://x.com/B1GTrench"
+  },
+  {
+   "wallet": "DieowDJ137xDRyCDn3YZYfAe4qzeGmdQJvryyqdWhtuc",
+   "name": "appie",
+   "twitter": "https://x.com/appiesol_"
+  },
+  {
+   "wallet": "DjM7Tu7whh6P3pGVBfDzwXAx2zaw51GJWrJE3PwtuN7s",
+   "name": "LUKEY ✣",
+   "twitter": "https://x.com/VERYKOOLLUKEY"
+  },
+  {
+   "wallet": "DpNVrtA3ERfKzX4F8Pi2CVykdJJjoNxyY5QgoytAwD26",
+   "name": "Gorilla Capital",
+   "twitter": "https://x.com/gorillacapsol"
+  },
+  {
+   "wallet": "DrJ6SnDXkEsPeGdmSs93v5rwWumv5QMvAGSZjAyWSd5o",
+   "name": "Iced",
+   "twitter": "https://x.com/IcedKnife"
+  },
+  {
+   "wallet": "DsqRyTUh1R37asYcVf1KdX4CNnz5DKEFmnXvgT4NfTPE",
+   "name": "Classic",
+   "twitter": "https://x.com/simplyclassic69"
+  },
+  {
+   "wallet": "DtjYbZntc2mEm1UrZHNcKguak6h6QM4S5xobnwFgg92Y",
+   "name": "Files",
+   "twitter": "https://x.com/xfilesboy"
+  },
+  {
+   "wallet": "DuGezKLZp8UL2aQMHthoUibEC7WSbpNiKFJLTtK1QHjx",
+   "name": "Eddy 💹🧲",
+   "twitter": "https://x.com/EddyMetaX"
+  },
+  {
+   "wallet": "DuQabFqdC9eeBULVa7TTdZYxe8vK8ct5DZr4Xcf7docy",
+   "name": "orangie",
+   "twitter": "https://x.com/orangie"
+  },
+  {
+   "wallet": "Dv32u9mvSXGVNshf7xM7afuMoPRifQxzuzEjfmfMysZY",
+   "name": "deecayz ⌐◨-◨",
+   "twitter": "https://x.com/deecayz"
+  },
+  {
+   "wallet": "DvAWxB2D7DL8dcnbyK7FUmwqWSecPka7XveuGV5hHah8",
+   "name": "Trend",
+   "twitter": "https://x.com/Trndsttr"
+  },
+  {
+   "wallet": "Dvbv5TdAyPpJk16X9mUxWFVicYtCUxTLhuof8TGuUaRv",
+   "name": "CookDoc",
+   "twitter": "https://x.com/CookDoc1993"
+  },
+  {
+   "wallet": "DwCp9GZw3ueoXPykHSPUkRZEwcTVbJH2i9Sf1cXYicWf",
+   "name": "wizard",
+   "twitter": "https://x.com/w1zar9"
+  },
+  {
+   "wallet": "Dwo2kj88YYhwcFJiybTjXezR9a6QjkMASz5xXD7kujXC",
+   "name": "Exotic",
+   "twitter": "https://x.com/74Exotic"
+  },
+  {
+   "wallet": "Dxudj2DQ5odnqgZvUocaeWc1eYC78Q8vfmVtPpvTrRNh",
+   "name": "storm",
+   "twitter": "https://x.com/stormtradez"
+  },
+  {
+   "wallet": "DxwDRWxQXDaVZquH3YvCVBQ75nUf16FttQ4q88okn5mc",
+   "name": "Sebi",
+   "twitter": "https://x.com/limpcritisism"
+  },
+  {
+   "wallet": "DzeSE8ZBNk36qqswcDxd8919evdH5upwyZ4u1yieQSkp",
+   "name": "十九岁绿帽少年🍀",
+   "twitter": "https://x.com/19ys_GGboy"
+  },
+  {
+   "wallet": "E79qwNHoJx45qS4xi3fuuG3JYAwXEFdg9pCPjwnweJ96",
+   "name": "Cryptooo-Spidey ❤️",
+   "twitter": "https://x.com/CryptoooSpidey"
+  },
+  {
+   "wallet": "E7gozEiAPNhpJsdS52amhhN2XCAqLZa7WPrhyR6C8o4S",
+   "name": "evening",
+   "twitter": "https://x.com/eveningbtc"
+  },
+  {
+   "wallet": "EA4MXkyF8C2NzY8fw2acJPuarmoU271KRCCAYpLzMBJr",
+   "name": "Grimace",
+   "twitter": "https://x.com/naughtygrimace"
+  },
+  {
+   "wallet": "EA9TnaqEZXq5VNGHuyV8169ydLWvJq5uAJiv43boLBBf",
+   "name": "Dooms",
+   "twitter": "https://x.com/SarDooms"
+  },
+  {
+   "wallet": "EAnB5151L8ejp3SM6haLgyv3snk6oqc8acKgWEg9T5J",
+   "name": "Jordan",
+   "twitter": "https://x.com/ohFrostyyy"
+  },
+  {
+   "wallet": "EBjXstFQBBnXVFEXouqGfUxQFmaEHu6KFbxrZQkGbjru",
+   "name": "Zinc",
+   "twitter": "https://x.com/zinceth"
+  },
+  {
+   "wallet": "ECa6q9uC9LaYYBekJ7ApD2EoKy3VKy7WZv863cg5pqM8",
+   "name": "Ochouso 🦈",
+   "twitter": "https://x.com/ochouso"
+  },
+  {
+   "wallet": "EDXHdSFdadFbYFFjxPXBqMe1kCEDFqpPu552uvp48HR8",
+   "name": "Clown",
+   "twitter": "https://x.com/ClownsTrenches"
+  },
+  {
+   "wallet": "EHg5YkU2SZBTvuT87rUsvxArGp3HLeye1fXaSDfuMyaf",
+   "name": "TIL",
+   "twitter": "https://x.com/tilcrypto"
+  },
+  {
+   "wallet": "EP5mvfhGv6x1XR33Fd8eioiYjtRXAawafPmkz9xBpDvG",
+   "name": "Zemrics",
+   "twitter": "https://x.com/Zemrics"
+  },
+  {
+   "wallet": "EQaxqKT3N981QBmdSUGNzAGK5S26zUwAdRHhBCgn87zD",
+   "name": "jamessmith",
+   "twitter": "https://x.com/luckedhub"
+  },
+  {
+   "wallet": "ETU3GyrUsv6UztQJxHgsBX2UoJFmq79WJe3JyDpAqGMz",
+   "name": "MACXBT",
+   "twitter": "https://x.com/00MACXBT"
+  },
+  {
+   "wallet": "EVCwZrtPFudcjw69RZ9Qogt8dW2HjBp6EiMgv1ujdYuJ",
+   "name": "ree",
+   "twitter": "https://x.com/reeotrix"
+  },
+  {
+   "wallet": "EYBMFf8mUyvZobqX7bkaCrvZ6bHCYxeVjFHQ9v2bmtAy",
+   "name": "Storm",
+   "twitter": "https://x.com/StormsTrades"
+  },
+  {
+   "wallet": "EaVboaPxFCYanjoNWdkxTbPvt57nhXGu5i6m9m6ZS2kK",
+   "name": "danny",
+   "twitter": "https://x.com/cladzsol"
+  },
+  {
+   "wallet": "EbSjMKQ4GiAxawit6LuHBjDqhC5gYGQhbH2YpBerJiCJ",
+   "name": "Crypto Chef",
+   "twitter": "https://x.com/TheCryptoChefX"
+  },
+  {
+   "wallet": "Ebk5ATdfrCuKi27dHZaw5YYsfREEzvvU8xeBhMxQoex6",
+   "name": "Sully",
+   "twitter": "https://x.com/sullyfromDeets"
+  },
+  {
+   "wallet": "EcVgevcb8F3QsHuBg96wrCXwC3j2gnrhLr1Q21YULNk8",
+   "name": "cuban",
+   "twitter": "https://x.com/oCubann"
+  },
+  {
+   "wallet": "EdDCRfDDeiiDXdntrP59abH4DXHFNU48zpMPYisDMjA7",
+   "name": "Mezoteric",
+   "twitter": "https://x.com/mezoteric"
+  },
+  {
+   "wallet": "EeSx4wehRQhEbmbyFvfqA633v2P4C558bHh2ed7zgZh",
+   "name": "Dolo 🥷",
+   "twitter": "https://x.com/Dolonomix"
+  },
+  {
+   "wallet": "EeXvxkcGqMDZeTaVeawzxm9mbzZwqDUMmfG3bF7uzumH",
+   "name": "milito",
+   "twitter": "https://x.com/fnmilito"
+  },
+  {
+   "wallet": "EgjCS3ULUCU5JN83XumirPr6171zvN5i6wc12SDiVGX3",
+   "name": "Legend",
+   "twitter": "https://x.com/legend_calls"
+  },
+  {
+   "wallet": "EgnY4zmqXuaqodCLW366jjd2ecki6pvmMF74MkSxMFQW",
+   "name": "Eric Cryptoman",
+   "twitter": "https://x.com/EricCryptoman"
+  },
+  {
+   "wallet": "EgzjRCbcdRiPc1bW52tcvGDnKDbQWCzQbUhDBszD2BZm",
+   "name": "Rev",
+   "twitter": "https://x.com/solrevv"
+  },
+  {
+   "wallet": "Ehqd8q5rAN8V7Y7EGxYm3Tp4KPQMTVWQtzjSSPP3Upg3",
+   "name": "Collectible",
+   "twitter": "https://x.com/collectible"
+  },
+  {
+   "wallet": "EjtQrPTbcMevStBkpnjsH23NfUCMhGHusTYsHuGVQZp2",
+   "name": "Zef",
+   "twitter": "https://x.com/zefwashere"
+  },
+  {
+   "wallet": "Enjoy9BmQgAUD9AKC4HpUbHByVdzwp7jQppKukEvdyWm",
+   "name": "Enjooyer",
+   "twitter": "https://x.com/0xEnjooyer"
+  },
+  {
+   "wallet": "EqiFgyNw6kgrmYstWyrP8VjKhka7XEmKTZzHSmwpr1Zb",
+   "name": "ban",
+   "twitter": "https://x.com/Ban_Val"
+  },
+  {
+   "wallet": "ErhZ8c1DA68BUcxUBcLVrL4w457dU48dxNiqeehSGB5p",
+   "name": "Lockiner",
+   "twitter": "https://x.com/lockiner"
+  },
+  {
+   "wallet": "EtVEeqiKcf9Wgp38Z3L8HFi3heT4nPxsoDwe6cxwkqhc",
+   "name": "Lunar cipher",
+   "twitter": "https://x.com/Lunarc1pher"
+  },
+  {
+   "wallet": "EtuuyC1njBScPtYFpuDP6mxdkfTcs9zbUbJGheHzof3t",
+   "name": "mog",
+   "twitter": "https://x.com/10piecedawg"
+  },
+  {
+   "wallet": "EtyHwLDfAi9E24Qw41xFUW8WtQ3NxajxJA2yaaUASR5a",
+   "name": "Dame",
+   "twitter": "https://x.com/TrenchDame"
+  },
+  {
+   "wallet": "EvhNmcXCZX6AMzzA9SLZ4Nuf4qkiJvwgFE67m4ukQoWk",
+   "name": "jessix",
+   "twitter": "https://x.com/notjessix"
+  },
+  {
+   "wallet": "Ew6qBU7N34gRNgpgUwhJ3PgrtbPYpLYWLBEG5yuQTceD",
+   "name": "👀",
+   "twitter": "https://x.com/UniswapVillain"
+  },
+  {
+   "wallet": "ExKCuoAzJCgCVjU3CvNoL8vVrdESTWkx3ubj6rQXwQM4",
+   "name": "TheDefiApe",
+   "twitter": "https://x.com/TheDefiApe"
+  },
+  {
+   "wallet": "Ez2jp3rwXUbaTx7XwiHGaWVgTPFdzJoSg8TopqbxfaJN",
+   "name": "Keano",
+   "twitter": "https://x.com/nftkeano"
+  },
+  {
+   "wallet": "F1WT79Jkw3BkBDUfCbrKKo15ghZNCEjvnjxQpiCfPuRM",
+   "name": "flock (6'3)",
+   "twitter": "https://x.com/flocko"
+  },
+  {
+   "wallet": "F2SuErm4MviWJ2HzKXk2nuzBC6xe883CFWUDCPz6cyWm",
+   "name": "Earl",
+   "twitter": "https://x.com/earlTrades"
+  },
+  {
+   "wallet": "F5TjPySiUJMdvqMZHnPP85Rc1vErDGV5FR5P2vdVm429",
+   "name": "Zyaf",
+   "twitter": "https://x.com/0xZyaf"
+  },
+  {
+   "wallet": "F5Tw3a3sUNXRUVabtKPE9C6mRxAoMnKDd8W2SLFQtAEB",
+   "name": "Exploitz",
+   "twitter": "https://x.com/exploitzonsol"
+  },
+  {
+   "wallet": "F5jWYuiDLTiaLYa54D88YbpXgEsA6NKHzWy4SN4bMYjt",
+   "name": "mercy",
+   "twitter": "https://x.com/mercularx"
+  },
+  {
+   "wallet": "F72vY99ihQsYwqEDCfz7igKXA5me6vN2zqVsVUTpw6qL",
+   "name": "Jalen",
+   "twitter": "https://x.com/RipJalens"
+  },
+  {
+   "wallet": "F8WtsrLzexRkjv11b1sgA3Qj7E889RGYa1jFLGoPwKTB",
+   "name": "kz",
+   "twitter": "https://x.com/kayz_ce"
+  },
+  {
+   "wallet": "FAicXNV5FVqtfbpn4Zccs71XcfGeyxBSGbqLDyDJZjke",
+   "name": "radiance",
+   "twitter": "https://x.com/radiancebrr"
+  },
+  {
+   "wallet": "FC3nyVqdufVfrgXiRJEqgST1JdJSEBEz6a9KoBfFP7c4",
+   "name": "psykø",
+   "twitter": "https://x.com/psykogem"
+  },
+  {
+   "wallet": "FCt3Gyuqcoc4vHrnAYdxVbqSg3m1AyDHtaVZMN8TctPv",
+   "name": "Rich The Dev",
+   "twitter": "https://x.com/Piana100x"
+  },
+  {
+   "wallet": "FEGu1issUaiWS7NhSNLwDYRudBSSUHaBenHF14qStv4W",
+   "name": "CryptoStacksss",
+   "twitter": "https://x.com/CryptoStacksss"
+  },
+  {
+   "wallet": "FGVjsmD76HMcMa6NNzhwxZ2qpx25fGnAZT7zF2A3SWtH",
+   "name": "aloh",
+   "twitter": "https://x.com/alohquant"
+  },
+  {
+   "wallet": "FH6jdKkoRg8MQKrtAUwiHq53FyCwoeNQ1ok4doFwGMUg",
+   "name": "Iz",
+   "twitter": "https://x.com/IzCryptoG"
+  },
+  {
+   "wallet": "FPx2BavA7J2C7Nz6WpoPL9f5kDAKjxLb38PHNZMoxCra",
+   "name": "Achi",
+   "twitter": "https://x.com/AchillesXBT"
+  },
+  {
+   "wallet": "FQEXjVZPT7BqcZNVs82Q46LFPUevG7YoDiKpugpJaiCb",
+   "name": "Padly",
+   "twitter": "https://x.com/Padly1k"
+  },
+  {
+   "wallet": "FRbUNvGxYNC1eFngpn7AD3f14aKKTJVC6zSMtvj2dyCS",
+   "name": "Henn",
+   "twitter": "https://x.com/henn100x"
+  },
+  {
+   "wallet": "FSAmbD6jm6SZZQadSJeC1paX3oTtAiY9hTx1UYzVoXqj",
+   "name": "Zil",
+   "twitter": "https://x.com/zilxbt"
+  },
+  {
+   "wallet": "FTg1gqW7vPm4kdU1LPM7JJnizbgPdRDy2PitKw6mY27j",
+   "name": "7",
+   "twitter": "https://x.com/Soloxbt"
+  },
+  {
+   "wallet": "FUZZUhT5qKncddMxLnkeiN7Dh1CmSpWPScp55iexZ85t",
+   "name": "Fuzz",
+   "twitter": "https://x.com/slfuzz"
+  },
+  {
+   "wallet": "FWAmTVsmAjxYZe4Nt5ooLDg6AHHUx3ST3nz89oGSGu59",
+   "name": "Hueno",
+   "twitter": "https://x.com/HuenoZ"
+  },
+  {
+   "wallet": "FajxNukkjDLGXfB5V3L1msrU9qgzuzhN4s4YQfefSCKp",
+   "name": "Divix",
+   "twitter": "https://x.com/cryptodivix"
+  },
+  {
+   "wallet": "FbvUU5qvD9JsU9jp3KDweCpZiVZHLoQBQ1PPCAAbd6FB",
+   "name": "profitier",
+   "twitter": "https://x.com/profitierr"
+  },
+  {
+   "wallet": "FeYVZPsDkmg3D9ddcySxLqGvAR9ES29ABZkeRcUn4FfY",
+   "name": "AsyncDuck",
+   "twitter": "https://x.com/Async_duck"
+  },
+  {
+   "wallet": "FhsSfTSHok3ryVfyuLSD1t9frc4c1ymyCr3S11Ci718z",
+   "name": "Spike",
+   "twitter": "https://x.com/NotSpikeG"
+  },
+  {
+   "wallet": "Fi2hrxExy6TJnKcbPtQpo6iZzX9SUVbB9mDw6d29NgCn",
+   "name": "quant",
+   "twitter": "https://x.com/quantgz"
+  },
+  {
+   "wallet": "FixmSpsBa7ew26gWdiqpoMAgKRFgbSXFbGAgfMZw67X",
+   "name": "Marcell",
+   "twitter": "https://x.com/MarcellxMarcell"
+  },
+  {
+   "wallet": "FkL99xVBParNcPTjxnLdqFFCg3cvcR7NjCGkMgDPFfW3",
+   "name": "Nils😈",
+   "twitter": "https://x.com/nilsthedegen"
+  },
+  {
+   "wallet": "FkRN9yF3Gysw3BVhUqAXJJMEGfKiJNaPQAWYWBErgDuN",
+   "name": "rez",
+   "twitter": "https://x.com/rezthegreatt"
+  },
+  {
+   "wallet": "FksF9AqK7UvkkuzDoHQxYiyk6APwpPAaRzXp5QG3FGqA",
+   "name": "proh",
+   "twitter": "https://x.com/PR0H0S"
+  },
+  {
+   "wallet": "FpD6n8gfoZNxyAN6QqNH4TFQdV9vZEgcv5W4H2YL8k4X",
+   "name": "Hesi",
+   "twitter": "https://x.com/hesikillaz"
+  },
+  {
+   "wallet": "FqamE7xrahg7FEWoByrx1o8SeyHt44rpmE6ZQfT7zrve",
+   "name": "EustazZ",
+   "twitter": "https://x.com/Eustazzeus"
+  },
+  {
+   "wallet": "FqojC24nUn3x6oMQC2ypBHmtH7rFAnKS6DvwsJoCMaiv",
+   "name": "CoCo",
+   "twitter": "https://x.com/CoCoCookerr"
+  },
+  {
+   "wallet": "FsG3BaPmRTdSrPaivbgJsFNCCa8cPfkUtk8VLWXkHpHP",
+   "name": "Reljoo",
+   "twitter": "https://x.com/Reljoooo"
+  },
+  {
+   "wallet": "Fv8byBKV8jK8jxoUtgB1A1dqGcxSoN8x7bUZobP8Xn1d",
+   "name": "Banf",
+   "twitter": "https://x.com/BanfSol"
+  },
+  {
+   "wallet": "FwjYcbfktK8PC2bzCrqxR6QkUPxmHFbcFGNrz3YAV7ft",
+   "name": "Paper",
+   "twitter": "https://x.com/stackppr"
+  },
+  {
+   "wallet": "FzVQSzj8JJr6WMGqbUHzx2XH1KkrfxRrRPv6WcbbZmND",
+   "name": "DustNukes",
+   "twitter": "https://x.com/DustNukes"
+  },
+  {
+   "wallet": "Fza6jHuaxeJGj3pMtWdTuYs52BHstpnpGawg2SWEra9",
+   "name": "Toz",
+   "twitter": "https://x.com/Cryptoze"
+  },
+  {
+   "wallet": "FzvHfo9Mb5XgE93eTaPmXMcZgETPTqyZCgPURmyP7KVM",
+   "name": "MoneyMaker",
+   "twitter": "https://x.com/TheMoro87"
+  },
+  {
+   "wallet": "G2mgnzpr59vYjKpwU9q5zVfS9yQ9HezMwjuqF7LACvR4",
+   "name": "fz7",
+   "twitter": "https://x.com/fz7trades"
+  },
+  {
+   "wallet": "G3CaEuingKVjqsoHf7SpSQuLvRAJA69dikaQYxBqvwEr",
+   "name": "✶",
+   "twitter": "https://x.com/Halo100x"
+  },
+  {
+   "wallet": "G3g1CKqKWSVEVURZDNMazDBv7YAhMNTjhJBVRTiKZygk",
+   "name": "Insyder",
+   "twitter": "https://x.com/insydercrypto"
+  },
+  {
+   "wallet": "G3gZWqrYkNmYFKYCyfRCNtGuxdyuE2wiYKkZpiZn4WSS",
+   "name": "Goyim",
+   "twitter": "https://x.com/goyimpnl"
+  },
+  {
+   "wallet": "G4q7d1fckiQ4uXxtQpEfgddzBVrXs28yr7VEP2xdRi4p",
+   "name": "Creator Finance",
+   "twitter": "https://x.com/CreatorFinanceX"
+  },
+  {
+   "wallet": "G5nxEXuFMfV74DSnsrSatqCW32F34XUnBeq3PfDS7w5E",
+   "name": "Profit",
+   "twitter": "https://x.com/FlippingProfits"
+  },
+  {
+   "wallet": "G6fUXjMKPJzCY1rveAE6Qm7wy5U3vZgKDJmN1VPAdiZC",
+   "name": "clukz",
+   "twitter": "https://x.com/clukzSOL"
+  },
+  {
+   "wallet": "GBERKNpahPnBGmeUGWQVjGBDBj6CcJKpGz34FqegmTgu",
+   "name": "Scrim",
+   "twitter": "https://x.com/mircs"
+  },
+  {
+   "wallet": "GDoG4tdbx8qkpECQKF5MebbEDpFJn6H739psqgoTG3aN",
+   "name": "crayohla",
+   "twitter": "https://x.com/CrayohlaEU"
+  },
+  {
+   "wallet": "GEKZWL474tFAyYDUoTgKEgYuMxT3Se7HzKDDptrnXnvS",
+   "name": "Advyth",
+   "twitter": "https://x.com/Advyth"
+  },
+  {
+   "wallet": "GEpM1SmE8ExgznJwyZX64F2Mv5LLFgvBCxm5zNWYUXL4",
+   "name": "Pain",
+   "twitter": "https://x.com/ipaincharts"
+  },
+  {
+   "wallet": "GGznouFGrtSETCzvt14gysyjZ2uYKBDVjMBaq8h1aCHG",
+   "name": "Boeroe",
+   "twitter": "https://x.com/xboeroe"
+  },
+  {
+   "wallet": "GJA1HEbxGnqBhBifH9uQauzXSB53to5rhDrzmKxhSU65",
+   "name": "Latuche",
+   "twitter": "https://x.com/Latuche95"
+  },
+  {
+   "wallet": "GJyhzLoZAxZHZGPvF3V1wsyGUnoGSQ55n6hN6nHv7W8B",
+   "name": "LilMoonLambo",
+   "twitter": "https://x.com/LilMoonLambo"
+  },
+  {
+   "wallet": "GL8VLakj5AeAnkVNd4gQAkjXLqAzjeNbNXUQBdo8FwQG",
+   "name": "polar",
+   "twitter": "https://x.com/polarsterrr"
+  },
+  {
+   "wallet": "GM7Hrz2bDq33ezMtL6KGidSWZXMWgZ6qBuugkb5H8NvN",
+   "name": "Beaver",
+   "twitter": "https://x.com/beaverd"
+  },
+  {
+   "wallet": "GNrmKZCxYyNiSUsjduwwPJzhed3LATjciiKVuSGrsHEC",
+   "name": "Giann",
+   "twitter": "https://x.com/Giann2K"
+  },
+  {
+   "wallet": "GP9PyTwGybX3q3tC5dMRKeuq8Dr15uPVvn3Z9fKbempH",
+   "name": "Sweep",
+   "twitter": "https://x.com/0xSweep"
+  },
+  {
+   "wallet": "GPryzRs7NshgCoxp382oYoye5PrfUBq8xE1CoEfNayNh",
+   "name": "Kaaox",
+   "twitter": "https://x.com/xKaaox"
+  },
+  {
+   "wallet": "GRcAsAnvZc6cX2Jx2yYFzWV62yqCoU74eV4Nfq36vqxQ",
+   "name": "green",
+   "twitter": "https://x.com/greencomeup"
+  },
+  {
+   "wallet": "GVQtcYiQLy3tKNPGzPa81RsCKycam1zLTQSybdnDjMkF",
+   "name": "GVQ",
+   "twitter": "https://x.com/GVQ_xx"
+  },
+  {
+   "wallet": "GXcAHhvutpa6gmwUVHtxg7KbYghsjNWQshKq4SinHRtQ",
+   "name": "Atlas",
+   "twitter": "https://x.com/atlascandle"
+  },
+  {
+   "wallet": "GfXQesPe3Zuwg8JhAt6Cg8euJDTVx751enp9EQQmhzPH",
+   "name": "Spuno",
+   "twitter": "https://x.com/spunosounds"
+  },
+  {
+   "wallet": "GmDXqHhXqfzEBErQqPft9xkznvgfkX6bcUT65MxQzNBj",
+   "name": "🇩🇴 Jerry",
+   "twitter": "https://x.com/0xJrmm"
+  },
+  {
+   "wallet": "Gp9W8Qa2J1RQLvJNkJd8GDgqY16yAQfyzC4DiDZewKb7",
+   "name": "maybe",
+   "twitter": "https://x.com/marekeacc"
+  },
+  {
+   "wallet": "GrD2umbfEBjQKFPDQvmmYNQ5eyRL9SAdWJj9FFMyeaDN",
+   "name": "Solstice",
+   "twitter": "https://x.com/The__Solstice"
+  },
+  {
+   "wallet": "Gtg4qSMkxME783rNdwHYQ11DbQvoXgLodTBLAAa8G5C2",
+   "name": "Win All Day",
+   "twitter": "https://x.com/winallday_"
+  },
+  {
+   "wallet": "Gv8YFCU9WESGpN6fcGKG9nirqcyF9wVZAqnQ1DjrsfcE",
+   "name": "Lectron",
+   "twitter": "https://x.com/LectronNFT"
+  },
+  {
+   "wallet": "GvTXquDAJbfrFrEGTPRPUj3WM5Bzub5yeTFzkLVHpjfD",
+   "name": "brunowsky",
+   "twitter": "https://x.com/brubowsky"
+  },
+  {
+   "wallet": "GwoFJFjUTUSWq2EwTz4P2Sznoq9XYLrf8t4q5kbTgZ1R",
+   "name": "Levis",
+   "twitter": "https://x.com/LevisNFT"
+  },
+  {
+   "wallet": "GxifJqkZv6CvgLVpcv5Z8tkqcCyVSWfUyvr2zCCjpEmV",
+   "name": "GK",
+   "twitter": "https://x.com/Ygktgk"
+  },
+  {
+   "wallet": "H1TLERBQyQzSd5gbvbWwP97GjeL9txzWoN5BK4UG7xYm",
+   "name": "alex",
+   "twitter": "https://x.com/0xWarlord"
+  },
+  {
+   "wallet": "H31vEBxSJk1nQdUN11qZgZyhScyShhscKhvhZZU3dQoU",
+   "name": "Megga",
+   "twitter": "https://x.com/Megga"
+  },
+  {
+   "wallet": "HA1L7GhQfypSRdfBi3tCkkCVEdEcBVYqBSQCENCrwPuB",
+   "name": "Hail",
+   "twitter": "https://x.com/ignHail"
+  },
+  {
+   "wallet": "HFx9E1vvWyoMmiHuTMSAQ2GRkJ2N4snCUwhUMr83LLSs",
+   "name": "yassir",
+   "twitter": "https://x.com/yassirwtf"
+  },
+  {
+   "wallet": "HLv6yCEpgjQV9PcKsvJpem8ESyULTyh9HjHn9CtqSek1",
+   "name": "Lyxe",
+   "twitter": "https://x.com/cryptolyxe"
+  },
+  {
+   "wallet": "HTVupcGHvA8tXX5pHmmAxQ8eiFAJSJhYNQjer3zycLcU",
+   "name": "Setora",
+   "twitter": "https://x.com/Setora__"
+  },
+  {
+   "wallet": "HUS9ErdrDqpqQePbmfgJUTnDTE6eZ8ES62a25RihSK9U",
+   "name": "Hustler",
+   "twitter": "https://x.com/JoeVargas"
+  },
+  {
+   "wallet": "HYSq1KBAvqWpEv1pCbV31muKM1za5A1WSHGdiVLUoNhb",
+   "name": "Apex 屮",
+   "twitter": "https://x.com/xApex0"
+  },
+  {
+   "wallet": "HYgRa7NfuNhGZ7hsPix4N7evmmU5t5BTUUEoxwFcTKJD",
+   "name": "zurh",
+   "twitter": "https://x.com/zurhxbt"
+  },
+  {
+   "wallet": "HbCxe8yWQJWnK3f3FX4oohgm87FZuPYD4Ydszqxgkwft",
+   "name": "Stacker ✝️",
+   "twitter": "https://x.com/Stackeronsol"
+  },
+  {
+   "wallet": "HcpsFY1tDhuzEGGwuqyYy6PSi6hHEjGbFKMz4oA5BicY",
+   "name": "jimmy",
+   "twitter": "https://x.com/JIMMYEDGAR"
+  },
+  {
+   "wallet": "Hi5yNvPSfagdja5xjYMTYWnnjSE3ze5KsezTLfuD2mqd",
+   "name": "gambles.sol",
+   "twitter": "https://x.com/mastern0de3"
+  },
+  {
+   "wallet": "HkFt55P3PhRWHXoTFeuvkKEE4ab26xZ1bk6UmXV88Pwz",
+   "name": "Terp",
+   "twitter": "https://x.com/OnlyTerp"
+  },
+  {
+   "wallet": "HmtAZQn7U75jkAxrXNh8vRFCmjGjM3Q2WpiTHXoCJrUz",
+   "name": "Preston",
+   "twitter": "https://x.com/prestonharty"
+  },
+  {
+   "wallet": "Hq5TTULwwmDjGvzQukgujHQogZ5uFSCyYHpP756Uvyae",
+   "name": "s0ber",
+   "twitter": "https://x.com/whaIecrypto"
+  },
+  {
+   "wallet": "HrCPnDvDgbpbFxKxer6Pw3qEcfAQQNNjb6aJNFWgTEng",
+   "name": "0xWinged",
+   "twitter": "https://x.com/0xExorcized"
+  },
+  {
+   "wallet": "HtvLcCFehifb7G4j42JDn53zD7sQRiELF5WHzJzNvWMm",
+   "name": "Polly",
+   "twitter": "https://x.com/0xsushi"
+  },
+  {
+   "wallet": "Huk3KuMLsLBZSer2n7MXmMPAJE1eKcr8dJS6DDoM3m8f",
+   "name": "Little Mustacho 🐕",
+   "twitter": "https://x.com/littlemustacho"
+  },
+  {
+   "wallet": "HvNqQBTfoiksyvzGR5rrNAv46DjeNgGNMTB5YZpYh16W",
+   "name": "Ray",
+   "twitter": "https://x.com/23slyy"
+  },
+  {
+   "wallet": "Hw5UKBU5k3YudnGwaykj5E8cYUidNMPuEewRRar5Xoc7",
+   "name": "Trenchman",
+   "twitter": "https://x.com/trenchmanjames"
+  },
+  {
+   "wallet": "HwRnKq7RPtKHvX9wyHsc1zvfHtGjPQa5tyZtGtbvfXE",
+   "name": "Jay",
+   "twitter": "https://x.com/BitBoyJay"
+  },
+  {
+   "wallet": "J15mCwMU8EeSvaiFTTyM8teCoxXf82aLUh6FgtDy5q1g",
+   "name": "Fwasty",
+   "twitter": "https://x.com/Fwasty"
+  },
+  {
+   "wallet": "J1XAE4onKYG1kTghgaytnyFgR3otQs1xEnJRRWM3d",
+   "name": "yode",
+   "twitter": "https://x.com/yodefv"
+  },
+  {
+   "wallet": "J1XAE4onKYG1kTghgaytnyFgR3otQs1xEnJRRWM3dj",
+   "name": "yode",
+   "twitter": "https://x.com/yodefv"
+  },
+  {
+   "wallet": "J23qr98GjGJJqKq9CBEnyRhHbmkaVxtTJNNxKu597wsA",
+   "name": "gr3g",
+   "twitter": "https://x.com/gr3gor14n"
+  },
+  {
+   "wallet": "J2B5fnm2DAAUAGa4EaegwQFoYaN6B5FerGA5sjtQoaGM",
+   "name": "Dan176",
+   "twitter": "https://x.com/176Dan"
+  },
+  {
+   "wallet": "J4rYYPEXHwYMvyNzVwRsTyaSVpHv4SXK6kQNGgvBdvc4",
+   "name": "RUSKY 🪬⚡️",
+   "twitter": "https://x.com/CryDevil23"
+  },
+  {
+   "wallet": "J6TDXvarvpBdPXTaTU8eJbtso1PUCYKGkVtMKUUY8iEa",
+   "name": "Pain",
+   "twitter": "https://x.com/PainCrypt0"
+  },
+  {
+   "wallet": "J9TYAsWWidbrcZybmLSfrLzryANf4CgJBLdvwdGuC8MB",
+   "name": "Johnson",
+   "twitter": "https://x.com/johnsoncooks101"
+  },
+  {
+   "wallet": "JAmx4Wsh7cWXRzQuVt3TCKAyDfRm9HA7ztJa4f7RM8h9",
+   "name": "Tally ꨄ︎",
+   "twitter": "https://x.com/tallxyyy"
+  },
+  {
+   "wallet": "JAunzNqs3bVBcWDjDxfq9rgLzJMCadNXoaCgfzLGMtYs",
+   "name": "Pengu 💫",
+   "twitter": "https://x.com/Penguzxbt"
+  },
+  {
+   "wallet": "JBTJAkwqYR471nmeHqLSUaLezNz4Yx2wy9jYotveGnEm",
+   "name": "Fawcette",
+   "twitter": "https://x.com/Fawcette_"
+  },
+  {
+   "wallet": "JDd3hy3gQn2V982mi1zqhNqUw1GfV2UL6g76STojCJPN",
+   "name": "West",
+   "twitter": "https://x.com/ratwizardx"
+  },
+  {
+   "wallet": "KJXB1ot9nkCvq1ZD27vzNSBaPPCT82DpVnXrcwxftvY",
+   "name": "i gamble your yearly salary",
+   "twitter": "https://x.com/aightbet"
+  },
+  {
+   "wallet": "LeenseyyUU3ccdBPCFCrrZ8oKU2B3T2uToGGZ7eVABY",
+   "name": "Leens",
+   "twitter": "https://x.com/leensx100"
+  },
+  {
+   "wallet": "PMJA8UQDyWTFw2Smhyp9jGA6aTaP7jKHR7BPudrgyYN",
+   "name": "chester",
+   "twitter": "https://x.com/Chestererer"
+  },
+  {
+   "wallet": "RaSSH7hMwLKtMT96xZyY4JwHRCCNYvvNeBh6AaFMqdA",
+   "name": "Rasta",
+   "twitter": "https://x.com/rastacowboy2021"
+  },
+  {
+   "wallet": "SAALE2x3sn51EyahJyqD6913L3GqHZdZo3egUdMayQp",
+   "name": "saale",
+   "twitter": "https://x.com/saale"
+  },
+  {
+   "wallet": "UxuuMeyX2pZPHmGZ2w3Q8MysvExCAquMtvEfqp2etvm",
+   "name": "Pandora",
+   "twitter": "https://x.com/pandoraflips"
+  },
+  {
+   "wallet": "YvEsBWpHK5PJ6Q8m4YrocwKeWys1NG67pbgi73UPnuX",
+   "name": "Gucci",
+   "twitter": "https://x.com/GucciArchives"
+  },
+  {
+   "wallet": "ardinRsN1mNYVeoJWTBsWeYeXvuR9UUDGMsCDKpb6AT",
+   "name": "trunoest",
+   "twitter": "https://x.com/trunoest"
+  },
+  {
+   "wallet": "gangJEP5geDHjPVRhDS5dTF5e6GtRvtNogMEEVs91RV",
+   "name": "Qavec",
+   "twitter": "https://x.com/Qavecc"
+  },
+  {
+   "wallet": "gkNNf4NwkR61B1QKBFtELe6TVZFhYRaC2LbVkoNyCkB",
+   "name": "Prada",
+   "twitter": "https://x.com/0xPradaa"
+  },
+  {
+   "wallet": "hahaA2GjzZbwgAwwryjmTb8VkmLt68hdZVHhtcpknpT",
+   "name": "Aspect",
+   "twitter": "https://x.com/AspectOnChain"
+  },
+  {
+   "wallet": "iPUp3qkm39ycMGbywWFMUyvaDhiiPGXeWXaDtmHNe6C",
+   "name": "Nikolas (aura arc)",
+   "twitter": "https://x.com/ArcNikolas"
+  },
+  {
+   "wallet": "j38fhfqWsJyt8hzym48P8QMsXWx1FfLUxQwuor7Ti4o",
+   "name": "Nilla",
+   "twitter": "https://x.com/NillaGurilla"
+  },
+  {
+   "wallet": "jsjsxPQQ8xoHvQ7ezhKiKWD8FnZe9txuRw3ewKRZUsb",
+   "name": "Jookiaus",
+   "twitter": "https://x.com/JookCrypto"
+  },
+  {
+   "wallet": "kiLogfWUXp7nby7Xi6R9t7u8ERQyRdAzg6wBjvuE49u",
+   "name": "kilo",
+   "twitter": "https://x.com/kilorippy"
+  },
+  {
+   "wallet": "kita97U8XijSrkwoEa6ViskeJnP8mCYUTsusU5RyaN5",
+   "name": "kitakitsune",
+   "twitter": "https://x.com/kitakitsune"
+  },
+  {
+   "wallet": "m7Kaas3Kd8FHLnCioSjCoSuVDReZ6FDNBVM6HTNYuF7",
+   "name": "Ferb",
+   "twitter": "https://x.com/ferbsol"
+  },
+  {
+   "wallet": "mGbBx5GBee8gKj8Tr2YfuP18WnoGYEtkErtx6KgkdG1",
+   "name": "/ MERCI /",
+   "twitter": "https://x.com/Merc_eth"
+  },
+  {
+   "wallet": "mW4PZB45isHmnjGkLpJvjKBzVS5NXzTJ8UDyug4gTsM",
+   "name": "Dex",
+   "twitter": "https://x.com/igndex"
+  },
+  {
+   "wallet": "nichQ7m3W37WJ9beNLZfTj27gLrjC7ddq4YguHufYas",
+   "name": "nich",
+   "twitter": "https://x.com/nichxbt"
+  },
+  {
+   "wallet": "qP3Q8d4WWsGbqkTfyA9Dr6cAD7DQoBuxPJMFTK48rWU",
+   "name": "kitty",
+   "twitter": "https://x.com/0xkitty69"
+  },
+  {
+   "wallet": "sAdNbe1cKNMDqDsa4npB3TfL62T14uAo2MsUQfLvzLT",
+   "name": "Ethan Prosper",
+   "twitter": "https://x.com/pr6spr"
+  },
+  {
+   "wallet": "uS74rigLoPmKdi169RPUB4VSF6T9PqChTpG5jWzVhVp",
+   "name": "para",
+   "twitter": "https://x.com/paradilf"
+  },
+  {
+   "wallet": "winkACDSxstg19HJgX1pwDGpD8f2ZpiqqAjyAbkgXLu",
+   "name": "Don",
+   "twitter": "https://x.com/doncaarbon"
+  },
+  {
+   "wallet": "xyzfhxfy8NhfeNG3Um3WaUvFXzNuHkrhrZMD8dsStB6",
+   "name": "Gasp",
+   "twitter": "https://x.com/oh_gasp"
+  },
+  {
+   "wallet": "zhYnXqK3MNSmwS3yxSvPmY5kUa1n2WUaCJgYUDrAHkL",
+   "name": "zhynx",
+   "twitter": "https://x.com/onlyzhynx"
+  },
+  {
+   "wallet": "ztRg1PdZbBQzMGbaz5UXqzaKX4frC82USoWiaVfohSv",
+   "name": "ItsVine",
+   "twitter": "https://x.com/ItsVineSOL"
+  },
+  {
+   "wallet": "zyncUiCSpP5zExdpvpRgx8twZ1AxTAqaeqtTVZ45ART",
+   "name": "zync (锌仔)",
+   "twitter": "https://x.com/zyncxbt"
+  }
+ ]
+}
