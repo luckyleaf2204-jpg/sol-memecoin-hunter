@@ -45,7 +45,7 @@ AUTH_WINDOW_S, AUTH_MAX_FAILS = 600, 10
 REFRESH_PER_MINT_S, REFRESH_GLOBAL_PER_MIN = 60, 10
 MAX_WATCH = 30
 LIST_KINDS = ("top", "new", "early", "whales", "dev", "social")
-VERSION = "web-17"
+VERSION = "web-18"
 HOME_LIMIT = {"opportunity": 60, "watch": 60, "nodata": 40, "excluded": 40}
 
 
@@ -100,7 +100,7 @@ def create_app(engine: ScannerEngine | None = None, start_scanner: bool = True,
                    "snapshot": {"store": "NOT CONFIGURED", "durable": False, "target": "-",
                                 "reason": "SNAPSHOT_DIR / SNAPSHOT_URL not set", "warning": NOT_DURABLE,
                                 "last_ts": None, "last": None, "last_error": None, "restore": None},
-                   "aux": [], "shadow": None, "shadow_task": None, "shadow_stop": None}
+                   "aux": [], "shadow": None, "shadow_http": None, "shadow_task": None, "shadow_stop": None}
 
     async def _snapshot_now(reason: str) -> None:
         from core.snapshot import snapshot
@@ -200,7 +200,9 @@ def create_app(engine: ScannerEngine | None = None, start_scanner: bool = True,
             state["bot_task"] = asyncio.create_task(state["bot"].run(state["bot_stop"]))
             # Independent read-only paper follower; no wallet keys and no transaction execution path.
             from trading.wallet_shadow import WalletShadow
-            state["shadow"] = WalletShadow(state["engine"].rpc, state["engine"].http,
+            from core.http import HttpClient
+            state["shadow_http"] = HttpClient()  # Isolate Jupiter circuit breaker from the paper bot.
+            state["shadow"] = WalletShadow(state["engine"].rpc, state["shadow_http"],
                                            DATA_DIR / "bwkw_shadow.db")
             state["shadow_stop"] = asyncio.Event()
             state["shadow_task"] = asyncio.create_task(state["shadow"].run(state["shadow_stop"]))
@@ -226,6 +228,8 @@ def create_app(engine: ScannerEngine | None = None, start_scanner: bool = True,
                 await asyncio.wait_for(state["shadow_task"], 8)
         if state["shadow"]:
             state["shadow"].close()
+        if state["shadow_http"]:
+            await state["shadow_http"].aclose()
         eng = state["engine"]
         if state["task"]:
             eng.stop()
