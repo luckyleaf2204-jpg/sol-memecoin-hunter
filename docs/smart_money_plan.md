@@ -64,3 +64,14 @@ If PASS: paper copy-trading only, >= 2-4 weeks, before any live consideration.
 * Copy exit when the token completes its curve before the wallet sells: the last curve price before completion
   (flagged "migrated"; an approximation — the AMM price is not recorded). Other exit rules unchanged.
 * Trades below 0.001 SOL are not stored (dust); the 0.05 SOL rule for wallet selection is unchanged.
+
+## Amendment 2 — precise accounting (written while recording, before ANY recorded trade was analysed or viewed)
+
+* The 0.05 SOL rule: a token counts towards a wallet's ">= 5 distinct tokens" only if the wallet bought >= 0.05 SOL
+  of it in one trade, and a copy TRIGGER is a buy of >= 0.05 SOL. Profit uses every stored trade (>= 0.001 SOL) of
+  the wallet in that token: profit = SOL out + tokens still held x valuation price - SOL in.
+* Average buy (eligibility) = mean SOL of the wallet's buys >= 0.05 SOL in the formation period.
+* Prices for entry / exit / valuation = sol_amount / token_amount of a single recorded trade (any wallet).
+* A copy whose exit point falls after the end of the window exits at the last price before the end ("end").
+* Program / pool accounts cannot be told apart from wallets in TradeEvent data (the event's `user` is the signer):
+  no extra filter.
