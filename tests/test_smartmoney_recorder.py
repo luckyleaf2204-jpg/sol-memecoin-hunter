@@ -47,3 +47,10 @@ def test_store_interns_ids_skips_dust_and_records_gaps(tmp_path):
     assert s.db.execute("SELECT * FROM gaps").fetchall() == [(10.0, 70.0)]
     s2 = R.Store(tmp_path / "t.db")                              # restart keeps the id table
     assert s2._id("mint", R.b58(MINT)) == rows[0][0] and s2.n_trades == 2
+
+
+def test_garbled_timestamp_is_dropped():
+    # seen live 2026-10-06: one event decoded with ts = -2.9e17 and ended the 21-day window after 26 minutes
+    assert R.decode(trade_line(ts=-288_230_376_136_558_712)) is None
+    assert R.decode(trade_line(ts=4_000_000_000)) is None
+    assert R.decode(trade_line(ts=1_791_000_000)) is not None

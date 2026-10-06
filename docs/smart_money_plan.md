@@ -75,3 +75,11 @@ If PASS: paper copy-trading only, >= 2-4 weeks, before any live consideration.
 * A copy whose exit point falls after the end of the window exits at the last price before the end ("end").
 * Program / pool accounts cannot be told apart from wallets in TradeEvent data (the event's `user` is the signer):
   no extra filter.
+
+## Amendment 3 — corrupt event + restart (2026-10-06, no recorded trade analysed or viewed beyond MIN/MAX ts)
+
+* The first run stopped after ~26 minutes: one event decoded with ts = -2.9e17 became MIN(ts), so the "21 days since
+  the first trade" stop fired at once. That one row was deleted; the decoder now drops events whose block time is
+  before 2024-01-01 or more than a day ahead of the clock.
+* The downtime between the last stored trade and the restart is written to `gaps` (same exclusion rule as any gap).
+  The 21-day window still counts from the first valid trade. No analysis rule changed.

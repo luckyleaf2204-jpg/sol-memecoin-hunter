@@ -56,12 +56,22 @@ def decode(line: str) -> dict | None:
         return None
     if d[:8] == TRADE_DISC and len(d) >= 97:
         sol, tok = struct.unpack_from("<QQ", d, 40)
+        ts = struct.unpack_from("<q", d, 89)[0]
+        if not plausible_ts(ts):
+            return None
         return {"kind": "trade", "mint": b58(d[8:40]), "sol": sol, "token": tok, "is_buy": bool(d[56]),
-                "wallet": b58(d[57:89]), "ts": struct.unpack_from("<q", d, 89)[0]}
+                "wallet": b58(d[57:89]), "ts": ts}
     if d[:8] == COMPLETE_DISC and len(d) >= 8 + 32 * 3 + 8:
         # CompleteEvent: user, mint, bonding_curve, timestamp
-        return {"kind": "complete", "mint": b58(d[40:72]), "ts": struct.unpack_from("<q", d, 104)[0]}
+        ts = struct.unpack_from("<q", d, 104)[0]
+        return {"kind": "complete", "mint": b58(d[40:72]), "ts": ts} if plausible_ts(ts) else None
     return None
+
+
+def plausible_ts(ts: int) -> bool:
+    """A block time that can be real: after 2024-01-01 and not more than a day ahead of this clock. A garbled event
+    (seen live: ts = -2.9e17) would otherwise become MIN(ts) and end the recording window at once."""
+    return 1_704_067_200 <= ts <= time.time() + 86400
 
 
 class Store:
