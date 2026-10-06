@@ -13,10 +13,12 @@ run_windows.bat --check <MINT> --lang vi     # báo cáo đầy đủ 1 token
 run_windows.bat --backtest early             # backtest Early Signal
 ```
 
-Phần mềm **research / scanner** tìm memecoin Solana mới (ưu tiên Pump.fun) trên Windows.
+Phần mềm **research / scanner** tìm memecoin Solana mới (ưu tiên Pump.fun) trên Windows, kèm các mô-đun paper trading tách biệt.
 
-> **KHÔNG phải bot giao dịch.** Không private key, không seed phrase, không ký transaction,
-> không auto buy/sell. Score chỉ là **công cụ xếp hạng để bạn tự nghiên cứu**, không phải dự đoán giá.
+> **Chỉ mô phỏng; không giao dịch thật.** Không private key, seed phrase hay ký/gửi transaction. Bot PAPER hiện có và
+> mô phỏng theo dõi ví BwWK17cb đều ghi kết quả riêng, không gửi lệnh. Mô phỏng BwWK bắt đầu từ lúc tiến trình chạy,
+> phát hiện qua polling RPC rồi dùng báo giá Jupiter; độ trễ, thiếu route và khác biệt khớp lệnh có thể làm kết quả
+> khác xa sniper thật. Score vẫn chỉ là **công cụ xếp hạng để bạn tự nghiên cứu**, không phải dự đoán giá.
 
 ---
 

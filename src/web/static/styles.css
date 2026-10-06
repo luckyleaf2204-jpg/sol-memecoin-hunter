@@ -107,6 +107,17 @@ h2 { font-size: 16px; margin: 16px 2px 8px; }
 .banner.red { background: rgba(239, 68, 68, 0.15); color: #ff8a8a; border: 1px solid rgba(239, 68, 68, 0.5); }
 .banner.orange { background: rgba(249, 115, 22, 0.12); color: #ffb37a; border: 1px solid rgba(249, 115, 22, 0.45); }
 .banner.green { background: rgba(20, 241, 149, 0.1); color: var(--accent); border: 1px solid rgba(20, 241, 149, 0.4); }
+.shadow-card { margin: 4px 0 14px; }
+.shadow-title { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-bottom: 4px; }
+.shadow-kpis { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 7px; margin: 10px 0; }
+.shadow-kpis > div { background: var(--panel2); border-radius: 10px; padding: 8px; min-width: 0; }
+.shadow-kpis span, .shadow-kpis b { display: block; }
+.shadow-kpis span { color: var(--muted); font-size: 11px; }
+.shadow-kpis b { margin-top: 3px; font-size: 13px; overflow-wrap: anywhere; }
+.shadow-card h3 { margin: 12px 0 4px; font-size: 13px; }
+.shadow-rows > div { display: grid; grid-template-columns: 1fr 1fr auto; gap: 6px; align-items: center; padding: 7px 0; border-top: 1px solid var(--border); font-size: 11px; }
+.shadow-rows > div > * { min-width: 0; overflow-wrap: anywhere; }
+.shadow-empty { padding: 12px; }
 
 details.sec { background: var(--panel); border: 1px solid var(--border); border-radius: 14px; margin-top: 10px; overflow: hidden; }
 details.sec > summary {

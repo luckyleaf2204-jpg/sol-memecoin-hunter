@@ -288,14 +288,33 @@ function toolbarHtml(kind, p) {
 async function renderList(kind, silent) {
   const p = listPrefs(kind);
   const view = $("#view");
-  if (!silent) view.innerHTML = `<h1>${esc(t("web.title." + kind))}</h1>${toolbarHtml(kind, p)}<div id="list"><div class="spin">${esc(t("web.loading"))}</div></div>`;
+  if (!silent) view.innerHTML = `<h1>${esc(t("web.title." + kind))}</h1>${kind === "new" ? '<section id="bwkw-shadow"></section>' : ""}${toolbarHtml(kind, p)}<div id="list"><div class="spin">${esc(t("web.loading"))}</div></div>`;
   bindToolbar(kind);
   try {
     const data = await api(`/api/list/${kind}?limit=300`);
     syncClock(data.server_time);
     S.cache[kind] = data.items;
     drawList(kind);
+    if (kind === "new") await renderBwkwShadow();
   } catch (e) { if (!silent) $("#list").innerHTML = `<div class="empty">${esc(t("web.error"))}: ${esc(e.message)}</div>`; }
+}
+async function renderBwkwShadow() {
+  const el = $("#bwkw-shadow"); if (!el) return;
+  try {
+    const d = await api("/api/shadow/bwkw");
+    const events = d.events || [], positions = d.positions || [];
+    const fmtSol = (v) => v === null || v === undefined ? "—" : Number(v).toFixed(4) + " SOL";
+    el.innerHTML = `<section class="token-head shadow-card">
+      <div class="shadow-title"><strong>🎯 Paper copy · BwWK17cb</strong><span class="badge">${esc(d.mode)}</span></div>
+      <div class="muted small"><a href="https://solscan.io/account/${encodeURIComponent(d.target)}" target="_blank" rel="noopener">${esc(d.target.slice(0,8))}…${esc(d.target.slice(-6))} ↗</a> · Theo dõi từ lúc khởi động</div>
+      <div class="banner orange">Chỉ mô phỏng, không gửi lệnh thật. Khớp theo báo giá Jupiter khi phát hiện giao dịch; kết quả không tương đương tốc độ sniper.</div>
+      ${d.last_error ? `<div class="banner red">Theo dõi tạm lỗi: ${esc(d.last_error)}</div>` : ""}
+      ${d.coverage && d.coverage !== "Watching new signatures from startup; earlier activity excluded" ? `<div class="banner">${esc(d.coverage)}</div>` : ""}
+      <div class="shadow-kpis"><div><span>Đã chốt</span><b class="${d.realized_sol >= 0 ? "c-green" : "c-red"}">${fmtSol(d.realized_sol)}</b></div><div><span>Vị thế mở</span><b>${positions.length}</b></div><div><span>Trạng thái</span><b>${d.running ? "Đang theo dõi" : "Đang khởi động"}</b></div></div>
+      ${positions.length ? `<h3>Vị thế paper đang mở</h3><div class="shadow-rows">${positions.map(x => `<div><a href="https://solscan.io/token/${encodeURIComponent(x.mint)}" target="_blank" rel="noopener">${esc(x.mint.slice(0,6))}…${esc(x.mint.slice(-5))} ↗</a><span>${(Number(x.token_raw) / (10 ** Number(x.decimals))).toPrecision(5)} token</span><span>Giá vốn ${fmtSol(Number(x.cost_lamports)/1e9)}</span></div>`).join("")}</div>` : ""}
+      <h3>Giao dịch mô phỏng gần đây</h3>${events.length ? `<div class="shadow-rows">${events.map(x => `<div><span>${esc(x.side)} · ${new Date(Number(x.ts)*1000).toLocaleTimeString("vi-VN")}</span><a href="https://solscan.io/token/${encodeURIComponent(x.mint)}" target="_blank" rel="noopener">${esc((x.mint||"").slice(0,6))}…${esc((x.mint||"").slice(-5))}</a><span class="${x.pnl_sol === null ? "c-muted" : x.pnl_sol >= 0 ? "c-green" : "c-red"}">${x.pnl_sol === null ? esc(x.status) : fmtSol(x.pnl_sol)}</span></div>`).join("")}</div>` : '<div class="empty shadow-empty">Đang chờ giao dịch mới của ví này…</div>'}
+    </section>`;
+  } catch (e) { el.innerHTML = `<section class="token-head shadow-card"><strong>🎯 Paper copy · BwWK17cb</strong><div class="muted small">Mô-đun chưa sẵn sàng: ${esc(e.message)}</div></section>`; }
 }
 function drawList(kind) {
   const p = listPrefs(kind), items = applyFilters(S.cache[kind] || [], p), el = $("#list");

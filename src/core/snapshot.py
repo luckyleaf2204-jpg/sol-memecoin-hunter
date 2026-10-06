@@ -24,7 +24,7 @@ import time
 from pathlib import Path
 
 FILES = ("paper_bot.json", "sample_epoch.json", "truth_ledger.json", "trading.json", "holdout_lock.json",
-         "research.db")
+         "research.db", "bwkw_shadow.db")
 GENERATIONS = 3                       # rotating slots: the live generation is never overwritten
 MANIFEST = "manifest.json"
 PROBE = "probe.json"
