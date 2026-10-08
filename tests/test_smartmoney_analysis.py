@@ -16,7 +16,7 @@ def _db(tmp_path):
 
 
 def put(s, ts, mint, wallet, buy, sol, tok):
-    s.buf.append((ts, None, s._id("mint", mint), s._id("wallet", wallet), int(buy), int(sol), int(tok)))
+    s.buf.append((ts, None, s._id("mint", mint), s._id("wallet", wallet), int(buy), int(sol), int(tok), None))
 
 
 def test_net_cost_as_registered():
@@ -38,7 +38,7 @@ def test_selection_eligibility_and_profit(tmp_path):
         put(s, t + k * 10 + 1, f"M{k}", "HOLD", True, 1 * SOL, 250)
     put(s, 10_000, "M0", "X", True, 0.01 * SOL, 1)       # end of window far away (cut at ~5500)
     s.flush()
-    w = A.window(s.db)
+    w = A.window(s.db, 9_000 / 86_400)                  # window 1000 -> 10000, cut 5500 (fixed window, amendment 6)
     sel = A.select_wallets(s.db, w)
     gid, hid = s._id("wallet", "GOOD"), s._id("wallet", "HOLD")
     assert set(sel["eligible"]) == {gid, hid} and sel["selected"][0] == gid
@@ -62,7 +62,7 @@ def _test_period_db(tmp_path):
     put(s, 100_200, "T2", w, True, 1 * SOL, 1 * SOL)
     put(s, 100_205, "T2", "o", True, 0.1 * SOL, 0.1 * SOL)              # entry 1.0
     put(s, 100_900, "T2", "o", True, 0.3 * SOL, 0.1 * SOL)              # 3.0 just before completion
-    s.done.append((s._id("mint", "T2"), 100_950))
+    s.done.append((s._id("mint", "T2"), 100_950, None))
     # T3: no sell, no completion -> 24 h cap
     put(s, 110_000, "T3", w, True, 1 * SOL, 1 * SOL)
     put(s, 110_010, "T3", "o", True, 0.1 * SOL, 0.1 * SOL)              # entry 1.0
@@ -78,13 +78,15 @@ def _test_period_db(tmp_path):
 
 def test_copy_rule_entry_delay_exits_and_lost_trades(tmp_path):
     s = _test_period_db(tmp_path)
-    w = A.window(s.db)
+    w = A.window(s.db, 200_000 / 86_400)                                # fixed window (amendment 6)
     assert w.cut == 100_000
-    rows = {r["mint"]: r for r in A.copies(s.db, w, [s._id("wallet", "W")])}
+    rows = {r["mint"]: r for r in A.copies_with_status(s.db, w, [s._id("wallet", "W")])}
     m = lambda k: s._id("mint", k)                                    # noqa: E731
     assert set(rows) == {m("T1"), m("T2"), m("T3"), m("T4")}           # T5 (< 0.05 SOL) is no trigger
     assert rows[m("T1")]["kind"] == "wallet_sold" and rows[m("T1")]["gross_pct"] == pytest.approx(50.0)
-    assert rows[m("T2")]["kind"] == "migrated" and rows[m("T2")]["gross_pct"] == pytest.approx(200.0)
+    # amendment 5: the curve completed while the copy was open and no PumpSwap data -> unresolved, never the
+    # last curve price (the old code returned "migrated" at +200 % here)
+    assert rows[m("T2")]["status"] == "unresolved" and rows[m("T2")]["net_pct"] is None
     assert rows[m("T3")]["kind"] == "max_hold" and rows[m("T3")]["gross_pct"] == pytest.approx(-50.0)
     assert rows[m("T4")]["kind"] == "no_trade_after" and rows[m("T4")]["net_pct"] == -100.0
     assert rows[m("T1")]["net_pct"] == pytest.approx(A.net_pct(1.0, 1.5))
@@ -93,7 +95,7 @@ def test_copy_rule_entry_delay_exits_and_lost_trades(tmp_path):
 def test_gap_overlap_excludes_the_copy(tmp_path):
     s = _test_period_db(tmp_path)
     s.gap(100_150, 100_150 + 600)                                       # 10 min gap inside T1 / T2 holdings
-    w = A.window(s.db)
+    w = A.window(s.db, 200_000 / 86_400)
     kinds = {r["mint"] for r in A.copies(s.db, w, [s._id("wallet", "W")])}
     assert s._id("mint", "T1") not in kinds and s._id("mint", "T3") in kinds
 

@@ -83,3 +83,46 @@ If PASS: paper copy-trading only, >= 2-4 weeks, before any live consideration.
   before 2024-01-01 or more than a day ahead of the clock.
 * The downtime between the last stored trade and the restart is written to `gaps` (same exclusion rule as any gap).
   The 21-day window still counts from the first valid trade. No analysis rule changed.
+
+## Amendment 4 — gap rule covers the whole copy (2026-10-08, no recorded trade analysed or viewed)
+
+* OLD (wrong): a copy was excluded only if a gap > 5 min overlapped [entry fill, exit fill]. Two holes: (1) a signal
+  just before a gap was "entered" at the first trade AFTER the gap — possibly hours later — and counted; (2) a signal
+  with no recorded trade afterwards was counted -100 % even when the reason was the recorder being down.
+* NEW: a copy is excluded ("gap") when a RECORDER_GAP > 5 min overlaps ANY part of [signal, max(exit decision time,
+  exit fill)] — signal -> entry, entry -> exit and every lookup in between. A signal with no trade afterwards counts
+  -100 % only if no gap overlaps [signal, window end]; otherwise it is excluded. Excluded copies are counted and
+  reported (status "gap"), never silently dropped.
+* Direction C uses the same copy function, so this applies to C as well.
+
+## Amendment 5 — migration outcome on PumpSwap, never the last curve price (2026-10-08, no data viewed)
+
+* OLD (optimistic): when the curve completed while a copy was open, the copy exited at the LAST BONDING-CURVE PRICE
+  before completion ("migrated"). That is the curve's top; PumpSwap trading after migration is not recorded, so the
+  outcome was not a real executable price and biased results upward (toward PASS).
+* NEW: price lookups (entry, exit, max-hold, window end) and the wallet's first sell use curve trades AND PumpSwap
+  trades (`amm_trades`). A copy whose [signal, exit] contains the completion time is valued only if the token's
+  PumpSwap price path (`amm_fetch`) and that wallet's PumpSwap activity (`amm_wallet_fetch`) are complete over
+  [completion, exit]; otherwise it is "unresolved". ANY unresolved copy (selected wallets or baseline) makes the
+  verdict BLOCKED_MIGRATION_DATA: the analysis is blocked until the PumpSwap data is fetched. Unresolved copies are
+  never dropped (dropping them would select on an outcome — migration).
+* Migration time = the CompleteEvent block time (`completes.ts`; receipt time `completes.recv_ms` from 2026-10-08).
+* The PumpSwap data is fetched AFTER the window by a separate tool (not written yet; its design is in
+  docs/smart_money_audit_2026-10-08.md). Formation-period valuation (selection only) is unchanged.
+
+## Amendment 6 — fixed window and stopping rule (2026-10-08)
+
+* The window is FIXED: first valid trade 2026-10-06 01:13:48 UTC + 21 days = **2026-10-27 01:13:48 UTC**; formation
+  / test cut 2026-10-16 13:13:48 UTC. The words "or less if stopped" (amendment 1) are withdrawn.
+* Recorder downtime, crashes or a stopped recorder are NOT a stopping rule: the gap is logged (RECORDER_GAP), the
+  recorder is restarted, the window end does not move.
+* No analysis of B or C before 2026-10-27 01:13:48 UTC, whatever the sample size or how results might look.
+  `tools/sm_analyze.py` and `tools/sm_kol.py` refuse to run before that time. `tools/sm_status.py` shows operations
+  only (gaps, completeness, storage) and never computes an outcome.
+
+## Recorder instrumentation (2026-10-08, data quality only — no rule above depends on it)
+
+* `trades.recv_ms` / `completes.recv_ms`: receipt time of each event from 2026-10-08 (NULL before; not back-filled).
+* `gaps.reason`, `recorder_events`, heartbeat, automatic startup gap, watchdog + logon autostart.
+* RPC_COMPLETENESS samples (`rpc_checks`); events found only by those samples go to `recovered_events` and are NOT
+  used by the analysis.

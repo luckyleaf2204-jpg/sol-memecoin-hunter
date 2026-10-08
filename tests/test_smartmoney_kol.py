@@ -9,7 +9,7 @@ from smartmoney.recorder import Store
 
 
 def put(s, ts, mint, wallet, buy, sol, tok):
-    s.buf.append((ts, None, s._id("mint", mint), s._id("wallet", wallet), int(buy), int(sol), int(tok)))
+    s.buf.append((ts, None, s._id("mint", mint), s._id("wallet", wallet), int(buy), int(sol), int(tok), None))
 
 
 def round_trip(s, t, mint, wallet, exit_mult):

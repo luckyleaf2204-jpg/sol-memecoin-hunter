@@ -45,3 +45,9 @@ pump.fun curve buys, with a realistic delay and costs, make money — and more t
 * PASS only if n >= 100 copied trades, lower bound of the per-wallet CI > 0 and random p < 0.05.
 * n < 100: INCONCLUSIVE (expected risk: KOLs trade mostly after migration, which is not recorded). Otherwise REJECT.
 * Any verdict other than PASS: no KOL copy bot, no tuning on this data. PASS: paper copy-trading only, >= 2-4 weeks.
+
+## Amendment 1 — shared copy-rule corrections (2026-10-08, no recorded trade analysed or viewed)
+
+Smart-money plan amendments 4-6 apply to C unchanged (C uses the same `copies` function and window): gap rule over
+the whole copy, PumpSwap outcome after migration (BLOCKED_MIGRATION_DATA without it), fixed window ending
+2026-10-27 01:13:48 UTC and no analysis before then (`tools/sm_kol.py` refuses).

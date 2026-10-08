@@ -8,7 +8,8 @@ import random
 import sqlite3
 from pathlib import Path
 
-from smartmoney.analysis import BIG, DELAY_S, DRAWS, Window, copies, net_pct, summary, window
+from smartmoney.analysis import (BIG, DELAY_S, DRAWS, Window, copies, copies_with_status, net_pct, status_counts,
+                                 summary, window)
 
 MIN_TOKENS = 3                 # eligibility, KOLs and baseline alike: >= 3 distinct tokens bought with >= 0.05 SOL
 POOL_CAP = 5000                # baseline pool is a fixed-seed sample of this many eligible non-KOL wallets
@@ -51,12 +52,16 @@ def run(db_path: str, roster_path: str, days: float = 21.0, draws: int = DRAWS, 
         kol_ids = {ids[k] for k in roster if k in ids}
         elig = eligible(db, w)
         kols = sorted(kol_ids & elig)
-        main = copies(db, w, kols)
+        main_all = copies_with_status(db, w, kols)
+        main = [r for r in main_all if r["status"] == "ok"]
         s = summary(main)
         others = sorted(elig - kol_ids)
         rng = random.Random(seed)
         pool = rng.sample(others, POOL_CAP) if len(others) > POOL_CAP else others
-        per_wallet = {x: copies(db, w, [x]) for x in pool}
+        per_all = {x: copies_with_status(db, w, [x]) for x in pool}
+        per_wallet = {x: [r for r in rows if r["status"] == "ok"] for x, rows in per_all.items()}
+        unresolved = sum(1 for r in main_all if r["status"] == "unresolved") + \
+            sum(1 for rows in per_all.values() for r in rows if r["status"] == "unresolved")
         means = []
         k = len(kols)
         if k and len(pool) >= k:
@@ -71,7 +76,10 @@ def run(db_path: str, roster_path: str, days: float = 21.0, draws: int = DRAWS, 
                   "ci_wallet_lower>0": bool(s.get("ci95_by_wallet")) and s["ci95_by_wallet"][0] > 0,
                   "random_p<0.05": p is not None and p < 0.05}
         verdict = "PASS" if all(checks.values()) else ("INCONCLUSIVE" if not checks["n>=100"] else "REJECT")
+        if unresolved:                                          # smart-money amendment 5 applies to C too
+            verdict = "BLOCKED_MIGRATION_DATA"
         return {"window": w.__dict__, "roster": len(roster), "kols_seen": len(kol_ids), "kols_eligible": k,
+                "copy_status_kols": status_counts(main_all), "unresolved_total": unresolved,
                 "test": s, "random_baseline": {"draws": len(means), "pool": len(pool), "pool_all": len(others),
                                                "mean_of_means": round(sum(means) / len(means), 3) if means else None,
                                                "p_random_ge_observed": p},

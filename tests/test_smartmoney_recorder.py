@@ -44,7 +44,7 @@ def test_store_interns_ids_skips_dust_and_records_gaps(tmp_path):
     assert rows[0][0] == rows[1][0] and rows[0][1] == rows[1][1] and [r[2] for r in rows] == [1, 0]
     assert s.db.execute("SELECT COUNT(*) FROM names").fetchone()[0] == 2
     s.gap(10.0, 70.0)
-    assert s.db.execute("SELECT * FROM gaps").fetchall() == [(10.0, 70.0)]
+    assert s.db.execute("SELECT start, end, reason FROM gaps").fetchall() == [(10.0, 70.0, None)]
     s2 = R.Store(tmp_path / "t.db")                              # restart keeps the id table
     assert s2._id("mint", R.b58(MINT)) == rows[0][0] and s2.n_trades == 2
 

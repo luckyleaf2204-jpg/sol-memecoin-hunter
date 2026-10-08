@@ -22,6 +22,14 @@ def main():
     a = ap.parse_args()
     if hasattr(sys.stdout, "reconfigure"):
         sys.stdout.reconfigure(encoding="utf-8")
+    import sqlite3
+    from smartmoney.analysis import analysis_allowed
+    db = sqlite3.connect(f"file:{a.db}?mode=ro", uri=True)
+    ok, end = analysis_allowed(db, a.days)
+    db.close()
+    if not ok:                                   # amendment 6: no peeking, no early stop
+        sys.exit(f"refused: the pre-registered window ends {datetime.fromtimestamp(end, timezone.utc):%Y-%m-%d %H:%M} "
+                 "UTC; B / C are analysed only after that (docs/smart_money_plan.md amendment 6)")
     r = run(a.db, a.roster, a.days)
     f = lambda t: datetime.fromtimestamp(t, timezone.utc).strftime("%Y-%m-%d %H:%M")  # noqa: E731
     w = r["window"]

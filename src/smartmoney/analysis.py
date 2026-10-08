@@ -1,5 +1,12 @@
-"""Smart-money copy test exactly as pre-registered (docs/smart_money_plan.md, amendments 1-2). Reads the recorder's
-SQLite database; nothing here is tuned on the data. Research only."""
+"""Smart-money copy test exactly as pre-registered (docs/smart_money_plan.md, amendments 1-6). Reads the recorder's
+SQLite database; nothing here is tuned on the data. Research only.
+
+Amendment 4: a copy is excluded when a recording gap > 5 min overlaps ANY part of it — signal -> entry -> exit — and a
+"no trade after the signal" copy counts -100 % only when no gap overlaps [signal, window end].
+Amendment 5: a token that completes its curve (migrates to PumpSwap) while a copy is open is valued on PumpSwap
+trades (`amm_trades`, filled after the window by a separate fetcher). Without that data the copy is UNRESOLVED and
+the run is BLOCKED: the last curve price is never used as a post-migration exit.
+Amendment 6: the window is fixed (first valid trade + 21 days); analysis refuses to run before its end."""
 from __future__ import annotations
 
 import random
@@ -28,24 +35,89 @@ class Window:
 
 
 def window(db: sqlite3.Connection, days: float = 21.0) -> Window:
-    t0, t1 = db.execute("SELECT MIN(ts), MAX(ts) FROM trades").fetchone()
-    end = min(t1, t0 + int(days * 86400))
+    """Amendment 6: fixed window = first valid trade + `days`; downtime or an early stop does NOT shorten it."""
+    t0 = db.execute("SELECT MIN(ts) FROM trades").fetchone()[0]
+    end = t0 + int(days * 86400)
     return Window(t0, t0 + (end - t0) // 2, end)
+
+
+def analysis_allowed(db: sqlite3.Connection, days: float = 21.0, now: float | None = None) -> tuple[bool, int]:
+    """Amendment 6 stopping rule: no B / C analysis before the pre-registered window end (no peeking, no early stop)."""
+    import time
+    end = window(db, days).end
+    return (time.time() if now is None else now) >= end, end
 
 
 def net_pct(entry: float, exit_: float) -> float:
     return 100 * ((exit_ / entry) * (1 - SIDE_COST) ** 2 - 1 - FIXED_SOL / POSITION_SOL)
 
 
+AMM_SCHEMA = """
+CREATE TABLE IF NOT EXISTS amm_trades (ts INTEGER NOT NULL, mint_id INTEGER NOT NULL, wallet_id INTEGER NOT NULL,
+                                       is_buy INTEGER NOT NULL, sol_lamports INTEGER NOT NULL, token_raw INTEGER NOT NULL,
+                                       source TEXT);
+CREATE TABLE IF NOT EXISTS amm_fetch (mint_id INTEGER PRIMARY KEY, from_ts INTEGER, to_ts INTEGER, source TEXT,
+                                      fetched_at REAL);
+CREATE TABLE IF NOT EXISTS amm_wallet_fetch (mint_id INTEGER NOT NULL, wallet_id INTEGER NOT NULL, from_ts INTEGER,
+                                             to_ts INTEGER, source TEXT, PRIMARY KEY (mint_id, wallet_id));
+CREATE INDEX IF NOT EXISTS ix_amm_mint_ts ON amm_trades(mint_id, ts);
+"""
+# amm_trades: PumpSwap trades after a curve completed (wallet_id 0 = price-only row, wallet unknown).
+# amm_fetch: the token's PumpSwap PRICE path is complete for [from_ts, to_ts].
+# amm_wallet_fetch: that wallet's PumpSwap trades of that token are complete for [from_ts, to_ts].
+
+
+def _has_amm(db) -> bool:
+    return db.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='amm_trades'").fetchone() is not None
+
+
 def _price_at_or_after(db, mint: int, t: int, limit: int):
-    r = db.execute("SELECT ts, sol_lamports * 1.0 / token_raw FROM trades WHERE mint_id=? AND ts>=? AND ts<=? "
-                   "ORDER BY ts LIMIT 1", (mint, t, limit)).fetchone()
-    return r
+    """First trade price at or after t (curve, and PumpSwap when recorded)."""
+    best = db.execute("SELECT ts, sol_lamports * 1.0 / token_raw FROM trades WHERE mint_id=? AND ts>=? AND ts<=? "
+                      "ORDER BY ts LIMIT 1", (mint, t, limit)).fetchone()
+    if _has_amm(db):
+        a = db.execute("SELECT ts, sol_lamports * 1.0 / token_raw FROM amm_trades WHERE mint_id=? AND ts>=? AND ts<=? "
+                       "ORDER BY ts LIMIT 1", (mint, t, limit)).fetchone()
+        if a is not None and (best is None or a[0] < best[0]):
+            best = a
+    return best
 
 
 def _last_price_before(db, mint: int, t: int):
-    return db.execute("SELECT ts, sol_lamports * 1.0 / token_raw FROM trades WHERE mint_id=? AND ts<=? "
+    """Last trade price at or before t (curve, and PumpSwap when recorded)."""
+    best = db.execute("SELECT ts, sol_lamports * 1.0 / token_raw FROM trades WHERE mint_id=? AND ts<=? "
                       "ORDER BY ts DESC LIMIT 1", (mint, t)).fetchone()
+    if _has_amm(db):
+        a = db.execute("SELECT ts, sol_lamports * 1.0 / token_raw FROM amm_trades WHERE mint_id=? AND ts<=? "
+                       "ORDER BY ts DESC LIMIT 1", (mint, t)).fetchone()
+        if a is not None and (best is None or a[0] > best[0]):
+            best = a
+    return best
+
+
+def _first_sell(db, wallet: int, mint: int, t: int):
+    s = db.execute("SELECT MIN(ts) FROM trades WHERE wallet_id=? AND mint_id=? AND is_buy=0 AND ts>=?",
+                   (wallet, mint, t)).fetchone()[0]
+    if _has_amm(db):
+        a = db.execute("SELECT MIN(ts) FROM amm_trades WHERE wallet_id=? AND mint_id=? AND is_buy=0 AND ts>=?",
+                       (wallet, mint, t)).fetchone()[0]
+        if a is not None and (s is None or a < s):
+            s = a
+    return s
+
+
+def _amm_resolved(db, mint: int, wallet: int, start: int, end: int) -> bool:
+    """PumpSwap price path AND this wallet's PumpSwap activity are both complete over [start, end]."""
+    if not _has_amm(db):
+        return False
+    p = db.execute("SELECT 1 FROM amm_fetch WHERE mint_id=? AND from_ts<=? AND to_ts>=?", (mint, start, end)).fetchone()
+    w = db.execute("SELECT 1 FROM amm_wallet_fetch WHERE mint_id=? AND wallet_id=? AND from_ts<=? AND to_ts>=?",
+                   (mint, wallet, start, end)).fetchone()
+    return p is not None and w is not None
+
+
+def _overlaps(gaps: list[tuple], start: float, end: float) -> bool:
+    return any(a < end and b > start for a, b in gaps)
 
 
 def _completion(db) -> dict:
@@ -81,9 +153,11 @@ def select_wallets(db: sqlite3.Connection, w: Window) -> dict:
     return {"eligible": sorted(elig), "selected": ranked[:TOP_N], "profit_sol": profit}
 
 
-def copies(db: sqlite3.Connection, w: Window, wallets: list[int], gaps: list[tuple] | None = None,
-           delay_s: int = DELAY_S) -> list[dict]:
-    """Copy trades of these wallets in the test period, exactly per the plan."""
+def copies_with_status(db: sqlite3.Connection, w: Window, wallets: list[int], gaps: list[tuple] | None = None,
+                       delay_s: int = DELAY_S) -> list[dict]:
+    """Every copy of these wallets in the test period with its status: 'ok' (counted), 'gap' (excluded: a recording
+    gap > 5 min overlaps signal -> exit, amendment 4) or 'unresolved' (the curve completed while the copy was open and
+    PumpSwap data is missing, amendment 5)."""
     done = _completion(db)
     gaps = gaps if gaps is not None else [(a, b) for a, b in db.execute("SELECT start, end FROM gaps")
                                           if b - a > GAP_EXCLUDE_S]
@@ -92,27 +166,50 @@ def copies(db: sqlite3.Connection, w: Window, wallets: list[int], gaps: list[tup
         firsts = db.execute("SELECT mint_id, MIN(ts) FROM trades WHERE wallet_id=? AND is_buy=1 AND sol_lamports>=? "
                             "AND ts>=? AND ts<=? GROUP BY mint_id", (wid, BIG, w.cut, w.end)).fetchall()
         for mint, trig in firsts:
-            entry = _price_at_or_after(db, mint, trig + delay_s, w.end)
-            if entry is None:
-                out.append({"wallet": wid, "mint": mint, "trigger": trig, "kind": "no_trade_after", "net_pct": -100.0,
-                            "gross_pct": -100.0, "entry_ts": trig, "exit_ts": trig})
-                continue
-            sell = db.execute("SELECT MIN(ts) FROM trades WHERE wallet_id=? AND mint_id=? AND is_buy=0 AND ts>=?",
-                              (wid, mint, trig)).fetchone()[0]
-            cap = min(trig + MAX_HOLD_S, w.end)
+            base = {"wallet": wid, "mint": mint, "trigger": trig}
             comp = done.get(mint)
-            if comp is not None and comp >= entry[0] and (sell is None or comp < sell) and comp <= cap:
-                ex, kind = _last_price_before(db, mint, comp), "migrated"
-            elif sell is not None and sell + delay_s <= cap:
-                ex, kind = _price_at_or_after(db, mint, sell + delay_s, cap) or _last_price_before(db, mint, cap), \
-                    "wallet_sold"
+            entry = _price_at_or_after(db, mint, trig + delay_s, w.end)
+            if entry is None:                                   # nothing traded after the signal
+                if _overlaps(gaps, trig, w.end):
+                    out.append({**base, "status": "gap", "kind": "no_trade_after", "net_pct": None})
+                elif comp is not None and trig <= comp <= w.end and not _amm_resolved(db, mint, wid, comp, w.end):
+                    out.append({**base, "status": "unresolved", "kind": "no_trade_after", "net_pct": None})
+                else:
+                    out.append({**base, "status": "ok", "kind": "no_trade_after", "net_pct": -100.0,
+                                "gross_pct": -100.0, "entry_ts": trig, "exit_ts": trig, "span_end": w.end})
+                continue
+            cap = min(trig + MAX_HOLD_S, w.end)
+            sell = _first_sell(db, wid, mint, trig)
+            if sell is not None and sell + delay_s <= cap:
+                decide, kind = sell + delay_s, "wallet_sold"
+                ex = _price_at_or_after(db, mint, decide, cap) or _last_price_before(db, mint, cap)
             else:
-                ex, kind = _last_price_before(db, mint, cap), ("end" if cap == w.end else "max_hold")
-            if any(a < ex[0] and b > entry[0] for a, b in gaps):
-                continue                                        # holding overlaps a recording gap > 5 min
-            out.append({"wallet": wid, "mint": mint, "trigger": trig, "kind": kind, "entry_ts": entry[0],
-                        "exit_ts": ex[0], "gross_pct": 100 * (ex[1] / entry[1] - 1),
-                        "net_pct": net_pct(entry[1], ex[1])})
+                decide, kind = cap, ("end" if cap == w.end else "max_hold")
+                ex = _last_price_before(db, mint, cap)
+            span_end = max(decide, ex[0])
+            migrated = comp is not None and trig <= comp <= span_end
+            if _overlaps(gaps, trig, span_end):
+                out.append({**base, "status": "gap", "kind": kind, "net_pct": None})
+                continue
+            if migrated and not _amm_resolved(db, mint, wid, comp, span_end):
+                out.append({**base, "status": "unresolved", "kind": kind + "+migrated", "net_pct": None})
+                continue
+            out.append({**base, "status": "ok", "kind": kind + ("+migrated" if migrated else ""),
+                        "entry_ts": entry[0], "exit_ts": ex[0], "span_end": span_end,
+                        "gross_pct": 100 * (ex[1] / entry[1] - 1), "net_pct": net_pct(entry[1], ex[1])})
+    return out
+
+
+def copies(db: sqlite3.Connection, w: Window, wallets: list[int], gaps: list[tuple] | None = None,
+           delay_s: int = DELAY_S) -> list[dict]:
+    """The counted copies (status 'ok') — the input of every metric."""
+    return [r for r in copies_with_status(db, w, wallets, gaps, delay_s) if r["status"] == "ok"]
+
+
+def status_counts(rows: list[dict]) -> dict:
+    out = {}
+    for r in rows:
+        out[r["status"]] = out.get(r["status"], 0) + 1
     return out
 
 
@@ -152,10 +249,14 @@ def run(db_path: str, days: float = 21.0, draws: int = DRAWS, seed: int = 11) ->
         w = window(db, days)
         sel = select_wallets(db, w)
         selected = sel["selected"]
-        main = copies(db, w, selected)
+        main_all = copies_with_status(db, w, selected)
+        main = [r for r in main_all if r["status"] == "ok"]
         s = summary(main)
         others = [x for x in sel["eligible"] if x not in set(selected)]
-        per_wallet = {x: copies(db, w, [x]) for x in others}
+        per_all = {x: copies_with_status(db, w, [x]) for x in others}
+        per_wallet = {x: [r for r in rows if r["status"] == "ok"] for x, rows in per_all.items()}
+        unresolved = sum(1 for r in main_all if r["status"] == "unresolved") + \
+            sum(1 for rows in per_all.values() for r in rows if r["status"] == "unresolved")
         rng = random.Random(seed)
         means = []
         if len(others) >= TOP_N:
@@ -169,11 +270,15 @@ def run(db_path: str, days: float = 21.0, draws: int = DRAWS, seed: int = 11) ->
         checks = {"n>=100": s.get("n", 0) >= 100,
                   "ci_wallet_lower>0": bool(s.get("ci95_by_wallet")) and s["ci95_by_wallet"][0] > 0,
                   "random_p<0.05": p is not None and p < 0.05}
+        verdict = "PASS" if all(checks.values()) else "REJECT"
+        if unresolved:                                          # amendment 5: never decide on curve-price exits
+            verdict = "BLOCKED_MIGRATION_DATA"
         return {"window": w.__dict__, "eligible": len(sel["eligible"]), "selected": len(selected),
+                "copy_status_selected": status_counts(main_all), "unresolved_total": unresolved,
                 "selected_formation_profit_sol": [round(sel["profit_sol"][x], 3) for x in selected],
                 "test": s, "random_baseline": {"draws": len(means), "pool": len(others),
                                                "mean_of_means": round(sum(means) / len(means), 3) if means else None,
                                                "p_random_ge_observed": p},
-                "delay_10s": d10, "checks": checks, "verdict": "PASS" if all(checks.values()) else "REJECT"}
+                "delay_10s": d10, "checks": checks, "verdict": verdict}
     finally:
         db.close()
