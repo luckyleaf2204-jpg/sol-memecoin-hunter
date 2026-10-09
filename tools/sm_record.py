@@ -60,8 +60,9 @@ def main():
 
     async def run():
         async def window_end():
+            f = None                                   # first valid trade: fixed once known (a full scan, not per minute)
             while not stop.is_set():
-                f = store.db.execute("SELECT MIN(ts) FROM trades").fetchone()[0]
+                f = f or store.db.execute("SELECT MIN(ts) FROM trades").fetchone()[0]
                 if f and time.time() - f >= a.days * 86400:
                     print(f"[sm] fixed window ({a.days} days from the first trade) ended: stopping", flush=True)
                     store.set_meta("finished", time.time())

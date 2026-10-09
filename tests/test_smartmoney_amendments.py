@@ -316,7 +316,8 @@ def test_completeness_sample_counts_and_recovers_apart_from_trades(tmp_path):
         (5, 3, 2, 2, 2)                                                   # slots 101-105 (100 and 106 dropped)
     assert s.db.execute("SELECT COUNT(*) FROM recovered_events").fetchone()[0] == 2
     assert s.db.execute("SELECT COUNT(*) FROM trades").fetchone()[0] == 0          # experiment data untouched
-    assert R.completeness_summary(s.db)["rpc_completeness"] == 0.6
+    assert R.completeness_summary(s.db)["provisional"] == 0.6
+    assert R.completeness_summary(s.db, min_checks=1)["rpc_completeness"] == 0.6
 
 
 def test_completeness_is_unknown_without_samples_and_failures_are_recorded(tmp_path):

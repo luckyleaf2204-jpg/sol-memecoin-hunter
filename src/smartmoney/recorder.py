@@ -40,6 +40,7 @@ CHECK_EVERY_S = 300.0                 # completeness check cadence
 CHECK_AGE_S = 60.0                    # check a window this old (delivery has had time to arrive)
 SIG_KEEP_S = 900.0
 MAX_RECOVER = 20
+MIN_CHECKS = 12                       # successful samples before RPC_COMPLETENESS is reported
 _B58 = "123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz"
 
 SCHEMA = """
@@ -120,6 +121,8 @@ def pid_alive(pid: int | None) -> bool:
 
 
 class Store:
+    """The recorder's SQLite store. Its connection is OWNED by the thread that created it (the event-loop thread);
+    sqlite3 refuses use from any other thread, so worker threads never receive a Store (see completeness_loop)."""
     def __init__(self, path: Path):
         self.db = sqlite3.connect(str(path), timeout=30)
         self.db.execute("PRAGMA journal_mode=WAL")
@@ -231,16 +234,17 @@ def rpc_call(method: str, params: list, url: str = HTTP_URL, timeout: float = 30
     return json.loads(urllib.request.urlopen(req, timeout=timeout).read())
 
 
-def completeness_check(store: Store, sigs: SigWindow, now: float | None = None, call=rpc_call,
-                       max_recover: int = MAX_RECOVER) -> dict:
-    """One RPC_COMPLETENESS sample. Ask the RPC for the program's signatures just BEFORE a signature we received
-    ~CHECK_AGE_S ago (a contiguous slot range); drop the lowest and highest slot (possibly partial); expected = the
-    signatures left, received = those the stream delivered. Missing ones are fetched (up to max_recover) and their
-    events stored in recovered_events ONLY. Never changes trades / selection."""
-    now = time.time() if now is None else now
-    anchor = sigs.anchor(CHECK_AGE_S, now)
+def completeness_probe(anchor: str | None, received, now: float, call=rpc_call,
+                       max_recover: int = MAX_RECOVER) -> tuple[dict, list[tuple]]:
+    """The NETWORK half of one RPC_COMPLETENESS sample; safe in a worker thread because it touches neither the Store
+    (its SQLite connection belongs to the recorder's event-loop thread) nor the live SigWindow (`received` is a
+    snapshot taken on that thread). Ask the RPC for the program's signatures just BEFORE `anchor` (a signature we
+    received ~CHECK_AGE_S ago: a contiguous slot range); drop its lowest and highest slot (possibly partial);
+    expected = the signatures left, received = those the stream delivered. Missing ones are fetched (up to
+    max_recover) and decoded. Returns (rpc_checks row, recovered_events rows); errors go into the row, never raised."""
     row = {"ts": now, "anchor": anchor, "slot_lo": None, "slot_hi": None, "expected": 0, "received": 0, "missing": 0,
            "recovered_tx": 0, "recovered_events": 0, "error": None}
+    recovered: list[tuple] = []
     try:
         if anchor is None:
             raise RuntimeError("no anchor signature yet")
@@ -251,8 +255,8 @@ def completeness_check(store: Store, sigs: SigWindow, now: float | None = None, 
         slots = [x["slot"] for x in items]
         lo, hi = min(slots), max(slots)
         expected = [x["signature"] for x in items if lo < x["slot"] < hi]
-        got = [s for s in expected if s in sigs.slot_of]
-        miss = [s for s in expected if s not in sigs.slot_of]
+        got = [s for s in expected if s in received]
+        miss = [s for s in expected if s not in received]
         row.update(slot_lo=lo, slot_hi=hi, expected=len(expected), received=len(got), missing=len(miss))
         for sig in miss[:max_recover]:
             tx = call("getTransaction", [sig, {"maxSupportedTransactionVersion": 1, "commitment": "confirmed",
@@ -264,25 +268,43 @@ def completeness_check(store: Store, sigs: SigWindow, now: float | None = None, 
                 ev = decode(line)
                 if ev:
                     row["recovered_events"] += 1
-                    store.db.execute("INSERT INTO recovered_events VALUES (?,?,?,?,?,?,?,?,?,?)",
-                                     (ev["ts"], tx.get("slot"), sig, ev["kind"], ev["mint"], ev.get("wallet"),
+                    recovered.append((ev["ts"], tx.get("slot"), sig, ev["kind"], ev["mint"], ev.get("wallet"),
                                       int(ev.get("is_buy", 0)), ev.get("sol"), ev.get("token"), now))
     except Exception as e:                                     # a failed check is recorded, never fatal
         row["error"] = f"{type(e).__name__}: {str(e)[:160]}"
+    return row, recovered
+
+
+def save_check(store: Store, row: dict, recovered: list[tuple] = ()) -> None:
+    """The DATABASE half of a sample: runs on the Store's own (event-loop) thread."""
+    if recovered:
+        store.db.executemany("INSERT INTO recovered_events VALUES (?,?,?,?,?,?,?,?,?,?)", recovered)
     store.db.execute("INSERT INTO rpc_checks VALUES (?,?,?,?,?,?,?,?,?,?)", tuple(row.values()))
     store.db.commit()
+
+
+def completeness_check(store: Store, sigs: SigWindow, now: float | None = None, call=rpc_call,
+                       max_recover: int = MAX_RECOVER) -> dict:
+    """One RPC_COMPLETENESS sample done synchronously on the CALLER's thread (which must own the Store). Never
+    changes trades / selection: recovered events go to recovered_events only."""
+    now = time.time() if now is None else now
+    row, recovered = completeness_probe(sigs.anchor(CHECK_AGE_S, now), set(sigs.slot_of), now, call, max_recover)
+    save_check(store, row, recovered)
     return row
 
 
-def completeness_summary(db: sqlite3.Connection) -> dict:
-    """RPC_COMPLETENESS over every successful sample; UNKNOWN when there is none (never assumed 100 %)."""
+def completeness_summary(db: sqlite3.Connection, min_checks: int = MIN_CHECKS) -> dict:
+    """RPC_COMPLETENESS over every successful sample; UNKNOWN (never assumed 100 %) until at least `min_checks`
+    successful samples exist (fixed before any sample: one hour of samples). The running ratio is reported apart as
+    `provisional`."""
     exp, rec, n, err = db.execute("SELECT COALESCE(SUM(expected),0), COALESCE(SUM(received),0), "
                                   "SUM(error IS NULL AND expected>0), SUM(error IS NOT NULL) FROM rpc_checks").fetchone()
     rtx, rev = db.execute("SELECT COALESCE(SUM(recovered_tx),0), COALESCE(SUM(recovered_events),0) "
                           "FROM rpc_checks").fetchone()
     return {"checks_ok": n or 0, "checks_failed": err or 0, "expected": exp, "received": rec, "missing": exp - rec,
             "recovered_tx": rtx, "recovered_events": rev,
-            "rpc_completeness": round(rec / exp, 4) if exp else "UNKNOWN"}
+            "provisional": round(rec / exp, 4) if exp else None,
+            "rpc_completeness": round(rec / exp, 4) if exp and (n or 0) >= min_checks else "UNKNOWN"}
 
 
 async def record(store: Store, url: str = WS_URL, stop: asyncio.Event | None = None, log=print,
@@ -341,7 +363,11 @@ async def record(store: Store, url: str = WS_URL, stop: asyncio.Event | None = N
 
 
 async def completeness_loop(store: Store, sigs: SigWindow, stop: asyncio.Event, every_s: float = CHECK_EVERY_S,
-                            log=print) -> None:
+                            log=print, call=rpc_call) -> None:
+    """Sample RPC completeness every `every_s`. Connection ownership: the anchor and the received-signature snapshot
+    are taken here, on the event-loop thread; only completeness_probe (HTTP, no Store) runs in a worker thread; the
+    rows are written back here. A failing sample is logged (recorder_events 'sampler_error' + an rpc_checks error
+    row) and never ends the recorder."""
     while not stop.is_set():
         try:
             await asyncio.wait_for(stop.wait(), every_s)
@@ -349,9 +375,25 @@ async def completeness_loop(store: Store, sigs: SigWindow, stop: asyncio.Event, 
             pass
         if stop.is_set():
             break
-        row = await asyncio.to_thread(completeness_check, store, sigs)
-        log(f"[sm] completeness sample: expected {row['expected']} received {row['received']} "
-            f"missing {row['missing']} recovered_tx {row['recovered_tx']} error {row['error']}")
+        try:
+            now = time.time()
+            anchor, received = sigs.anchor(CHECK_AGE_S, now), frozenset(sigs.slot_of)
+            row, recovered = await asyncio.to_thread(completeness_probe, anchor, received, now, call)
+            save_check(store, row, recovered)
+            log(f"[sm] completeness sample: expected {row['expected']} received {row['received']} "
+                f"missing {row['missing']} recovered_tx {row['recovered_tx']} error {row['error']}")
+        except asyncio.CancelledError:
+            raise
+        except Exception as e:                                 # a sampler bug must not stop the recording
+            msg = f"{type(e).__name__}: {str(e)[:160]}"
+            log(f"[sm] completeness sampler error (recording continues): {msg}")
+            try:
+                store.event("sampler_error", msg)
+                save_check(store, {"ts": time.time(), "anchor": None, "slot_lo": None, "slot_hi": None,
+                                   "expected": 0, "received": 0, "missing": 0, "recovered_tx": 0,
+                                   "recovered_events": 0, "error": f"sampler: {msg}"})
+            except Exception as e2:
+                log(f"[sm] could not log the sampler error: {type(e2).__name__}: {e2}")
 
 
 def estimate_storage(size_bytes: int, recorded_s: float, remaining_s: float, free_bytes: int) -> dict:
