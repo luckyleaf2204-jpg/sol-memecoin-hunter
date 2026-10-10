@@ -55,14 +55,16 @@ def net_pct(entry: float, exit_: float) -> float:
 AMM_SCHEMA = """
 CREATE TABLE IF NOT EXISTS amm_trades (ts INTEGER NOT NULL, mint_id INTEGER NOT NULL, wallet_id INTEGER NOT NULL,
                                        is_buy INTEGER NOT NULL, sol_lamports INTEGER NOT NULL, token_raw INTEGER NOT NULL,
-                                       source TEXT);
+                                       source TEXT, sig TEXT);
 CREATE TABLE IF NOT EXISTS amm_fetch (mint_id INTEGER PRIMARY KEY, from_ts INTEGER, to_ts INTEGER, source TEXT,
                                       fetched_at REAL);
 CREATE TABLE IF NOT EXISTS amm_wallet_fetch (mint_id INTEGER NOT NULL, wallet_id INTEGER NOT NULL, from_ts INTEGER,
                                              to_ts INTEGER, source TEXT, PRIMARY KEY (mint_id, wallet_id));
 CREATE INDEX IF NOT EXISTS ix_amm_mint_ts ON amm_trades(mint_id, ts);
+CREATE UNIQUE INDEX IF NOT EXISTS ux_amm_sig ON amm_trades(mint_id, sig);
 """
-# amm_trades: PumpSwap trades after a curve completed (wallet_id 0 = price-only row, wallet unknown).
+# amm_trades: PumpSwap trades after a curve completed (wallet_id 0 = price-only row, wallet unknown; sig = the
+#   transaction, unique per mint, so a re-fetch never duplicates). Filled by smartmoney/pumpswap.py.
 # amm_fetch: the token's PumpSwap PRICE path is complete for [from_ts, to_ts].
 # amm_wallet_fetch: that wallet's PumpSwap trades of that token are complete for [from_ts, to_ts].
 

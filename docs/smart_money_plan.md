@@ -107,8 +107,27 @@ If PASS: paper copy-trading only, >= 2-4 weeks, before any live consideration.
   verdict BLOCKED_MIGRATION_DATA: the analysis is blocked until the PumpSwap data is fetched. Unresolved copies are
   never dropped (dropping them would select on an outcome — migration).
 * Migration time = the CompleteEvent block time (`completes.ts`; receipt time `completes.recv_ms` from 2026-10-08).
-* The PumpSwap data is fetched AFTER the window by a separate tool (not written yet; its design is in
-  docs/smart_money_audit_2026-10-08.md). Formation-period valuation (selection only) is unchanged.
+* The PumpSwap data is fetched AFTER the window by a separate tool (amendment 5a). Formation-period valuation (selection only) is unchanged.
+
+## Amendment 5a — the PumpSwap fetcher (2026-10-10, no recorded trade analysed or viewed)
+
+Implemented as `src/smartmoney/pumpswap.py` + `tools/sm_pumpswap.py` (fetch refused before the window end). No
+outcome rule changes; this only says how amendment 5's data is obtained and when it counts as complete.
+* Mints: every curve completion in the window; range [completion, min(completion + 24 h, window end)] (a copy open
+  at the completion has trigger <= completion and span <= trigger + 24 h). Wallet marks: every wallet with a
+  >= 0.05 SOL curve buy of the mint up to the completion.
+* Pool: GeckoTerminal, dex `pumpswap`, base = the mint, quote = WSOL, created within 10 min of the completion;
+  none or more than one -> failed (no guessing).
+* History: Helius `getTransactionsForAddress(pool)` in block-time order over the range, every page to the end.
+  Swap = the pool's own vault change (quote WSOL / base token, lamports per raw token as on the curve); wallet = fee
+  payer; failed transactions and liquidity changes are skipped; one row per transaction (unique, re-runs idempotent).
+* Complete only if: every page read (transient errors retried, request errors not), block times inside the range
+  and non-decreasing, the pool's creation transaction is the start of the history, its initial reserve price is
+  within 5x of the last curve price (a unit / wrong-pool check — the first SWAP is not used: a migration-second
+  snipe moved one real pool 38x), and the page cap (400 per mint) was not hit. Otherwise nothing is written for the
+  mint except a log row: its copies stay unresolved and the verdict stays BLOCKED_MIGRATION_DATA.
+* Limits: the vault delta includes the ~0.2 % LP fee; a relayer-paid swap is attributed to the relayer; trading on
+  other pools / DEXes is not seen.
 
 ## Amendment 6 — fixed window and stopping rule (2026-10-08)
 

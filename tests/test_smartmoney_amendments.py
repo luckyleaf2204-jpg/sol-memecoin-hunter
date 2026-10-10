@@ -94,7 +94,8 @@ def _amm(s, rows, fetched=True, wallet_fetched=True, start=100_950, end=200_000)
     s.db.executescript(A.AMM_SCHEMA)
     m = s._id("mint", "M")
     for ts, wallet, buy, sol, tok in rows:
-        s.db.execute("INSERT INTO amm_trades VALUES (?,?,?,?,?,?,?)",
+        s.db.execute("INSERT INTO amm_trades (ts, mint_id, wallet_id, is_buy, sol_lamports, token_raw, source) "
+                     "VALUES (?,?,?,?,?,?,?)",
                      (ts, m, s._id("wallet", wallet) if wallet else 0, int(buy), int(sol), int(tok), "test"))
     if fetched:
         s.db.execute("INSERT INTO amm_fetch VALUES (?,?,?,?,?)", (m, start, end, "test", 0.0))

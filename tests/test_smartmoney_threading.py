@@ -69,6 +69,14 @@ class StreamWS:
         return trade_msg(self.i)
 
 
+async def until(cond, timeout=5.0):
+    """Wait for a condition instead of a fixed sleep (no timing flake on a loaded machine)."""
+    t = time.time()
+    while not cond():
+        assert time.time() - t < timeout, "condition not reached"
+        await asyncio.sleep(0.02)
+
+
 def test_old_pattern_reproduces_the_cross_thread_error(tmp_path):
     """The exact call the old completeness_loop made: completeness_check(store, ...) inside asyncio.to_thread."""
     s = Store(tmp_path / "t.db")
@@ -94,7 +102,7 @@ def test_loop_samples_in_a_worker_thread_and_writes_on_the_owner_thread(tmp_path
         sigs = old_sigs(time.time())
         task = asyncio.create_task(R.completeness_loop(s, sigs, stop, every_s=0.05, log=lambda m: None,
                                                        call=sample_rpc(seen)))
-        await asyncio.sleep(0.4)
+        await until(lambda: s.db.execute("SELECT COUNT(*) FROM rpc_checks").fetchone()[0] >= 2)
         stop.set()
         await task
     asyncio.run(go())
@@ -118,7 +126,9 @@ def test_a_sampler_bug_is_logged_and_the_recorder_keeps_recording(tmp_path, monk
         sigs = SigWindow()
         rec = asyncio.create_task(R.record(s, stop=stop, log=logs.append, connect=lambda: StreamWS(stop), sigs=sigs))
         loop = asyncio.create_task(R.completeness_loop(s, sigs, stop, every_s=0.05, log=logs.append))
-        await asyncio.sleep(0.6)
+        await until(lambda: s.db.execute("SELECT COUNT(*) FROM recorder_events WHERE kind='sampler_error'")
+                    .fetchone()[0] >= 2)
+        await asyncio.sleep(0.3)                                # keep streaming after the failures
         assert not rec.done() and not loop.done()               # neither task died
         stop.set()
         await asyncio.wait_for(asyncio.gather(rec, loop), 5)

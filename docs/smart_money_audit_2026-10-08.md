@@ -27,7 +27,7 @@ curve top. New function: `gap`, `gap`, `unresolved`.
   (`amm_fetch`) AND complete PumpSwap activity of that wallet for the token (`amm_wallet_fetch`) over
   [completion, exit], otherwise it is `unresolved` and the verdict is `BLOCKED_MIGRATION_DATA`.
 
-**Fetcher design (to build after 2026-10-27, before the analysis; not written yet):**
+**Fetcher design (as first planned; BUILT 2026-10-10 with the changes in plan amendment 5a and section 7):**
 1. List the (wallet, mint) copies whose span contains a completion, for the selected wallets AND the baseline
    pools — computed from the curve data with `copies_with_status` (status `unresolved`), no outcome needed.
 2. Per mint: find its PumpSwap pool (GeckoTerminal `/networks/solana/tokens/{mint}/pools`, dex `pumpswap`), then the
@@ -87,3 +87,28 @@ build has no `dbstat`): `trades` + its two indexes ~88 %, `names` (mints + walle
 ~2-8 B per row; `rpc_checks` / `recorder_events` / `recovered_events` stay in the kB-MB range. Projection to
 2026-10-27 01:13 UTC: ~6.2 GB; free on D: ~16 GB -> ~11 GB left (margin ~2.9x the remaining growth). No compression or
 retention is applied; none is needed for the window.
+
+## 7. Follow-up 2026-10-10: recorder crash fixed, PumpSwap fetcher built
+
+**Recorder crash (2026-10-08 09:12 -> 2026-10-09 01:25 UTC).** The completeness sampler ran `completeness_check`
+in `asyncio.to_thread`; it wrote through the Store's SQLite connection from the worker thread (`ProgrammingError`,
+outside the try) and also iterated the live `SigWindow` deque there (`deque mutated during iteration`, seen once).
+Either ended `asyncio.gather`; the watchdog restarted the recorder each time (~160 restarts, each gap < 5 min).
+Fix (commit 3311bc3): connection ownership — the anchor and a snapshot of received signatures are taken on the
+event-loop thread, only HTTP runs in the worker (`completeness_probe`, no Store), rows are written back on the
+loop thread (`save_check`); a sampler failure is logged (`sampler_error` + an rpc_checks error row) and never ends
+the recorder. RPC_COMPLETENESS is UNKNOWN until 12 successful samples. Regression tests reproduce the old call
+(ProgrammingError) and show the recorder keeps storing trades through sampler failures.
+Evidence after the fix (recorder pid 2028 from 2026-10-09 01:25:26 UTC to 2026-10-10 08:14 UTC, ~30.8 h): 0
+restarts, 1 stream reconnect (23 s gap), 369 completeness samples, 0 failed, 0 sampler errors;
+RPC_COMPLETENESS 1.0 (338 195 expected = received). Caveat: both sides are the same public RPC; failed transactions
+are included; decoding completeness inside delivered transactions is not measured.
+
+**PumpSwap fetcher** (plan amendment 5a). Live check on an EXTERNAL token (not from the recorded data), pool
+3TXrbe…, first 30 min after its creation: 41 pages, 3 731 swaps, a re-run gave the same 3 731 distinct rows;
+per-minute last swap price vs GeckoTerminal minute close: 30 minutes, ratio min 0.996 / median 1.000 / max 1.006.
+The pool's initial reserve price was 0.000326 lamports per raw token; the first swap (2 476 SOL, same second) paid
+38x that — why the consistency check uses the creation reserves, not the first swap.
+Cost: that busy pool needed ~82 pages per hour; a 24 h range of such a pool exceeds the 400-page cap (it would stay
+unresolved), and at ~100 credits per page the whole fetch may not fit a free Helius plan. Run `--plan` after the
+window to count mints, then decide the budget; until every needed mint is complete the verdict stays BLOCKED.
