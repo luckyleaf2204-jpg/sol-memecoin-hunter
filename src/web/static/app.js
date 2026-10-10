@@ -1165,6 +1165,7 @@ async function renderInsiders(silent) {
       <div class="kv"><span class="k">${esc(t("web.ins.generated"))}</span><span class="v">${esc(r.generated_at)} · RPC ${r.rpc_calls} · ${esc(t("web.ins.traced"))} ${r.traced_wallets}</span></div>
       ${runBtn}${prog}</div>
     <div class="disclaimer">${esc(t("web.ins.how"))}</div>
+    ${pnlHtml(r.pnl, names)}
     ${deepHtml(r.deep, names)}
     <h2>${esc(t("web.ins.behind"))}</h2>${insTable(ehead, real.slice(0, 40).map(entRow))}
     <h2>${esc(t("web.ins.hop2"))}</h2>${insTable([t("web.ins.addr"), t("web.ins.n_tokens"), t("web.ins.children"), t("web.ins.tokens")],
@@ -1182,6 +1183,20 @@ function moneyPath(p) {
   // p: [{from, to, dir, sol}] from the address back to an insider wallet; each hop printed in the direction SOL moved
   return p.map((h) => h.dir === "back" ? `${esc(short(h.to))} → ${esc(short(h.from))}` : `${esc(short(h.from))} → ${esc(short(h.to))}`)
     .map((x, i) => x + ` <span class="c-muted">(${p[i].sol} SOL)</span>`).join(" · ");
+}
+function sol(v) { return v === null || v === undefined ? "—" : `<span class="${v > 0 ? "c-green" : v < 0 ? "c-red" : ""}">${v > 0 ? "+" : ""}${Number(v).toLocaleString("vi-VN", { maximumFractionDigits: 1 })}</span>`; }
+function pnlHtml(p, names) {
+  if (!p) return "";
+  const g = (p.deployer_groups || []);
+  const tot = g.reduce((a, x) => a + (x.net_sol || 0), 0);
+  const grp = g.slice(0, 25).concat(g.length > 25 ? g.slice(-8) : []).map((x) => `<tr><td>${esc(names[x.mint] || short(x.mint))}</td><td class="num"><b>${sol(x.net_sol)}</b></td>
+    <td class="num">${sol(x.deployer_net_sol)}</td><td class="num">${x.wallets}</td><td>${acct(x.deployer)}${Object.keys(x.sent_to_exchange || {}).length ? ` <span class="pill warn">${esc(t("web.ins.to_cex"))} ${esc(Object.keys(x.sent_to_exchange).join(", "))}</span>` : ""}</td></tr>`);
+  const cl = (p.clusters || []).slice(0, 12).map((c) => `<tr><td>${acct(c.address)}</td><td class="num"><b>${sol(c.net_sol)}</b></td><td class="num">${c.wallets}</td><td class="num">${c.coins}</td></tr>`);
+  const wl = (p.wallets || []).slice(0, 30).map((w) => `<tr><td>${acct(w.wallet)}</td><td class="num"><b>${sol(w.net_sol)}</b></td><td class="num">${w.spent_sol} / ${w.received_sol}</td><td class="num">${w.wins}/${w.coins}</td><td class="small">${esc((w.why || []).join(", "))}</td></tr>`);
+  return `<h2>${esc(t("web.ins.pnl"))}</h2><div class="muted small">${esc(t("web.ins.pnl_note", { n: g.length, tot: Math.round(tot).toLocaleString("vi-VN") }))}</div>
+    <h3>${esc(t("web.ins.pnl_groups"))}</h3>${insTable([t("web.ins.token"), t("web.ins.pnl_group_net"), t("web.ins.pnl_dev_net"), t("web.ins.pnl_wallets"), t("web.ins.deployer")], grp)}
+    <h3>${esc(t("web.ins.pnl_clusters"))}</h3>${insTable([t("web.ins.addr"), t("web.ins.pnl_net"), t("web.ins.pnl_wallets"), t("web.ins.pnl_coins")], cl)}
+    <h3>${esc(t("web.ins.pnl_top"))}</h3>${insTable([t("web.ins.addr"), t("web.ins.pnl_net"), t("web.ins.pnl_in_out"), t("web.ins.pnl_wins"), t("web.ins.pnl_why")], wl)}`;
 }
 function deepHtml(d, names) {
   if (!d) return "";

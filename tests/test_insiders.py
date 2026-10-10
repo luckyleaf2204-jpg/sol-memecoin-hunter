@@ -229,3 +229,58 @@ def test_deep_trace_never_mixes_directions(monkeypatch):
     d = D.deep_trace(FakeChain({}), seeds, max_hops=4, workers=1)
     assert d["nodes"]["X"]["tok"]["back"] == {"M1"} and d["nodes"]["X"]["tok"]["fwd"] == {"M2"}
     assert d["nodes"]["Y"]["tok"]["fwd"] == {"M2"} and not d["nodes"]["Y"]["tok"]["back"]
+
+
+# ---------------------------------------------------------------- profit per wallet (pool-side pricing)
+from insiders import pnl as PN  # noqa: E402
+
+POOL = "6zZHQtPqiBzwm4qR21BHaKp5VJEYhzjccamfd6x8cjsP"   # a PumpSwap pool (program account)
+W2 = "9qhkWvC7K2wtsn3H8sbEWAGv82LD12uKxmyN7YdmxS8D"
+
+
+def ptx(ts, wallet_tok, pool_tok, pool_wsol, extra=(), wallet_sol=(0, 0)):
+    """pre/post token balances: (owner, mint, pre, post)."""
+    rows = [(WALLET, MINT, *wallet_tok), (POOL, MINT, *pool_tok), (POOL, PN.WSOL, *pool_wsol), *extra]
+    pre = [{"owner": o, "mint": m, "uiTokenAmount": {"amount": str(a)}} for o, m, a, _ in rows]
+    post = [{"owner": o, "mint": m, "uiTokenAmount": {"amount": str(b)}} for o, m, _, b in rows]
+    return {"blockTime": ts, "meta": {"err": None, "preTokenBalances": pre, "postTokenBalances": post,
+                                      "preBalances": [wallet_sol[0]], "postBalances": [wallet_sol[1]]},
+            "transaction": {"signatures": ["x"], "message": {"accountKeys": [{"pubkey": WALLET}]}}}
+
+
+def test_pnl_prices_trades_on_the_pool_side_even_when_proceeds_go_to_a_bot_vault():
+    sol = 10 ** 9
+    txs = [ptx(1, (0, 100), (1000, 900), (50 * sol, 52 * sol), wallet_sol=(10 * sol, 8 * sol)),     # buy 2 SOL
+           ptx(2, (100, 0), (900, 1000), (60 * sol, 50 * sol), wallet_sol=(8 * sol, 8 * sol))]      # sell 10 SOL,
+    ch = FakeChain({(PN.ata(WALLET, MINT), "asc", 0): {"data": txs}})                               # paid elsewhere
+    r = PN.pair_pnl(ch, WALLET, MINT)
+    assert (r["spent_sol"], r["received_sol"], r["net_sol"], r["n_buy"], r["n_sell"]) == (2.0, 10.0, 8.0, 1, 1)
+
+
+def test_pnl_splits_a_bundle_by_token_amounts_and_tracks_transfers():
+    sol = 10 ** 9
+    bundle = ptx(1, (0, 100), (1000, 700), (0, 3 * sol), extra=[(W2, MINT, 0, 200)])        # 3 SOL for 300 tokens
+    out = ptx(2, (100, 40), (700, 700), (3 * sol, 3 * sol), extra=[(W2, MINT, 200, 260)])  # 60 tokens to W2
+    ch = FakeChain({(PN.ata(WALLET, MINT), "asc", 0): {"data": [bundle, out]}})
+    r = PN.pair_pnl(ch, WALLET, MINT)
+    assert r["spent_sol"] == 1.0 and r["tokens_out"] == 60 and r["sent_to"] == [W2] and r["tokens_left"] == 40
+
+
+def test_ata_derivation_matches_a_known_account():
+    # CfkigDD8... DUMBMONEY (Token-2022) ATA seen on chain: DbT81ECHUd...
+    a = PN.ata("CfkigDD8ig77boQNw9pqXMYaBu14XekugqzgeupGoJU6", "CAjtTHvC878f8cZ4zEwdvgjkjFM7rbYN8Mb1go1cpump",
+               "TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb")
+    assert a.startswith("DbT81ECHUd") and not S.on_curve(a)
+
+
+def test_pnl_prices_the_dev_buy_inside_the_create_transaction():
+    """Create: the curve is minted the supply (its tokens go UP) while the dev buys; the dev's cost is the curve's
+    SOL increase shared by the buyers' token amounts."""
+    sol = 10 ** 9
+    create = ptx(1, (0, 100), (0, 800), (0, 0), extra=[(W2, MINT, 0, 100)])
+    create["meta"]["preBalances"], create["meta"]["postBalances"] = [0, 0], [0, 4 * sol]   # curve lamports +4 SOL
+    create["transaction"]["message"]["accountKeys"] = [{"pubkey": WALLET}, {"pubkey": POOL}]
+    del create["meta"]["preTokenBalances"][2], create["meta"]["postTokenBalances"][2]     # no WSOL on the curve
+    ch = FakeChain({(PN.ata(WALLET, MINT), "asc", 0): {"data": [create]}})
+    r = PN.pair_pnl(ch, WALLET, MINT)
+    assert r["spent_sol"] == 2.0 and r["n_buy"] == 1 and r["tokens_in"] == 0

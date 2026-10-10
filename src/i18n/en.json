@@ -1075,5 +1075,19 @@
  "web.ins.hops": "Hops (← funds, → receives)",
  "web.ins.sol_out_in": "SOL sent / received",
  "web.ins.paths": "Money path per coin",
- "web.ins.pays_into": "pays into"
+ "web.ins.pays_into": "pays into",
+ "web.ins.pnl": "Profit on the channel's coins (SOL)",
+ "web.ins.pnl_note": "Priced on the pool / bonding-curve side of each trade (also when proceeds go to a bot vault). Fees not deducted; tokens still held not valued. {n} coins, deployer groups total {tot} SOL.",
+ "web.ins.pnl_groups": "Deployer group per coin (deployer + wallets it sent the coin to, 2 levels)",
+ "web.ins.pnl_group_net": "Group net",
+ "web.ins.pnl_dev_net": "Deployer alone",
+ "web.ins.pnl_wallets": "Wallets",
+ "web.ins.pnl_clusters": "Profit per wallet cluster (shared funder / sink)",
+ "web.ins.pnl_net": "Net (SOL)",
+ "web.ins.pnl_coins": "Positions",
+ "web.ins.pnl_top": "Most profitable wallets",
+ "web.ins.pnl_in_out": "In / out (SOL)",
+ "web.ins.pnl_wins": "Wins / coins",
+ "web.ins.pnl_why": "Why listed",
+ "web.ins.to_cex": "sent tokens to"
 }

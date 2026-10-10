@@ -1075,5 +1075,19 @@
  "web.ins.hops": "Số bước (← nạp, → nhận)",
  "web.ins.sol_out_in": "SOL nạp ra / nhận vào",
  "web.ins.paths": "Đường đi tiền theo từng coin",
- "web.ins.pays_into": "nạp vào"
+ "web.ins.pays_into": "nạp vào",
+ "web.ins.pnl": "Lợi nhuận trên các coin của kênh (SOL)",
+ "web.ins.pnl_note": "Giá lấy từ phía pool / bonding curve của từng lệnh (kể cả khi tiền bán đi vào ví bot). Chưa trừ phí. Token còn giữ không tính giá trị. {n} coin, tổng lãi nhóm deployer {tot} SOL.",
+ "web.ins.pnl_groups": "Nhóm deployer theo coin (deployer + các ví nó chuyển token cho, 2 cấp)",
+ "web.ins.pnl_group_net": "Lãi nhóm",
+ "web.ins.pnl_dev_net": "Riêng deployer",
+ "web.ins.pnl_wallets": "Số ví",
+ "web.ins.pnl_clusters": "Lãi theo cụm ví (cùng nguồn nạp / nơi rút)",
+ "web.ins.pnl_net": "Lãi (SOL)",
+ "web.ins.pnl_coins": "Số vị thế",
+ "web.ins.pnl_top": "Ví lãi nhiều nhất",
+ "web.ins.pnl_in_out": "Chi / thu (SOL)",
+ "web.ins.pnl_wins": "Thắng / coin",
+ "web.ins.pnl_why": "Vì sao có trong danh sách",
+ "web.ins.to_cex": "chuyển token vào"
 }

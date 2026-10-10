@@ -23,6 +23,8 @@ def main():
     ap.add_argument("--deep", type=int, default=0, help="also trace N hops back / forward (3-4); 0 = off")
     ap.add_argument("--deep-budget", type=int, default=8000)
     ap.add_argument("--reuse", action="store_true", help="deep trace only, on the existing result file")
+    ap.add_argument("--pnl", action="store_true", help="also price the wallets' trades on the called coins")
+    ap.add_argument("--pnl-budget", type=int, default=3000)
     a = ap.parse_args()
     if hasattr(sys.stdout, "reconfigure"):
         sys.stdout.reconfigure(encoding="utf-8", line_buffering=True)
@@ -43,6 +45,12 @@ def main():
         print(f"activity check: {D.check_activity(chain, d, seeds)} busy addresses flagged")
         r["deep"] = D.summarize(d, seeds, r.get("tickers", {}))
         r["deep"]["rpc_calls"] = chain.calls
+    if a.pnl:
+        from insiders import pnl as PN
+        chain.budget = chain.calls + a.pnl_budget
+        r["pnl"] = PN.run_pnl(chain, r, progress=print)
+        r["pnl"]["deployer_groups"] = PN.group_pnl(chain, r, r["pnl"]["rows"], progress=print)
+        print(f"pnl: {r['pnl']['pairs']} pairs, status {r['pnl']['status']}")
     Path(a.out).write_text(json.dumps(r, ensure_ascii=False, separators=(",", ":")), encoding="utf-8")
     print(f"done: rpc calls this run {chain.calls}, cache hits {chain.cached} -> {a.out}")
 

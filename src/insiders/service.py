@@ -18,7 +18,10 @@ def light(result: dict | None) -> dict | None:
         return result
     toks = [{**{k: v for k, v in t.items() if k != "buyers"}, "n_buyers": len(t.get("buyers") or []),
              "n_pre_call": sum(1 for b in t.get("buyers") or [] if b.get("pre_call"))} for t in result.get("tokens", [])]
-    return {**result, "tokens": toks}
+    out = {**result, "tokens": toks}
+    if result.get("pnl"):
+        out["pnl"] = {k: v for k, v in result["pnl"].items() if k != "rows"}
+    return out
 
 
 class InsiderService:
@@ -59,6 +62,8 @@ class InsiderService:
                 res = S.run(chain, S.load_calls(), progress=self.log.append)
             if self.result and self.result.get("deep") and not res.get("deep"):
                 res["deep"] = {**self.result["deep"], "from_earlier_scan": True}   # deep trace runs offline
+            if self.result and self.result.get("pnl") and not res.get("pnl"):
+                res["pnl"] = {**self.result["pnl"], "from_earlier_scan": True}
             self.result = res
             try:
                 Path(self.result_path).write_text(json.dumps(res, ensure_ascii=False), encoding="utf-8")
