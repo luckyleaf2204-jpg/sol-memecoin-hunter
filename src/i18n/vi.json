@@ -1141,5 +1141,7 @@
  "web.ins.paper_open": "đang giữ",
  "web.ins.paper_closed": "đã đóng (24 giờ)",
  "web.ins.paper_no_route": "không mua được",
- "web.ins.paper_noroute": "không có route"
+ "web.ins.paper_noroute": "không có route",
+ "web.ins.minutes": "phút",
+ "web.ins.new_wallet": "ví mới:"
 }

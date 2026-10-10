@@ -1211,10 +1211,18 @@ function watchHtml(w, names) {
   if (!w) return `<h2>${esc(t("web.ins.watch"))}</h2><div class="muted small">${esc(t("web.ins.watch_off"))}</div>`;
   const lv = { strong: "bad", high: "bad", medium: "warn", watch: "", info: "" };
   const kind = (a) => t("web.ins.ev." + a.kind.toLowerCase());
-  const coin = (m) => m ? `<a class="mono" href="https://dexscreener.com/solana/${esc(m)}" target="_blank" rel="noopener">${esc(names[m] || short(m))}</a> <span class="copy" data-copy="${esc(m)}">⧉</span>` : "";
+  const lk = (u, txt) => `<a href="${esc(u)}" target="_blank" rel="noopener">${esc(txt)}</a>`;
+  const coin = (m, a) => {
+    if (!m) return "";
+    const sym = a.symbol || names[m];
+    const chart = safeUrl(a.chart) || "https://dexscreener.com/solana/" + m;
+    return `${sym ? `<b>$${esc(sym)}</b> ` : ""}${a.name ? `<span class="small">${esc(a.name)}</span> ` : ""}<span class="mono small">${esc(short(m))}</span> <span class="copy" data-copy="${esc(m)}">⧉</span>
+      <div class="small">${lk(chart, "DexScreener")} · ${lk("https://pump.fun/coin/" + m, "pump.fun")} · ${lk("https://solscan.io/token/" + m, "Solscan")}
+      ${a.age_h !== undefined && a.age_h !== null ? ` · <b>${esc(a.age_h < 1 ? Math.round(a.age_h * 60) + " " + t("web.ins.minutes") : a.age_h + " h")}</b>` : ""}${a.mcap ? " · MC " + esc(usd(a.mcap)) : ""}</div>`;
+  };
   const rows = (w.alerts || []).slice(0, 60).map((a) => `<tr><td class="small">${esc(new Date(a.ts * 1000).toLocaleString("vi-VN"))}</td>
     <td><span class="pill ${lv[a.level] || ""}">${esc(t("web.ins.lv." + a.level))}${a.n_wallets ? " ×" + a.n_wallets : ""}</span> ${esc(kind(a))}</td>
-    <td>${a.mint ? coin(a.mint) : acct(a.to)}${a.age_h !== undefined && a.age_h !== null ? ` <span class="c-muted small">${a.age_h} h</span>` : ""}</td>
+    <td>${a.mint ? coin(a.mint, a) : `${esc(t("web.ins.new_wallet"))} ${acct(a.to)}`}</td>
     <td class="num">${a.sol || ""}</td><td>${acct(a.wallet)}<div class="muted small">${esc(a.why || "")}</div></td></tr>`);
   return `<h2>${esc(t("web.ins.watch"))}</h2><div class="muted small">${esc(t("web.ins.watch_note", { n: w.watched, k: w.children, p: w.polls }))}
     ${w.tier_a ? " · " + esc(t("web.ins.tiers", { a: w.tier_a, b: w.tier_b, m: w.muted || 0 })) : ""}

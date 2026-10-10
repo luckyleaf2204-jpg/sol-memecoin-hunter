@@ -1141,5 +1141,7 @@
  "web.ins.paper_open": "holding",
  "web.ins.paper_closed": "closed (24 h)",
  "web.ins.paper_no_route": "could not buy",
- "web.ins.paper_noroute": "no route"
+ "web.ins.paper_noroute": "no route",
+ "web.ins.minutes": "min",
+ "web.ins.new_wallet": "new wallet:"
 }

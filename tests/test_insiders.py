@@ -504,3 +504,31 @@ def test_watch_opens_a_paper_trade_on_a_strong_alert(tmp_path):
     w.poll_once()
     st = w.status()["paper"]
     assert st["summary"]["positions"] == 1 and st["rows"][0]["mint"] == NEWMINT
+
+
+def test_alerts_carry_name_links_age_and_busy_new_coins_are_not_missed(tmp_path):
+    """RPC cannot date a busy coin (>= 1000 signatures): the creation time from DexScreener / Jupiter is used."""
+    sol = 10 ** 9
+    txs = {"b1": wtx(WALLET, "b1", 1_500, NEWMINT, (0, 5), (2 * sol, sol))}
+    rpc = FakeRpc({WALLET: [{"signature": "old"}]}, txs, mint_sigs=1000)
+    meta = lambda m: {"name": "Frog Coin", "symbol": "FROG", "mcap": 12345.0, "created_ts": 2_000 - 1_800,   # noqa: E731
+                      "chart": "https://dexscreener.com/solana/pair1"}
+    r = {"tokens": [{"mint": MINT, "status": "ok", "deployer": WALLET}], "tickers": {}}
+    w = WT.Watcher(r, tmp_path / "w.json", rpc=rpc, now=lambda: 2_000.0, meta=meta)
+    w.poll_once()
+    rpc.sigs = {WALLET: [{"signature": "b1"}, {"signature": "old"}]}
+    a = w.poll_once()[0]
+    assert a["symbol"] == "FROG" and a["age_h"] == 0.5 and a["mcap"] == 12345.0
+    txt = WT.alert_text({**a, "level": "strong"})
+    assert "$FROG" in txt and "Frog Coin" in txt and "pump.fun/coin/" + NEWMINT in txt and "pair1" in txt
+    assert "0.5 giờ tuổi" in txt and "MC $12,345" in txt
+
+
+def test_coin_meta_falls_back_to_jupiter():
+    def get(url):
+        if "dexscreener" in url:
+            return []
+        return [{"id": NEWMINT, "name": "Frog", "symbol": "FRG", "mcap": 9.0, "createdAt": "2026-10-10T22:33:50Z"}]
+    m = WT.coin_meta(NEWMINT, get=get)
+    assert m["symbol"] == "FRG" and m["src"] == "jupiter" and m["created_ts"] > 0
+    assert WT.coin_meta(NEWMINT, get=lambda u: (_ for _ in ()).throw(OSError("down"))) == {}

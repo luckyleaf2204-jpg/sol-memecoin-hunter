@@ -161,15 +161,53 @@ def analyse(tx: dict, wallet: str) -> list[dict]:
     return ev
 
 
+def _get_json(url: str):
+    req = urllib.request.Request(url, headers={"Accept": "application/json", "User-Agent": "Mozilla/5.0"})
+    return json.loads(urllib.request.urlopen(req, timeout=20).read())
+
+
+def coin_meta(mint: str, get=_get_json) -> dict:
+    """Name, symbol, market cap, chart link (DexScreener) and creation time (the EARLIEST of Jupiter's coin creation
+    and DexScreener's pair creation: after a migration the main pair is younger than the coin). {} if unknown."""
+    out: dict = {}
+    try:
+        ds = get(f"https://api.dexscreener.com/tokens/v1/solana/{mint}") or []
+        if ds:
+            p = max(ds, key=lambda x: (x.get("liquidity") or {}).get("usd") or 0)
+            bt = p.get("baseToken") or {}
+            made = [int(x["pairCreatedAt"] / 1000) for x in ds if x.get("pairCreatedAt")]
+            out = {"name": bt.get("name"), "symbol": bt.get("symbol"), "mcap": p.get("marketCap") or p.get("fdv"),
+                   "created_ts": min(made) if made else None, "dex": p.get("dexId"), "chart": p.get("url"),
+                   "src": "dexscreener"}
+    except Exception:
+        pass
+    try:
+        jp = get(f"https://lite-api.jup.ag/tokens/v2/search?query={mint}") or []
+        j = next((x for x in jp if x.get("id") == mint), None)
+        if j:
+            from datetime import datetime
+            c = j.get("createdAt") or (j.get("firstPool") or {}).get("createdAt")
+            ts = int(datetime.fromisoformat(c.replace("Z", "+00:00")).timestamp()) if c else None
+            if not out:
+                out = {"name": j.get("name"), "symbol": j.get("symbol"), "mcap": j.get("mcap"), "created_ts": ts,
+                       "dex": j.get("launchpad"), "chart": None, "src": "jupiter"}
+            elif ts and (out.get("created_ts") is None or ts < out["created_ts"]):
+                out["created_ts"] = ts
+    except Exception:
+        pass
+    return out
+
+
 class Watcher:
     def __init__(self, result: dict, state_path: Path, rpc=None, now=time.time, old_mints: set | None = None,
-                 notify=None, notify_levels: tuple = ("strong",), paper_quote=None):
+                 notify=None, notify_levels: tuple = ("strong",), paper_quote=None, meta=None):
         self.base, self.tier_b = watch_tiers(result)
         self.old = old_mints if old_mints is not None else (
             {t["mint"] for t in result.get("tokens", [])} | {c["mint"] for c in (result.get("extra") or {}).get("coins", [])})
         self.tickers = result.get("tickers", {})
         self.path, self.rpc, self.now = Path(state_path), rpc or Rpc(), now
         self.notify, self.notify_levels = notify, set(notify_levels)
+        self.meta = meta
         self.lock = threading.Lock()
         self.state = {"last_sig": {}, "children": {}, "alerts": [], "mint_age": {}, "polls": 0, "last_poll": None,
                       "last_error": None, "muted": {}}
@@ -195,6 +233,17 @@ class Watcher:
         created = sigs[-1].get("blockTime") if sigs and len(sigs) < 1000 else None
         self.state["mint_age"][mint] = created
         return None if created is None else self.now() - created
+
+    def _meta(self, mint: str) -> dict:
+        """Coin name / symbol / creation from DexScreener or Jupiter; the creation time is cached, the market cap
+        is refreshed at every alert."""
+        if not self.meta:
+            return {}
+        cache = self.state.setdefault("meta", {})
+        m = self.meta(mint) or {}
+        if m:
+            cache[mint] = {k: m.get(k) for k in ("name", "symbol", "created_ts")}
+        return {**cache.get(mint, {}), **m}
 
     def _fresh(self, addr: str) -> bool:
         return len(self.rpc("getSignaturesForAddress", [addr, {"limit": 5}]) or []) <= 2
@@ -276,7 +325,11 @@ class Watcher:
             return None
         if mint in self.old:
             return None if ev["kind"] != "CREATE" else {**ev, "level": "info", "ticker": self.tickers.get(mint)}
+        info = self._meta(mint)
+        ev = {**ev, **{k: info.get(k) for k in ("name", "symbol", "mcap", "chart", "dex")}}
         age = self._mint_age(mint)
+        if age is None and info.get("created_ts"):        # a busy new coin has >= 1000 signatures in minutes
+            age = max(0.0, self.now() - info["created_ts"])
         if ev["kind"] != "CREATE" and (age is None or age > NEW_COIN_S):
             return None                                       # an old / established coin: not a launch
         if ev["kind"] != "CREATE" and self._is_bot(ev["wallet"], mint):
@@ -372,9 +425,13 @@ def alert_text(a: dict, tickers: dict | None = None) -> str:
     if a.get("mint"):
         m = a["mint"]
         age = f" · {a['age_h']} giờ tuổi" if a.get("age_h") is not None else ""
-        lines.append(f"Coin: <code>{m}</code>{escape(' ' + tickers[m]) if m in tickers else ''}{age}")
-        lines.append(f'<a href="https://dexscreener.com/solana/{m}">DexScreener</a> · '
-                     f'<a href="https://pump.fun/coin/{m}">pump.fun</a>')
+        name = a.get("symbol") or tickers.get(m)
+        title = f"<b>${escape(name)}</b> ({escape(a.get('name') or '')}) " if name else ""
+        mc = f" · MC ${a['mcap']:,.0f}" if isinstance(a.get("mcap"), (int, float)) else ""
+        lines.append(f"Coin: {title}<code>{m}</code>{age}{mc}")
+        lines.append(f'<a href="{a.get("chart") or "https://dexscreener.com/solana/" + m}">DexScreener</a> · '
+                     f'<a href="https://pump.fun/coin/{m}">pump.fun</a> · '
+                     f'<a href="https://solscan.io/token/{m}">Solscan</a>')
     if a.get("to"):
         lines.append(f"Ví mới: <code>{a['to']}</code>")
     if a.get("sol"):
