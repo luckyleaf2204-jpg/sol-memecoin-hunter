@@ -412,3 +412,27 @@ def test_family_tree_one_direction_ancestors_and_pruning(monkeypatch):
     assert len(kept) == 1 and kept[0]["a"] in ("BOSS", "GRAND") and kept[0]["n_coins"] == 2
     t = kept[0] if kept[0]["a"] == "BOSS" else kept[0]["c"][0]
     assert {c["a"] for c in t["c"]} == {"fa", "fb"} and t["c"][0]["c"][0]["coins"]
+
+
+def test_alerts_are_pushed_by_level_and_capped(tmp_path):
+    sent = []
+    w = WT.Watcher({"tokens": [], "tickers": {NEWMINT: "NEW"}}, tmp_path / "w.json", rpc=lambda m, p: [],
+                   notify=lambda txt: sent.append(txt) or True, notify_levels=("strong", "high"))
+    al = [{"level": "medium", "kind": "BUY", "mint": NEWMINT, "wallet": WALLET, "sig": "s"},
+          {"level": "strong", "kind": "BUY", "mint": NEWMINT, "wallet": WALLET, "sig": "s", "n_wallets": 2, "age_h": 0.3}]
+    w._send(al)
+    assert len(sent) == 1 and "MẠNH" in sent[0] and "×2" in sent[0] and NEWMINT in sent[0] and "dexscreener" in sent[0]
+    sent.clear()
+    w._send([{"level": "high", "kind": "CREATE", "mint": NEWMINT, "wallet": WALLET, "sig": str(i)} for i in range(20)])
+    assert len(sent) == 16 and "5 cảnh báo khác" in sent[-1] and w.status()["notified"] == 1 + 15
+    assert w.status()["telegram"] is True
+
+
+def test_no_notifier_without_telegram_env(tmp_path, monkeypatch):
+    monkeypatch.delenv("TELEGRAM_BOT_TOKEN", raising=False)
+    monkeypatch.delenv("TELEGRAM_CHAT_ID", raising=False)
+    svc = InsiderService(result_path=tmp_path / "r.json", key="")
+    svc.result = {"tokens": [], "tickers": {}}
+    monkeypatch.setattr(WT.Watcher, "run_forever", lambda self, stop, progress=print, every_s=0: None)
+    assert svc.start_watch(tmp_path / "w.json") and svc.watcher.notify is None
+    assert svc.status()["watch"]["telegram"] is False

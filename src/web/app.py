@@ -210,7 +210,7 @@ def create_app(engine: ScannerEngine | None = None, start_scanner: bool = True,
                 state["aux"].append(asyncio.create_task(_snapshot_loop()))
             if (env("INSIDER_WATCH") or "1") != "0":       # deployer watch for the Insiders page (read-only)
                 if _insiders().start_watch(DATA_DIR / "insider_watch.json"):
-                    print("[insider-watch] watching the channel's deployers every 5 min (public RPC)", flush=True)
+                    print("[insider-watch] watching the channel's deployers every 2 min (public RPC)", flush=True)
             from web.keepalive import keepalive_url, keepalive_loop
             ka = keepalive_url()
             if ka:

@@ -1,4 +1,4 @@
-"""Deployer watch (research only, read-only): every 5 minutes look at the wallets behind the channel's coins and
+"""Deployer watch (research only, read-only): every 2 minutes look at the wallets behind the channel's coins and
 raise an alert when one of them
   * creates a coin                              (CREATE)
   * buys / receives a coin that is < 24 h old   (BUY_NEW / RECEIVE_NEW) and is not one of the channel's old coins
@@ -11,6 +11,7 @@ alerts, temporary wallets) is kept in a JSON file; the first poll of a wallet on
 from __future__ import annotations
 
 import json
+import os
 import threading
 import time
 import urllib.error
@@ -24,13 +25,13 @@ PUBLIC_RPC = "https://api.mainnet-beta.solana.com"
 PUMP = "6EF8rrecthR5Dkzon8Nwu78hRvfCKubJ14M5uBEwF6P"
 WSOL = "So11111111111111111111111111111111111111112"
 STABLES = {"EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v", "Es9vMFrzaCERmJfrF4H2FYD4KCoNkY11McCe8BenwNYB"}
-EVERY_S = 300
+EVERY_S = int(os.environ.get("INSIDER_WATCH_EVERY_S") or 120)   # a poll starts every 2 minutes
 NEW_COIN_S = 24 * 3600
 FUND_MIN_LAMPORTS = 500_000_000
 CHILD_TTL_S = 72 * 3600
 MAX_NEW_TX = 25                  # per wallet per poll (a busy wallet is summarised, not replayed)
 MAX_ALERTS = 600
-B_SLICES = 6                     # tier B is checked one sixth per poll: every wallet about every 30 minutes
+B_SLICES = 15                    # tier B is checked 1/15 per poll: every wallet about every 30 minutes
 BOT_NEW_COINS = 4                # a wallet touching >= 4 different new coins in 24 h is a sniper bot: muted
 
 
@@ -161,12 +162,14 @@ def analyse(tx: dict, wallet: str) -> list[dict]:
 
 
 class Watcher:
-    def __init__(self, result: dict, state_path: Path, rpc=None, now=time.time, old_mints: set | None = None):
+    def __init__(self, result: dict, state_path: Path, rpc=None, now=time.time, old_mints: set | None = None,
+                 notify=None, notify_levels: tuple = ("strong", "high", "medium")):
         self.base, self.tier_b = watch_tiers(result)
         self.old = old_mints if old_mints is not None else (
             {t["mint"] for t in result.get("tokens", [])} | {c["mint"] for c in (result.get("extra") or {}).get("coins", [])})
         self.tickers = result.get("tickers", {})
         self.path, self.rpc, self.now = Path(state_path), rpc or Rpc(), now
+        self.notify, self.notify_levels = notify, set(notify_levels)
         self.lock = threading.Lock()
         self.state = {"last_sig": {}, "children": {}, "alerts": [], "mint_age": {}, "polls": 0, "last_poll": None,
                       "last_error": None, "muted": {}}
@@ -242,6 +245,7 @@ class Watcher:
             self.state["watched"] = len(watched)
             self.state["rpc_calls"] = getattr(self.rpc, "calls", None)
         self.save()
+        self._send(new_alerts)
         progress(f"[insider-watch] poll {self.state['polls']}: {len(watched)} wallets, {len(new_alerts)} alerts")
         return new_alerts
 
@@ -292,6 +296,21 @@ class Watcher:
             if n >= 2:
                 a["level"], a["n_wallets"] = "strong", n
 
+    def _send(self, alerts: list[dict]) -> None:
+        """Push the new alerts of the chosen levels (strongest first, at most 15 per poll + a count)."""
+        if not self.notify:
+            return
+        todo = [a for a in alerts if a.get("level") in self.notify_levels]
+        order = {"strong": 0, "high": 1, "medium": 2, "watch": 3, "info": 4}
+        todo.sort(key=lambda a: order.get(a.get("level"), 9))
+        sent = 0
+        for a in todo[:15]:
+            sent += bool(self.notify(alert_text(a, self.tickers)))
+        if len(todo) > 15:
+            self.notify(f"… và {len(todo) - 15} cảnh báo khác trên dashboard")
+        with self.lock:
+            self.state["notified"] = self.state.get("notified", 0) + sent
+
     def save(self) -> None:
         try:
             self.path.parent.mkdir(parents=True, exist_ok=True)
@@ -304,6 +323,8 @@ class Watcher:
             return {"polls": self.state["polls"], "last_poll": self.state["last_poll"],
                     "watched": self.state.get("watched", len(self.base)), "every_s": EVERY_S,
                     "tier_a": len(self.base), "tier_b": len(self.tier_b), "muted": len(self.state.get("muted", {})),
+                    "telegram": bool(self.notify), "notify_levels": sorted(self.notify_levels),
+                    "notified": self.state.get("notified", 0),
                     "children": len(self.state["children"]), "last_error": self.state["last_error"],
                     "rpc_calls": self.state.get("rpc_calls"), "last_poll_s": self.state.get("last_poll_s"),
                     "alerts": self.state["alerts"][:200]}
@@ -318,3 +339,44 @@ class Watcher:
                 self.state["last_error"] = f"{type(e).__name__}: {str(e)[:120]}"
             self.state["last_poll_s"] = round(time.time() - t0)
             stop.wait(max(0.0, every_s - (time.time() - t0)))
+
+
+LEVEL_VI = {"strong": "🚨 MẠNH", "high": "🔴 TẠO COIN", "medium": "🟠 Coin mới", "watch": "🔵 Nạp ví mới", "info": "ℹ️"}
+KIND_VI = {"CREATE": "tạo coin mới", "BUY": "mua coin mới", "RECEIVE": "nhận coin mới", "FUND": "nạp SOL cho ví mới"}
+
+
+def alert_text(a: dict, tickers: dict | None = None) -> str:
+    """One alert as a Telegram HTML message (addresses in <code>, links to DexScreener / pump.fun / Solscan)."""
+    from html import escape
+    tickers = tickers or {}
+    head = LEVEL_VI.get(a.get("level"), a.get("level", ""))
+    if a.get("n_wallets"):
+        head += f" ×{a['n_wallets']} ví cùng vào"
+    lines = [f"<b>{head}</b>: ví theo dõi {KIND_VI.get(a['kind'], a['kind'])}"]
+    if a.get("mint"):
+        m = a["mint"]
+        age = f" · {a['age_h']} giờ tuổi" if a.get("age_h") is not None else ""
+        lines.append(f"Coin: <code>{m}</code>{escape(' ' + tickers[m]) if m in tickers else ''}{age}")
+        lines.append(f'<a href="https://dexscreener.com/solana/{m}">DexScreener</a> · '
+                     f'<a href="https://pump.fun/coin/{m}">pump.fun</a>')
+    if a.get("to"):
+        lines.append(f"Ví mới: <code>{a['to']}</code>")
+    if a.get("sol"):
+        lines.append(f"SOL: {a['sol']}")
+    lines.append(f"Ví: <code>{a['wallet']}</code> ({escape(a.get('why') or '')})")
+    lines.append(f'<a href="https://solscan.io/tx/{a.get("sig")}">giao dịch</a>')
+    return "\n".join(lines)
+
+
+def telegram_sender(token: str, chat_id: str):
+    """Plain urllib sender (the watcher runs in a thread). The token is never logged."""
+    def send(text: str) -> bool:
+        body = json.dumps({"chat_id": chat_id, "text": text, "parse_mode": "HTML",
+                           "disable_web_page_preview": True}).encode()
+        try:
+            req = urllib.request.Request(f"https://api.telegram.org/bot{token}/sendMessage", data=body,
+                                         headers={"Content-Type": "application/json"})
+            return bool(json.loads(urllib.request.urlopen(req, timeout=20).read()).get("ok"))
+        except Exception:                                    # never echo the URL (it holds the token)
+            return False
+    return send

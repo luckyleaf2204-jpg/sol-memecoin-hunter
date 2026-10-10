@@ -1187,9 +1187,25 @@ function moneyPath(p) {
   return p.map((h) => h.dir === "back" ? `${esc(short(h.to))} → ${esc(short(h.from))}` : `${esc(short(h.from))} → ${esc(short(h.to))}`)
     .map((x, i) => x + ` <span class="c-muted">(${p[i].sol} SOL)</span>`).join(" · ");
 }
+function beep() {
+  try { const c = new (window.AudioContext || window.webkitAudioContext)(); const o = c.createOscillator(); const g = c.createGain();
+    o.frequency.value = 880; g.gain.value = 0.15; o.connect(g); g.connect(c.destination); o.start(); setTimeout(() => { o.stop(); c.close(); }, 350); } catch (_) { /* no audio */ }
+}
+function pingNew(w, names) {             // sound + vibration + system notification for alerts newer than the last seen
+  const al = (w && w.alerts) || []; if (!al.length) return;
+  const top = al[0].ts || 0, last = Number(LS.get("insLastAlert", 0)) || 0;
+  if (!last) { LS.set("insLastAlert", top); return; }
+  const fresh = al.filter((a) => (a.ts || 0) > last && ["strong", "high", "medium"].includes(a.level));
+  LS.set("insLastAlert", Math.max(top, last));
+  if (!fresh.length) return;
+  beep(); if (navigator.vibrate) navigator.vibrate([200, 100, 200]);
+  const a = fresh[0], txt = `${t("web.ins.lv." + a.level)}: ${t("web.ins.ev." + a.kind.toLowerCase())} ${a.mint ? (names[a.mint] || short(a.mint)) : ""}`;
+  toast(txt);
+  try { if ("Notification" in window && Notification.permission === "granted") new Notification("SOL Hunter · Insiders", { body: txt + (fresh.length > 1 ? ` (+${fresh.length - 1})` : "") }); } catch (_) { /* iOS without PWA */ }
+}
 async function refreshWatch() {           // only the alert table: open details elsewhere stay open
   const box = $("#insWatch"); if (!box) return;
-  try { const d = await api("/api/insiders/watch"); box.innerHTML = watchHtml(d.watch, d.tickers || {}); bindIns(); } catch (_) { /* next tick */ }
+  try { const d = await api("/api/insiders/watch"); box.innerHTML = watchHtml(d.watch, d.tickers || {}); pingNew(d.watch, d.tickers || {}); bindIns(); } catch (_) { /* next tick */ }
 }
 function watchHtml(w, names) {
   if (!w) return `<h2>${esc(t("web.ins.watch"))}</h2><div class="muted small">${esc(t("web.ins.watch_off"))}</div>`;
@@ -1202,6 +1218,8 @@ function watchHtml(w, names) {
     <td class="num">${a.sol || ""}</td><td>${acct(a.wallet)}<div class="muted small">${esc(a.why || "")}</div></td></tr>`);
   return `<h2>${esc(t("web.ins.watch"))}</h2><div class="muted small">${esc(t("web.ins.watch_note", { n: w.watched, k: w.children, p: w.polls }))}
     ${w.tier_a ? " · " + esc(t("web.ins.tiers", { a: w.tier_a, b: w.tier_b, m: w.muted || 0 })) : ""}
+    · ${esc(t(w.telegram ? "web.ins.tg_on" : "web.ins.tg_off", { n: w.notified || 0 }))}
+    ${"Notification" in window && Notification.permission !== "granted" ? `<button class="btn" id="insNotify">${esc(t("web.ins.enable_notif"))}</button>` : ""}
     ${w.last_poll ? " · " + esc(t("web.ins.watch_last")) + " " + esc(new Date(w.last_poll * 1000).toLocaleTimeString("vi-VN")) + (w.last_poll_s ? ` (${w.last_poll_s}s)` : "") : ""}</div>
     ${insTable([t("web.ins.when"), t("web.ins.event"), t("web.ins.coin_or_wallet"), "SOL", t("web.ins.by")], rows)}`;
 }
@@ -1268,6 +1286,8 @@ function bindIns() {
     const hs = [...tb.querySelectorAll("th")].map((h) => h.textContent);
     tb.querySelectorAll("tbody tr").forEach((tr) => [...tr.children].forEach((td, i) => { td.dataset.l = hs[i] || ""; }));
   });
+  const nb = $("#insNotify");
+  if (nb) nb.onclick = async () => { try { await Notification.requestPermission(); } catch (_) { /* unsupported */ } beep(); refreshWatch(); };
   const b = $("#insRun");
   if (b) b.onclick = async () => { b.disabled = true; try { await api("/api/insiders/run", { method: "POST" }); toast(t("web.ins.started")); } catch (e) { toast(t("web.error")); } renderInsiders(true); };
 }
@@ -1303,7 +1323,7 @@ function route() {
   if (p0 === "watch") { setTab("watch"); renderWatch(); startPoll(() => renderWatch(true), POLL.watch); return; }
   if (p0 === "narrative") { setTab("more"); renderNarrative(); stopPoll(); return; }
   if (p0 === "events") { setTab("more"); renderEvents(); startPoll(() => renderEvents(true), POLL.events); return; }
-  if (p0 === "insiders") { setTab("more"); renderInsiders(); startPoll(() => { if (S.insRunning) renderInsiders(true); else refreshWatch(); }, 60000); return; }
+  if (p0 === "insiders") { setTab("more"); renderInsiders(); startPoll(() => { if (S.insRunning) renderInsiders(true); else refreshWatch(); }, 30000); return; }
   if (p0 === "status") { setTab("more"); renderStatus(); startPoll(() => renderStatus(true), POLL.status); return; }
   if (p0 === "smart") { setTab("more"); $("#view").innerHTML = `<h1>${esc(t("tab.smart_money"))}</h1><div class="token-head">${esc(t("na.smart_money"))}</div><div class="disclaimer">${esc(t("na.rule"))}</div>`; stopPoll(); return; }
   setTab("more"); renderMore(); stopPoll();

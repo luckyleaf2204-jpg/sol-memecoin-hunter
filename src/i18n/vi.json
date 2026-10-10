@@ -1090,7 +1090,7 @@
  "web.ins.pnl_wins": "Thắng / coin",
  "web.ins.pnl_why": "Vì sao có trong danh sách",
  "web.ins.to_cex": "chuyển token vào",
- "web.ins.watch": "Theo dõi ví deployer (5 phút / lần)",
+ "web.ins.watch": "Theo dõi ví deployer (2 phút / lần)",
  "web.ins.watch_off": "Bộ theo dõi chưa chạy trên server.",
  "web.ins.watch_note": "Đang theo dõi {n} ví + {k} ví mới được họ nạp tiền (72 giờ). Đã quét {p} lần. Báo khi họ tạo coin, mua / nhận coin dưới 24 giờ tuổi, hoặc nạp SOL cho ví mới.",
  "web.ins.watch_last": "lần quét gần nhất",
@@ -1116,7 +1116,7 @@
  "web.ins.new_coins": "Coin mới liên quan",
  "web.ins.old_roles": "Vai trò ở 95 coin cũ",
  "web.ins.old_lead": "ví mẹ cũ: {n} coin",
- "web.ins.tiers": "nhóm A {a} ví mỗi 5 phút, nhóm B {b} ví luân phiên ~30 phút, đã tắt {m} ví bot",
+ "web.ins.tiers": "nhóm A {a} ví mỗi 2 phút, nhóm B {b} ví luân phiên ~30 phút, đã tắt {m} ví bot",
  "web.ins.trees": "Cây gia phả ví (ai nạp tiền cho ai → ví của từng coin)",
  "web.ins.trees_note": "Lần SOL tối đa {h} bước. Mỗi gia đình một cây; bấm ▸ để mở nhánh. Nhãn đỏ = ví đó là deployer; số kèm theo = lãi SOL trên coin đó. Cây dừng ở sàn / dịch vụ lớn.",
  "web.ins.tree_funding": "Cây nạp tiền",
@@ -1127,5 +1127,8 @@
  "web.ins.tree_stop": "sàn / dịch vụ, không đi tiếp",
  "web.ins.tree_count": "{k} nhánh, {n} coin",
  "web.ins.tree_ancestor": "Tổ tiên (nạp tiền cho đời dưới):",
- "web.ins.tree_flows_to": "Tiền chảy tiếp về:"
+ "web.ins.tree_flows_to": "Tiền chảy tiếp về:",
+ "web.ins.tg_on": "Telegram: BẬT (đã gửi {n})",
+ "web.ins.tg_off": "Telegram: chưa bật (cần TELEGRAM_BOT_TOKEN + TELEGRAM_CHAT_ID trên Render)",
+ "web.ins.enable_notif": "Bật thông báo trên máy này"
 }
