@@ -228,3 +228,89 @@ def check_activity(chain: Chain, deep: dict, seeds: dict, top: int = 60) -> int:
             nodes[a]["active_hub"] = act["per_min"]
             n_hub += 1
     return n_hub
+
+
+def build_trees(nodes: dict, seeds: dict, roots: list[str], roles: dict, labels=None, depth: int = 8,
+                max_children: int = 40, stop=lambda a: False) -> list[dict]:
+    """Family trees, ONE direction each: a funding tree (root -> wallets it funded -> ... -> the coins' wallets) or a
+    cash-out tree (root <- wallets that paid it <- ... <- the coins' wallets), whichever links more coins. A child
+    is linked by the first money path found for a coin (amount on the edge)."""
+    labels = labels or (lambda a: _label(a))
+
+    def kids(a, d):
+        out = {}
+        for m, (child, lam) in (nodes.get(a, {}).get("via", {}).get(d) or {}).items():
+            if child not in out or lam > out[child]:
+                out[child] = lam
+        return sorted(out.items(), key=lambda x: -x[1])[:max_children]
+
+    def walk(a, d, level, seen, lam=0):
+        lab, kind = labels(a)
+        n = {"a": a, "l": lab, "k": kind, "sol": round(lam / 1e9, 3), "coins": roles.get(a, [])}
+        if level and stop(a):
+            n["stop"] = True                                  # an exchange / service: the tree is not followed through
+        elif level < depth and a not in seeds:
+            ch = [walk(c, d, level + 1, seen | {c}, l) for c, l in kids(a, d) if c not in seen]
+            ch = [c for c in ch if c["n_coins"] or c.get("stop")]   # a branch leading to no coin is noise
+            if ch:
+                n["c"] = ch
+        n["n_coins"] = len({x[0] for x in _leaf_coins(n)})
+        return n
+    out = []
+    for r in roots:
+        if r not in nodes:
+            continue
+        best = max((walk(r, d, 0, {r}) | {"dir": d} for d in ("back", "fwd")), key=lambda t: t["n_coins"])
+        if best["n_coins"]:
+            out.append(best)
+    return out
+
+
+def _leaf_coins(n: dict) -> list:
+    out = list(n.get("coins") or [])
+    for c in n.get("c") or []:
+        out += _leaf_coins(c)
+    return out
+
+
+def tree_addresses(n: dict) -> set:
+    out = {n["a"]}
+    for c in n.get("c") or []:
+        out |= tree_addresses(c)
+    return out
+
+
+def _distance(n: dict, a: str, d: int = 0):
+    if n["a"] == a:
+        return d
+    for c in n.get("c") or []:
+        r = _distance(c, a, d + 1)
+        if r is not None:
+            return r
+    return None
+
+
+def dedupe_trees(trees: list[dict], weak=lambda t: False) -> list[dict]:
+    """One tree per family. Trees whose root sits inside another tree are the same family; the tree that links the
+    most coins is kept and the others become its ancestors ("parents", nearest first)."""
+    addrs = {t["a"]: tree_addresses(t) for t in trees}
+    fam = {t["a"]: {t["a"]} for t in trees}
+    for t in trees:                                         # union families by containment
+        for u in trees:
+            if t is not u and t["a"] in addrs[u["a"]]:
+                merged = fam[t["a"]] | fam[u["a"]]
+                for x in merged:
+                    fam[x] = merged
+    out, done = [], set()
+    by = {t["a"]: t for t in trees}
+    for t in sorted(trees, key=lambda t: (-t["n_coins"], weak(t))):
+        if t["a"] in done:
+            continue
+        members = [by[a] for a in fam[t["a"]]]
+        best = max(members, key=lambda m: (not weak(m), m["n_coins"]))
+        anc = [(m, _distance(m, best["a"])) for m in members if m is not best and best["a"] in addrs[m["a"]]]
+        best["parents"] = [{"a": m["a"], "l": m.get("l"), "k": m.get("k"), "dir": m.get("dir")}
+                           for m, _ in sorted(anc, key=lambda x: x[1] if x[1] is not None else 99)]
+        out.append(best)
+        done |= fam[t["a"]]
+    return sorted(out, key=lambda t: -t["n_coins"])

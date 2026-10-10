@@ -354,3 +354,14 @@ details.ev div { padding: 2px 0; }
   table.ins td[data-l]:not(:first-child)::before { content: attr(data-l) ": "; color: var(--muted); font-size: 11px; }
   .ins-wrap { overflow-x: visible; }
 }
+
+/* family trees */
+.tree { border: 1px solid var(--border); border-radius: 10px; padding: 8px 10px; margin: 8px 0; background: var(--panel); }
+.tree-h { font-size: 12px; color: var(--muted); margin-bottom: 4px; }
+.tn { margin: 3px 0; font-size: 12px; }
+.tn > summary { cursor: pointer; list-style: none; }
+.tn > summary::before { content: "▸ "; color: var(--accent); }
+.tn[open] > summary::before { content: "▾ "; }
+.tn.leaf::before { content: "• "; color: var(--muted); }
+.tk { margin-left: 10px; padding-left: 8px; border-left: 1px dashed var(--border); }
+.tn .pill { font-size: 10px; padding: 1px 6px; }

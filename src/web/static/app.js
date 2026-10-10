@@ -1166,6 +1166,7 @@ async function renderInsiders(silent) {
       ${runBtn}${prog}</div>
     <div class="disclaimer">${esc(t("web.ins.how"))}</div>
     <div id="insWatch">${watchHtml(d.watch, names)}</div>
+    ${treesHtml(r.trees)}
     ${extraHtml(r.extra, names)}
     ${pnlHtml(r.pnl, names)}
     ${deepHtml(r.deep, names)}
@@ -1203,6 +1204,22 @@ function watchHtml(w, names) {
     ${w.tier_a ? " · " + esc(t("web.ins.tiers", { a: w.tier_a, b: w.tier_b, m: w.muted || 0 })) : ""}
     ${w.last_poll ? " · " + esc(t("web.ins.watch_last")) + " " + esc(new Date(w.last_poll * 1000).toLocaleTimeString("vi-VN")) + (w.last_poll_s ? ` (${w.last_poll_s}s)` : "") : ""}</div>
     ${insTable([t("web.ins.when"), t("web.ins.event"), t("web.ins.coin_or_wallet"), "SOL", t("web.ins.by")], rows)}`;
+}
+function treeNode(n, dir, level) {
+  const kids = n.c || [];
+  const pill = n.l ? ` <span class="pill ${n.k === "exchange" || n.k === "fee" ? "" : "ok"}">${esc(n.l)}</span>` : "";
+  const edge = level ? `<span class="c-muted small">${esc(t(dir === "fwd" ? "web.ins.tree_sent_up" : "web.ins.tree_funded", { sol: n.sol }))}</span> ` : "";
+  const coins = (n.coins || []).map((c) => `<span class="pill ${c[1] === "dev" ? "bad" : ""}">${esc(c[0])} ${esc(c[1] === "dev" ? t("web.ins.deployer") : c[1])}${c[2] !== null && c[2] !== undefined ? " " + (c[2] > 0 ? "+" : "") + Number(c[2]).toFixed(1) : ""}</span>`).join(" ");
+  const head = `${edge}${acct(n.a)}${pill}${n.stop ? ` <span class="c-muted small">(${esc(t("web.ins.tree_stop"))})</span>` : ""}${kids.length ? ` <span class="c-muted small">· ${esc(t("web.ins.tree_count", { k: kids.length, n: n.n_coins }))}</span>` : ""}${coins ? "<div>" + coins + "</div>" : ""}`;
+  if (!kids.length) return `<div class="tn leaf">${head}</div>`;
+  return `<details class="tn" ${level < 1 ? "open" : ""}><summary>${head}</summary><div class="tk">${kids.map((c) => treeNode(c, dir, level + 1)).join("")}</div></details>`;
+}
+function treesHtml(tr) {
+  if (!tr || !(tr.trees || []).length) return "";
+  return `<h2>${esc(t("web.ins.trees"))}</h2><div class="muted small">${esc(t("web.ins.trees_note", { h: tr.hops }))}</div>
+    ${tr.trees.map((x) => `<div class="tree"><div class="tree-h">${esc(t(x.dir === "fwd" ? "web.ins.tree_cashout" : "web.ins.tree_funding"))} · <b>${x.n_coins}</b> ${esc(t("web.ins.coins"))}</div>
+      ${(x.parents || []).length ? `<div class="small muted">${x.parents.map((p) => esc(t(p.dir === "fwd" ? "web.ins.tree_flows_to" : "web.ins.tree_ancestor")) + " " + acct(p.a) + (p.l ? " " + esc(p.l) : "")).join("<br>")}</div>` : ""}
+      ${treeNode(x, x.dir, 0)}</div>`).join("")}`;
 }
 function extraHtml(x, names) {
   if (!x) return "";

@@ -397,3 +397,18 @@ def test_tier_b_rotates_and_snipers_are_muted(tmp_path):
     for i in range(WT.BOT_NEW_COINS):
         muted = w._is_bot(CEX, f"m{i}")
     assert muted and CEX in w.state["muted"]
+
+
+def test_family_tree_one_direction_ancestors_and_pruning(monkeypatch):
+    """BOSS -> fa -> A (coin M1), BOSS -> fb -> B (coin M2), GRAND -> BOSS; a dead branch is pruned."""
+    sol = 10 * 10 ** 9
+    back = {"A": {"fa": sol}, "fa": {"BOSS": sol}, "B": {"fb": sol}, "fb": {"BOSS": sol}, "BOSS": {"GRAND": sol}}
+    monkeypatch.setattr(D, "flows", graph_flows(back, {}))
+    seeds = {"A": {"tokens": {"M1"}, "ts": 0}, "B": {"tokens": {"M2"}, "ts": 0}}
+    d = D.deep_trace(FakeChain({}), seeds, max_hops=4, workers=1)
+    roles = {"A": [["M1", "dev", 5.0]], "B": [["M2", "#3", None]]}
+    trees = D.build_trees(d["nodes"], seeds, ["BOSS", "GRAND"], roles)
+    kept = D.dedupe_trees(trees)
+    assert len(kept) == 1 and kept[0]["a"] in ("BOSS", "GRAND") and kept[0]["n_coins"] == 2
+    t = kept[0] if kept[0]["a"] == "BOSS" else kept[0]["c"][0]
+    assert {c["a"] for c in t["c"]} == {"fa", "fb"} and t["c"][0]["c"][0]["coins"]

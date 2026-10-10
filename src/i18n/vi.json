@@ -1116,5 +1116,16 @@
  "web.ins.new_coins": "Coin mới liên quan",
  "web.ins.old_roles": "Vai trò ở 95 coin cũ",
  "web.ins.old_lead": "ví mẹ cũ: {n} coin",
- "web.ins.tiers": "nhóm A {a} ví mỗi 5 phút, nhóm B {b} ví luân phiên ~30 phút, đã tắt {m} ví bot"
+ "web.ins.tiers": "nhóm A {a} ví mỗi 5 phút, nhóm B {b} ví luân phiên ~30 phút, đã tắt {m} ví bot",
+ "web.ins.trees": "Cây gia phả ví (ai nạp tiền cho ai → ví của từng coin)",
+ "web.ins.trees_note": "Lần SOL tối đa {h} bước. Mỗi gia đình một cây; bấm ▸ để mở nhánh. Nhãn đỏ = ví đó là deployer; số kèm theo = lãi SOL trên coin đó. Cây dừng ở sàn / dịch vụ lớn.",
+ "web.ins.tree_funding": "Cây nạp tiền",
+ "web.ins.tree_cashout": "Cây rút tiền (các ví chuyển SOL về đây)",
+ "web.ins.coins": "coin",
+ "web.ins.tree_funded": "được nạp {sol} SOL",
+ "web.ins.tree_sent_up": "chuyển lên {sol} SOL",
+ "web.ins.tree_stop": "sàn / dịch vụ, không đi tiếp",
+ "web.ins.tree_count": "{k} nhánh, {n} coin",
+ "web.ins.tree_ancestor": "Tổ tiên (nạp tiền cho đời dưới):",
+ "web.ins.tree_flows_to": "Tiền chảy tiếp về:"
 }

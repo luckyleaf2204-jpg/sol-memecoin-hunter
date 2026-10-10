@@ -1116,5 +1116,16 @@
  "web.ins.new_coins": "New coins linked",
  "web.ins.old_roles": "Role in the 95 old coins",
  "web.ins.old_lead": "old lead: {n} coins",
- "web.ins.tiers": "tier A {a} wallets every 5 min, tier B {b} wallets in rotation ~30 min, {m} bots muted"
+ "web.ins.tiers": "tier A {a} wallets every 5 min, tier B {b} wallets in rotation ~30 min, {m} bots muted",
+ "web.ins.trees": "Wallet family trees (who funded whom → each coin's wallets)",
+ "web.ins.trees_note": "SOL traced up to {h} hops. One tree per family; tap ▸ to open a branch. Red tag = that wallet deployed the coin; the number = its SOL profit on it. Trees stop at exchanges / big services.",
+ "web.ins.tree_funding": "Funding tree",
+ "web.ins.tree_cashout": "Cash-out tree (wallets that sent SOL here)",
+ "web.ins.coins": "coins",
+ "web.ins.tree_funded": "funded {sol} SOL",
+ "web.ins.tree_sent_up": "sent up {sol} SOL",
+ "web.ins.tree_stop": "exchange / service, not followed",
+ "web.ins.tree_count": "{k} branches, {n} coins",
+ "web.ins.tree_ancestor": "Ancestor (funded the generation below):",
+ "web.ins.tree_flows_to": "Money flows on to:"
 }
