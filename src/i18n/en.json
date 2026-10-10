@@ -1091,7 +1091,7 @@
  "web.ins.pnl_why": "Why listed",
  "web.ins.to_cex": "sent tokens to",
  "web.ins.watch": "Deployer watch (every 2 min)",
- "web.ins.watch_off": "The watch is not running on the server.",
+ "web.ins.watch_off": "The watch now runs on https://kol-radar.onrender.com (durable, Telegram). It is off here.",
  "web.ins.watch_note": "Watching {n} wallets + {k} new wallets they funded (72 h). {p} polls. Alerts when they create a coin, buy / receive a coin < 24 h old, or fund a new wallet.",
  "web.ins.watch_last": "last poll",
  "web.ins.when": "When",

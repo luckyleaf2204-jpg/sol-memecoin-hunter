@@ -208,7 +208,7 @@ def create_app(engine: ScannerEngine | None = None, start_scanner: bool = True,
             state["shadow_task"] = asyncio.create_task(state["shadow"].run(state["shadow_stop"]))
             if state.get("snapshot_store") is not None:
                 state["aux"].append(asyncio.create_task(_snapshot_loop()))
-            if (env("INSIDER_WATCH") or "1") != "0":       # deployer watch for the Insiders page (read-only)
+            if (env("INSIDER_WATCH") or "0") == "1":       # deployer watch: runs on kol-radar now (opt-in here)
                 if _insiders().start_watch(DATA_DIR / "insider_watch.json"):
                     print("[insider-watch] watching the channel's deployers every 2 min (public RPC)", flush=True)
             from web.keepalive import keepalive_url, keepalive_loop

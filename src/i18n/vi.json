@@ -1091,7 +1091,7 @@
  "web.ins.pnl_why": "Vì sao có trong danh sách",
  "web.ins.to_cex": "chuyển token vào",
  "web.ins.watch": "Theo dõi ví deployer (2 phút / lần)",
- "web.ins.watch_off": "Bộ theo dõi chưa chạy trên server.",
+ "web.ins.watch_off": "Bộ theo dõi đã chuyển sang https://kol-radar.onrender.com (lưu bền, báo Telegram). Ở đây đã tắt.",
  "web.ins.watch_note": "Đang theo dõi {n} ví + {k} ví mới được họ nạp tiền (72 giờ). Đã quét {p} lần. Báo khi họ tạo coin, mua / nhận coin dưới 24 giờ tuổi, hoặc nạp SOL cho ví mới.",
  "web.ins.watch_last": "lần quét gần nhất",
  "web.ins.when": "Lúc",
