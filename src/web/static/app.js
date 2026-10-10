@@ -1195,7 +1195,7 @@ function pingNew(w, names) {             // sound + vibration + system notificat
   const al = (w && w.alerts) || []; if (!al.length) return;
   const top = al[0].ts || 0, last = Number(LS.get("insLastAlert", 0)) || 0;
   if (!last) { LS.set("insLastAlert", top); return; }
-  const fresh = al.filter((a) => (a.ts || 0) > last && ["strong", "high", "medium"].includes(a.level));
+  const fresh = al.filter((a) => (a.ts || 0) > last && a.level === "strong");    // only STRONG rings
   LS.set("insLastAlert", Math.max(top, last));
   if (!fresh.length) return;
   beep(); if (navigator.vibrate) navigator.vibrate([200, 100, 200]);

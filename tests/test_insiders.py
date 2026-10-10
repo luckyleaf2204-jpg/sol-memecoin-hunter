@@ -436,3 +436,22 @@ def test_no_notifier_without_telegram_env(tmp_path, monkeypatch):
     monkeypatch.setattr(WT.Watcher, "run_forever", lambda self, stop, progress=print, every_s=0: None)
     assert svc.start_watch(tmp_path / "w.json") and svc.watcher.notify is None
     assert svc.status()["watch"]["telegram"] is False
+
+
+def test_new_wallet_funded_then_buying_right_away_makes_a_strong_alert(tmp_path):
+    """Group wallet funds a fresh wallet (seen in poll 2); the fresh wallet had ALREADY bought the new coin before
+    poll 3 looked at it: the buy is still read (from the funding signature) and with the group's own buy -> STRONG."""
+    sol = 10 ** 9
+    txs = {"f1": wtx(WALLET, "f1", 1_500, transfer=(BOSS, 2 * sol)),
+           "kb": wtx(BOSS, "kb", 1_550, NEWMINT, (0, 7), (2 * sol, sol)),
+           "wb": wtx(WALLET, "wb", 1_560, NEWMINT, (0, 5), (3 * sol, sol))}
+    rpc = FakeRpc({WALLET: [{"signature": "old"}]}, txs)
+    w = watcher(tmp_path, rpc, wallets=(WALLET,))
+    w.poll_once()                                                            # baseline
+    rpc.sigs = {WALLET: [{"signature": "f1"}, {"signature": "old"}]}
+    assert w.poll_once()[0]["kind"] == "FUND"
+    rpc.sigs = {WALLET: [{"signature": "wb"}, {"signature": "f1"}, {"signature": "old"}],
+                BOSS: [{"signature": "kb"}, {"signature": "f1"}]}             # BOSS bought before we looked at it
+    al = w.poll_once()
+    strong = [a for a in al if a["level"] == "strong"]
+    assert {a["wallet"] for a in strong} == {WALLET, BOSS} and strong[0]["n_wallets"] == 2

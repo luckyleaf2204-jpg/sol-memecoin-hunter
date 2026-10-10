@@ -163,7 +163,7 @@ def analyse(tx: dict, wallet: str) -> list[dict]:
 
 class Watcher:
     def __init__(self, result: dict, state_path: Path, rpc=None, now=time.time, old_mints: set | None = None,
-                 notify=None, notify_levels: tuple = ("strong", "high", "medium")):
+                 notify=None, notify_levels: tuple = ("strong",)):
         self.base, self.tier_b = watch_tiers(result)
         self.old = old_mints if old_mints is not None else (
             {t["mint"] for t in result.get("tokens", [])} | {c["mint"] for c in (result.get("extra") or {}).get("coins", [])})
@@ -209,6 +209,9 @@ class Watcher:
             found = []
             try:
                 last = self.state["last_sig"].get(w)
+                kid = self.state["children"].get(w)
+                if not last and kid and kid.get("sig"):
+                    last = kid["sig"]                        # a funded new wallet: read everything since its funding
                 opts = {"limit": MAX_NEW_TX}
                 if last:
                     opts["until"] = last
@@ -254,7 +257,8 @@ class Watcher:
         if ev["kind"] == "FUND":
             if ev["to"] in self.base or ev["to"] in self.state["children"] or not self._fresh(ev["to"]):
                 return None
-            self.state["children"][ev["to"]] = {"parent": ev["wallet"], "since": self.now(), "why": why[:40]}
+            self.state["children"][ev["to"]] = {"parent": ev["wallet"], "since": self.now(), "why": why[:40],
+                                                "sig": ev.get("sig")}
             return {**ev, "level": "watch", "note": "now watched for 72 h"}
         mint = ev["mint"]
         if ev["wallet"] in self.state.setdefault("muted", {}):

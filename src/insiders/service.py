@@ -50,7 +50,7 @@ class InsiderService:
             return False
         from insiders.watch import Watcher, telegram_sender
         tok, chat = os.environ.get("TELEGRAM_BOT_TOKEN"), os.environ.get("TELEGRAM_CHAT_ID")
-        levels = tuple(x for x in (os.environ.get("INSIDER_ALERT_LEVELS") or "strong,high,medium").split(",") if x)
+        levels = tuple(x for x in (os.environ.get("INSIDER_ALERT_LEVELS") or "strong").split(",") if x)
         self.watcher = Watcher(self.result, state_path, notify=telegram_sender(tok, chat) if tok and chat else None,
                                notify_levels=levels)
         self.watch_stop = threading.Event()
