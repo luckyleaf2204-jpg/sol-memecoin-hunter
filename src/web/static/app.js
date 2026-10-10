@@ -1231,7 +1231,7 @@ function paperHtml(p, names) {
   const sumRow = marks.map((k) => { const m = (s.marks || {})[k]; return m ? `<td class="num">${sol(m.avg_pct)}% <span class="c-muted small">(${m.wins}/${m.n} ${esc(t("web.ins.paper_wins"))}, ${sol(m.pnl_usd)} $)</span></td>` : `<td class="num">—</td>`; }).join("");
   const rows = (p.rows || []).map((x) => `<tr><td>${x.mint ? `<a class="mono" href="https://dexscreener.com/solana/${esc(x.mint)}" target="_blank" rel="noopener">${esc(names[x.mint] || short(x.mint))}</a>` : ""}<div class="muted small">${esc(new Date(x.opened * 1000).toLocaleString("vi-VN"))}${x.n_wallets ? " · ×" + x.n_wallets : ""}</div></td>
     <td class="num">${x.status === "no_route" ? esc(t("web.ins.paper_noroute")) : pct(x.entry_value, x.usd)}</td>${marks.map((k) => `<td class="num">${pct((x.marks || {})[k], x.usd)}</td>`).join("")}
-    <td class="num">${pct(x.peak, x.usd)} / ${pct(x.trough, x.usd)}</td><td class="small">${esc(t("web.ins.paper_" + x.status))}</td></tr>`);
+    <td class="num">${pct(x.peak, x.usd)} / ${pct(x.trough, x.usd)}</td><td class="small">${esc(t({ open: "web.ins.paper_open", closed: "web.ins.paper_closed", no_route: "web.ins.paper_no_route" }[x.status] || "common.unknown"))}</td></tr>`);
   return `<h3>${esc(t("web.ins.paper", { usd: s.usd || 500 }))}</h3><div class="muted small">${esc(t("web.ins.paper_note"))}</div>
     ${insTable([t("web.ins.paper_marks"), ...marks.map((k) => "+" + k)], [`<tr><td>${esc(t("web.ins.paper_avg", { n: s.positions || 0 }))}</td>${sumRow}</tr>`])}
     ${insTable([t("web.ins.token"), t("web.ins.paper_instant"), ...marks.map((k) => "+" + k), t("web.ins.paper_peak"), ""], rows)}`;
