@@ -1165,6 +1165,7 @@ async function renderInsiders(silent) {
       <div class="kv"><span class="k">${esc(t("web.ins.generated"))}</span><span class="v">${esc(r.generated_at)} · RPC ${r.rpc_calls} · ${esc(t("web.ins.traced"))} ${r.traced_wallets}</span></div>
       ${runBtn}${prog}</div>
     <div class="disclaimer">${esc(t("web.ins.how"))}</div>
+    <div id="insWatch">${watchHtml(d.watch, names)}</div>
     ${pnlHtml(r.pnl, names)}
     ${deepHtml(r.deep, names)}
     <h2>${esc(t("web.ins.behind"))}</h2>${insTable(ehead, real.slice(0, 40).map(entRow))}
@@ -1183,6 +1184,23 @@ function moneyPath(p) {
   // p: [{from, to, dir, sol}] from the address back to an insider wallet; each hop printed in the direction SOL moved
   return p.map((h) => h.dir === "back" ? `${esc(short(h.to))} → ${esc(short(h.from))}` : `${esc(short(h.from))} → ${esc(short(h.to))}`)
     .map((x, i) => x + ` <span class="c-muted">(${p[i].sol} SOL)</span>`).join(" · ");
+}
+async function refreshWatch() {           // only the alert table: open details elsewhere stay open
+  const box = $("#insWatch"); if (!box) return;
+  try { const d = await api("/api/insiders/watch"); box.innerHTML = watchHtml(d.watch, d.tickers || {}); bindIns(); } catch (_) { /* next tick */ }
+}
+function watchHtml(w, names) {
+  if (!w) return `<h2>${esc(t("web.ins.watch"))}</h2><div class="muted small">${esc(t("web.ins.watch_off"))}</div>`;
+  const lv = { strong: "bad", high: "bad", medium: "warn", watch: "", info: "" };
+  const kind = (a) => t("web.ins.ev." + a.kind.toLowerCase());
+  const coin = (m) => m ? `<a class="mono" href="https://dexscreener.com/solana/${esc(m)}" target="_blank" rel="noopener">${esc(names[m] || short(m))}</a> <span class="copy" data-copy="${esc(m)}">⧉</span>` : "";
+  const rows = (w.alerts || []).slice(0, 60).map((a) => `<tr><td class="small">${esc(new Date(a.ts * 1000).toLocaleString("vi-VN"))}</td>
+    <td><span class="pill ${lv[a.level] || ""}">${esc(t("web.ins.lv." + a.level))}${a.n_wallets ? " ×" + a.n_wallets : ""}</span> ${esc(kind(a))}</td>
+    <td>${a.mint ? coin(a.mint) : acct(a.to)}${a.age_h !== undefined && a.age_h !== null ? ` <span class="c-muted small">${a.age_h} h</span>` : ""}</td>
+    <td class="num">${a.sol || ""}</td><td>${acct(a.wallet)}<div class="muted small">${esc(a.why || "")}</div></td></tr>`);
+  return `<h2>${esc(t("web.ins.watch"))}</h2><div class="muted small">${esc(t("web.ins.watch_note", { n: w.watched, k: w.children, p: w.polls }))}
+    ${w.last_poll ? " · " + esc(t("web.ins.watch_last")) + " " + esc(new Date(w.last_poll * 1000).toLocaleTimeString("vi-VN")) + (w.last_poll_s ? ` (${w.last_poll_s}s)` : "") : ""}</div>
+    ${insTable([t("web.ins.when"), t("web.ins.event"), t("web.ins.coin_or_wallet"), "SOL", t("web.ins.by")], rows)}`;
 }
 function sol(v) { return v === null || v === undefined ? "—" : `<span class="${v > 0 ? "c-green" : v < 0 ? "c-red" : ""}">${v > 0 ? "+" : ""}${Number(v).toLocaleString("vi-VN", { maximumFractionDigits: 1 })}</span>`; }
 function pnlHtml(p, names) {
@@ -1250,7 +1268,7 @@ function route() {
   if (p0 === "watch") { setTab("watch"); renderWatch(); startPoll(() => renderWatch(true), POLL.watch); return; }
   if (p0 === "narrative") { setTab("more"); renderNarrative(); stopPoll(); return; }
   if (p0 === "events") { setTab("more"); renderEvents(); startPoll(() => renderEvents(true), POLL.events); return; }
-  if (p0 === "insiders") { setTab("more"); renderInsiders(); startPoll(() => { if (S.insRunning) renderInsiders(true); }, 5000); return; }
+  if (p0 === "insiders") { setTab("more"); renderInsiders(); startPoll(() => { if (S.insRunning) renderInsiders(true); else refreshWatch(); }, 60000); return; }
   if (p0 === "status") { setTab("more"); renderStatus(); startPoll(() => renderStatus(true), POLL.status); return; }
   if (p0 === "smart") { setTab("more"); $("#view").innerHTML = `<h1>${esc(t("tab.smart_money"))}</h1><div class="token-head">${esc(t("na.smart_money"))}</div><div class="disclaimer">${esc(t("na.rule"))}</div>`; stopPoll(); return; }
   setTab("more"); renderMore(); stopPoll();

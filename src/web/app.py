@@ -208,6 +208,9 @@ def create_app(engine: ScannerEngine | None = None, start_scanner: bool = True,
             state["shadow_task"] = asyncio.create_task(state["shadow"].run(state["shadow_stop"]))
             if state.get("snapshot_store") is not None:
                 state["aux"].append(asyncio.create_task(_snapshot_loop()))
+            if (env("INSIDER_WATCH") or "1") != "0":       # deployer watch for the Insiders page (read-only)
+                if _insiders().start_watch(DATA_DIR / "insider_watch.json"):
+                    print("[insider-watch] watching the channel's deployers every 5 min (public RPC)", flush=True)
             from web.keepalive import keepalive_url, keepalive_loop
             ka = keepalive_url()
             if ka:
@@ -493,6 +496,11 @@ def create_app(engine: ScannerEngine | None = None, start_scanner: bool = True,
     async def insiders_api():
         """Insider scan of the call channel's tokens (research only; the Helius key stays on the server)."""
         return _insiders().status()
+
+    @app.get("/api/insiders/watch")
+    async def insiders_watch():
+        w = getattr(_insiders(), "watcher", None)
+        return {"watch": w.status() if w else None, "tickers": (_insiders().result or {}).get("tickers", {})}
 
     @app.post("/api/insiders/run")
     async def insiders_run():

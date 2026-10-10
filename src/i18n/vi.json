@@ -1089,5 +1089,22 @@
  "web.ins.pnl_in_out": "Chi / thu (SOL)",
  "web.ins.pnl_wins": "Thắng / coin",
  "web.ins.pnl_why": "Vì sao có trong danh sách",
- "web.ins.to_cex": "chuyển token vào"
+ "web.ins.to_cex": "chuyển token vào",
+ "web.ins.watch": "Theo dõi ví deployer (5 phút / lần)",
+ "web.ins.watch_off": "Bộ theo dõi chưa chạy trên server.",
+ "web.ins.watch_note": "Đang theo dõi {n} ví + {k} ví mới được họ nạp tiền (72 giờ). Đã quét {p} lần. Báo khi họ tạo coin, mua / nhận coin dưới 24 giờ tuổi, hoặc nạp SOL cho ví mới.",
+ "web.ins.watch_last": "lần quét gần nhất",
+ "web.ins.when": "Lúc",
+ "web.ins.event": "Sự kiện",
+ "web.ins.coin_or_wallet": "Coin / ví nhận",
+ "web.ins.by": "Ví theo dõi",
+ "web.ins.ev.create": "tạo coin mới",
+ "web.ins.ev.buy": "mua coin mới",
+ "web.ins.ev.receive": "nhận coin mới",
+ "web.ins.ev.fund": "nạp SOL cho ví mới",
+ "web.ins.lv.strong": "MẠNH",
+ "web.ins.lv.high": "cao",
+ "web.ins.lv.medium": "chú ý",
+ "web.ins.lv.watch": "theo dõi",
+ "web.ins.lv.info": "thông tin"
 }

@@ -97,6 +97,7 @@ def pair_pnl(chain: Chain, wallet: str, mint: str, token_program: str = TOKEN, m
     spent = received = bought = sold = 0
     n_buy = n_sell = 0
     t_in = t_out = 0
+    trades: list[list] = []                                 # [ts, side, sol, tokens]
     to_wallets: dict[str, int] = defaultdict(int)
     first = last = None
     token, pages, complete = None, 0, False
@@ -122,6 +123,7 @@ def pair_pnl(chain: Chain, wallet: str, mint: str, token_program: str = TOKEN, m
                 o, pv = max(pools.items(), key=lambda x: abs(x[1]))
                 same = abs(dt) + sum(abs(d) for q, d in deltas.items() if on_curve(q) and (d > 0) == (dt > 0))
                 sol = abs(pv) * abs(dt) / max(1, same)
+                trades.append([ts, "buy" if dt > 0 else "sell", round(sol / 1e9, 4), abs(dt)])
                 if dt > 0:
                     bought += dt
                     n_buy += 1
@@ -132,8 +134,10 @@ def pair_pnl(chain: Chain, wallet: str, mint: str, token_program: str = TOKEN, m
                     received += sol
             elif dt > 0:
                 t_in += dt                                  # received from another wallet (or minted to it)
+                trades.append([ts, "in", 0, dt])
             else:
                 t_out += -dt
+                trades.append([ts, "out", 0, -dt])
                 for o, d in deltas.items():
                     if d > 0 and on_curve(o):
                         to_wallets[o] += d
@@ -148,7 +152,7 @@ def pair_pnl(chain: Chain, wallet: str, mint: str, token_program: str = TOKEN, m
             "received_sol": round(received / 1e9, 4), "net_sol": round((received - spent) / 1e9, 4),
             "n_buy": n_buy, "n_sell": n_sell, "tokens_in": t_in, "tokens_out": t_out,
             "tokens_left": max(0, bought + t_in - sold - t_out), "sent_to": sorted(to_wallets, key=lambda a: -to_wallets[a])[:5],
-            "first_ts": first, "last_ts": last}
+            "first_ts": first, "last_ts": last, "trades": trades[:400]}
 
 
 def pick_pairs(result: dict, top_repeat: int = 30) -> tuple[dict, dict]:

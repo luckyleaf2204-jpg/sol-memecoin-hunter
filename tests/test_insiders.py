@@ -284,3 +284,95 @@ def test_pnl_prices_the_dev_buy_inside_the_create_transaction():
     ch = FakeChain({(PN.ata(WALLET, MINT), "asc", 0): {"data": [create]}})
     r = PN.pair_pnl(ch, WALLET, MINT)
     assert r["spent_sol"] == 2.0 and r["n_buy"] == 1 and r["tokens_in"] == 0
+
+
+# ---------------------------------------------------------------- deployer watch (5 min)
+from insiders import watch as WT  # noqa: E402
+
+NEWMINT = "7uqfEqdd9strJVYiju6kasjCj6AzjBF2S1GmWRhdpump"
+
+
+def wtx(wallet, sig, ts, mint=None, tok=(0, 0), sol=(0, 0), create=False, transfer=None):
+    keys = [{"pubkey": wallet}] + ([{"pubkey": WT.PUMP}] if create else [])
+    pre = [{"owner": wallet, "mint": mint, "uiTokenAmount": {"amount": str(tok[0])}}] if mint else []
+    post = [{"owner": wallet, "mint": mint, "uiTokenAmount": {"amount": str(tok[1])}}] if mint else []
+    ins = [{"parsed": {"type": "transfer", "info": {"source": wallet, "destination": transfer[0],
+                                                     "lamports": transfer[1]}}}] if transfer else []
+    return {"blockTime": ts, "meta": {"err": None, "preTokenBalances": pre, "postTokenBalances": post,
+                                      "preBalances": [sol[0]] + [0] * (len(keys) - 1),
+                                      "postBalances": [sol[1]] + [0] * (len(keys) - 1),
+                                      "logMessages": ["Program log: Instruction: Create"] if create else [],
+                                      "innerInstructions": []},
+            "transaction": {"signatures": [sig], "message": {"accountKeys": keys, "instructions": ins}}}
+
+
+def test_analyse_create_buy_receive_and_fund():
+    sol = 10 ** 9
+    assert WT.analyse(wtx(WALLET, "a", 1, NEWMINT, (0, 5), (2 * sol, sol), create=True), WALLET)[0]["kind"] == "CREATE"
+    assert WT.analyse(wtx(WALLET, "b", 1, NEWMINT, (0, 5), (2 * sol, sol)), WALLET)[0]["kind"] == "BUY"
+    assert WT.analyse(wtx(WALLET, "c", 1, NEWMINT, (0, 5), (sol, sol)), WALLET)[0]["kind"] == "RECEIVE"
+    ev = WT.analyse(wtx(WALLET, "d", 1, transfer=(BOSS, sol)), WALLET)
+    assert ev[0]["kind"] == "FUND" and ev[0]["to"] == BOSS
+    assert WT.analyse(wtx(WALLET, "e", 1, transfer=(PDA, sol)), WALLET) == []        # program account: a trade
+    assert WT.analyse(wtx(WALLET, "f", 1, NEWMINT, (5, 0), (sol, 2 * sol)), WALLET) == []   # a sell: no alert
+
+
+class FakeRpc:
+    def __init__(self, sigs, txs, mint_sigs=1, fresh=True):
+        self.sigs, self.txs, self.mint_sigs, self.fresh, self.calls = sigs, txs, mint_sigs, fresh, 0
+
+    def __call__(self, method, params):
+        self.calls += 1
+        if method == "getTransaction":
+            return self.txs[params[0]]
+        a, opts = params
+        if a in self.sigs:
+            out = self.sigs[a]
+            if opts.get("until"):
+                out = out[:[s["signature"] for s in out].index(opts["until"])]
+            return out
+        if a == NEWMINT:
+            return [{"signature": "m", "blockTime": 1_000}] * self.mint_sigs
+        return [{"signature": "x"}] * (1 if self.fresh else 5)
+
+
+def watcher(tmp_path, rpc, now=2_000.0, wallets=(WALLET, CEX)):
+    r = {"tokens": [{"mint": MINT, "status": "ok", "deployer": w} for w in wallets], "tickers": {}}
+    return WT.Watcher(r, tmp_path / "w.json", rpc=rpc, now=lambda: now)
+
+
+def test_first_poll_only_records_then_new_coin_buys_alert_and_two_wallets_are_strong(tmp_path):
+    sol = 10 ** 9
+    txs = {"b1": wtx(WALLET, "b1", 1_500, NEWMINT, (0, 5), (2 * sol, sol)),
+           "b2": wtx(CEX, "b2", 1_600, NEWMINT, (0, 9), (3 * sol, sol))}
+    rpc = FakeRpc({WALLET: [{"signature": "old"}], CEX: [{"signature": "old2"}]}, txs)
+    w = watcher(tmp_path, rpc)
+    assert w.poll_once() == []                                              # baseline
+    rpc.sigs = {WALLET: [{"signature": "b1"}, {"signature": "old"}], CEX: [{"signature": "b2"}, {"signature": "old2"}]}
+    al = w.poll_once()
+    assert {a["kind"] for a in al} == {"BUY"} and all(a["level"] == "strong" and a["n_wallets"] == 2 for a in al)
+    assert al[0]["age_h"] == round(1_000 / 3600, 2)
+    assert WT.Watcher({"tokens": []}, tmp_path / "w.json", rpc=rpc).state["polls"] == 2      # state persisted
+
+
+def test_old_or_channel_coins_do_not_alert(tmp_path):
+    sol = 10 ** 9
+    txs = {"b1": wtx(WALLET, "b1", 1_500, NEWMINT, (0, 5), (2 * sol, sol)),
+           "c1": wtx(WALLET, "c1", 1_500, MINT, (0, 5), (2 * sol, sol))}
+    rpc = FakeRpc({WALLET: [{"signature": "old"}]}, txs, mint_sigs=1000)          # >= 1000 sigs: an old coin
+    w = watcher(tmp_path, rpc, wallets=(WALLET,))
+    w.poll_once()
+    rpc.sigs = {WALLET: [{"signature": "c1"}, {"signature": "b1"}, {"signature": "old"}]}
+    assert w.poll_once() == []
+
+
+def test_funding_a_fresh_wallet_adds_it_to_the_watch_for_72h(tmp_path):
+    txs = {"f1": wtx(WALLET, "f1", 1_500, transfer=(BOSS, 10 ** 9))}
+    rpc = FakeRpc({WALLET: [{"signature": "old"}]}, txs)
+    w = watcher(tmp_path, rpc, wallets=(WALLET,))
+    w.poll_once()
+    rpc.sigs = {WALLET: [{"signature": "f1"}, {"signature": "old"}]}
+    al = w.poll_once()
+    assert al[0]["kind"] == "FUND" and BOSS in w.wallets()
+    w.now = lambda: 2_000.0 + WT.CHILD_TTL_S + 1
+    assert BOSS not in w.wallets()

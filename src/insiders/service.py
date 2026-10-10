@@ -41,7 +41,18 @@ class InsiderService:
 
     def status(self) -> dict:
         return {"running": self.running, "started_at": self.started_at, "error": self.error,
-                "progress": list(self.log), "can_run": bool(self.key), "result": light(self.result)}
+                "progress": list(self.log), "can_run": bool(self.key), "result": light(self.result),
+                "watch": self.watcher.status() if getattr(self, "watcher", None) else None}
+
+    def start_watch(self, state_path: Path) -> bool:
+        """Start the 5-minute deployer watch in a daemon thread (public RPC; no key needed)."""
+        if getattr(self, "watcher", None) or not self.result:
+            return False
+        from insiders.watch import Watcher
+        self.watcher = Watcher(self.result, state_path)
+        self.watch_stop = threading.Event()
+        threading.Thread(target=self.watcher.run_forever, args=(self.watch_stop,), daemon=True).start()
+        return True
 
     def start(self, runner=None) -> bool:
         """Start a scan unless one is running. Returns False when it cannot start."""

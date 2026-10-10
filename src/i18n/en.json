@@ -1089,5 +1089,22 @@
  "web.ins.pnl_in_out": "In / out (SOL)",
  "web.ins.pnl_wins": "Wins / coins",
  "web.ins.pnl_why": "Why listed",
- "web.ins.to_cex": "sent tokens to"
+ "web.ins.to_cex": "sent tokens to",
+ "web.ins.watch": "Deployer watch (every 5 min)",
+ "web.ins.watch_off": "The watch is not running on the server.",
+ "web.ins.watch_note": "Watching {n} wallets + {k} new wallets they funded (72 h). {p} polls. Alerts when they create a coin, buy / receive a coin < 24 h old, or fund a new wallet.",
+ "web.ins.watch_last": "last poll",
+ "web.ins.when": "When",
+ "web.ins.event": "Event",
+ "web.ins.coin_or_wallet": "Coin / funded wallet",
+ "web.ins.by": "Watched wallet",
+ "web.ins.ev.create": "created a coin",
+ "web.ins.ev.buy": "bought a new coin",
+ "web.ins.ev.receive": "received a new coin",
+ "web.ins.ev.fund": "funded a new wallet",
+ "web.ins.lv.strong": "STRONG",
+ "web.ins.lv.high": "high",
+ "web.ins.lv.medium": "note",
+ "web.ins.lv.watch": "watch",
+ "web.ins.lv.info": "info"
 }
