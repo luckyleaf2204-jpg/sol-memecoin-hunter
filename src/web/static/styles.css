@@ -334,3 +334,23 @@ details.grp .cards { margin-top: 8px; }
 .tblw { overflow-x: auto; max-width: 100%; }
 .tbl { border-collapse: collapse; width: 100%; font-size: 12px; white-space: nowrap; }
 .tbl th, .tbl td { padding: 3px 6px; border-bottom: 1px solid var(--line, rgba(127,127,127,.2)); text-align: left; }
+
+/* insiders page */
+.ins-wrap { overflow-x: auto; margin: 6px 0 14px; -webkit-overflow-scrolling: touch; }
+table.ins { width: 100%; border-collapse: collapse; font-size: 12px; }
+table.ins th { text-align: left; font-weight: 600; color: var(--muted); padding: 6px 8px; border-bottom: 1px solid var(--border); white-space: nowrap; }
+table.ins td { padding: 6px 8px; border-bottom: 1px solid var(--border); vertical-align: top; }
+table.ins td.num { text-align: right; white-space: nowrap; font-variant-numeric: tabular-nums; }
+table.ins td.small { min-width: 140px; }
+.mono { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
+.copy { cursor: pointer; opacity: 0.6; }
+details.ev { margin-top: 4px; }
+details.ev summary { cursor: pointer; color: var(--accent); font-size: 11px; }
+details.ev div { padding: 2px 0; }
+@media (max-width: 600px) {
+  table.ins thead { display: none; }
+  table.ins tr { display: block; border-bottom: 1px solid var(--border); padding: 6px 0; }
+  table.ins td { display: block; border: 0; padding: 2px 4px; text-align: left !important; min-width: 0 !important; }
+  table.ins td[data-l]:not(:first-child)::before { content: attr(data-l) ": "; color: var(--muted); font-size: 11px; }
+  .ins-wrap { overflow-x: visible; }
+}

@@ -560,7 +560,7 @@ function renderMore() {
   $("#view").innerHTML = `<h1>${esc(t("web.nav.more"))}</h1><div class="menu">
     ${item("#/top", "web.title.top")}${item("#/list/whales", "tab.whales")}${item("#/list/dev", "tab.dev")}${item("#/list/social", "tab.social")}
     ${item("#/narrative", "tab.narrative")}${item("#/events", "lbl.live_events")}${item("#/smart", "tab.smart_money", true)}
-    ${item("#/status", "web.title.status")}
+    ${item("#/insiders", "web.title.insiders")}${item("#/status", "web.title.status")}
     <button id="logout"><span>${esc(t("web.login.change"))}</span><span>›</span></button>
   </div><div class="disclaimer">${esc(t("app.disclaimer"))}</div>`;
   $("#logout").onclick = () => { LS.del("accessCode"); S.code = ""; showLogin(""); };
@@ -1130,6 +1130,62 @@ function showLogin(err) {
   $("#code").onkeydown = (e) => { if (e.key === "Enter") go(); };
 }
 
+/* ---------------------------------------------------------------- insiders (call channel scan) */
+function acct(a) {
+  return `<a class="mono" href="https://solscan.io/account/${esc(a)}" target="_blank" rel="noopener">${esc(short(a))}</a> <span class="copy" data-copy="${esc(a)}">⧉</span>`;
+}
+function tks(list, names) { return (list || []).map((m) => esc(names[m] || short(m))).join(", "); }
+function insTable(head, rows) {
+  return rows.length ? `<div class="ins-wrap"><table class="ins"><thead><tr>${head.map((h) => `<th>${esc(h)}</th>`).join("")}</tr></thead><tbody>${rows.join("")}</tbody></table></div>`
+    : `<div class="empty">${esc(t("common.none"))}</div>`;
+}
+async function renderInsiders(silent) {
+  const view = $("#view");
+  if (!silent) view.innerHTML = `<h1>${esc(t("web.title.insiders"))}</h1><div id="ins"><div class="spin">${esc(t("web.loading"))}</div></div>`;
+  let d;
+  try { d = await api("/api/insiders"); } catch (e) { if (!silent) $("#ins").textContent = t("web.error"); return; }
+  S.insRunning = d.running;
+  const r = d.result, names = (r && r.tickers) || {};
+  const runBtn = d.can_run ? `<button class="btn" id="insRun" ${d.running ? "disabled" : ""}>${esc(d.running ? t("web.ins.running") : t("web.ins.run"))}</button>` : `<span class="c-muted small">${esc(t("web.ins.no_key"))}</span>`;
+  const prog = d.running || d.error ? `<div class="muted small mono">${esc((d.progress || []).slice(-4).join(" · "))}</div>${d.error ? `<div class="c-red small">${esc(d.error)}</div>` : ""}` : "";
+  if (!r) { $("#ins").innerHTML = `<div class="token-head">${runBtn}${prog}</div><div class="empty">${esc(t("web.ins.empty"))}</div>`; bindIns(); return; }
+  const toks = r.tokens || [], okT = toks.filter((x) => x.status === "ok");
+  const stat = {}; toks.forEach((x) => { const k = x.status.startsWith("error") ? "error" : x.status; stat[k] = (stat[k] || 0) + 1; });
+  const ents = r.entities || [];
+  const real = ents.filter((e) => !e.hub), hubs = ents.filter((e) => e.hub);
+  const ev = (e) => (e.evidence || []).length ? `<details class="ev"><summary>${esc(t("web.ins.evidence"))} (${e.evidence.length})</summary>${e.evidence.map((x) =>
+    `<div class="small">${acct(x.wallet)} ${x.from_sol ? "← " + x.from_sol + " SOL" : ""}${x.in_sol ? "→ " + x.in_sol + " SOL" : ""} · ${(x.roles || []).map((r) =>
+      esc(names[r[0]] || short(r[0])) + " " + (r[1] === "deployer" ? esc(t("web.ins.deployer")) : "#" + r[1]) + (r[2] ? "" : " (" + esc(t("web.ins.after")) + ")")).join(", ")}</div>`).join("")}</details>` : "";
+  const entRow = (e) => `<tr><td>${acct(e.address)}${e.label ? ` <span class="pill ${e.kind === "exchange" ? "" : "ok"}">${esc(e.label)}</span>` : ""}${e.is_insider_wallet ? ` <span class="pill">${esc(t("web.ins.also_insider"))}</span>` : ""}</td><td class="num"><b>${e.n_tokens}</b></td>
+    <td class="num">${e.funded_wallets} / ${e.funded_sol}</td><td class="num">${e.received_from_wallets} / ${e.received_sol}</td><td class="small">${tks(e.tokens, names)}${ev(e)}</td></tr>`;
+  const ehead = [t("web.ins.addr"), t("web.ins.n_tokens"), t("web.ins.funded"), t("web.ins.received"), t("web.ins.tokens")];
+  // n_wallets >= 2 is applied by the server
+  $("#ins").innerHTML = `<div class="token-head">
+      <div class="kv"><span class="k">${esc(t("web.ins.scanned"))}</span><span class="v">${okT.length} / ${toks.length} (${esc(Object.entries(stat).map(([k, v]) => k + " " + v).join(", "))})</span></div>
+      <div class="kv"><span class="k">${esc(t("web.ins.generated"))}</span><span class="v">${esc(r.generated_at)} · RPC ${r.rpc_calls} · ${esc(t("web.ins.traced"))} ${r.traced_wallets}</span></div>
+      ${runBtn}${prog}</div>
+    <div class="disclaimer">${esc(t("web.ins.how"))}</div>
+    <h2>${esc(t("web.ins.behind"))}</h2>${insTable(ehead, real.slice(0, 40).map(entRow))}
+    <h2>${esc(t("web.ins.hop2"))}</h2>${insTable([t("web.ins.addr"), t("web.ins.n_tokens"), t("web.ins.children"), t("web.ins.tokens")],
+      (r.hop2_parents || []).slice(0, 25).map((p) => `<tr><td>${acct(p.address)}</td><td class="num"><b>${p.n_tokens}</b></td><td class="num">${p.n_children}</td><td class="small">${tks(p.tokens, names)}</td></tr>`))}
+    <h2>${esc(t("web.ins.repeat"))}</h2>${insTable([t("web.ins.addr"), t("web.ins.n_tokens"), t("web.ins.pre_call"), t("web.ins.deployer"), t("web.ins.tokens")],
+      (r.repeat_wallets || []).slice(0, 60).map((w) => `<tr><td>${acct(w.wallet)}${w.bot_like ? ` <span class="pill warn">${esc(t("web.ins.bot"))}</span>` : ""}</td><td class="num"><b>${w.n_tokens}</b></td><td class="num">${w.n_pre_call}</td><td class="small">${tks(w.deployer_of, names)}</td><td class="small">${tks(w.tokens, names)}</td></tr>`))}
+    <h2>${esc(t("web.ins.hubs"))}</h2><div class="muted small">${esc(t("web.ins.hubs_note"))}</div>${insTable(ehead, hubs.slice(0, 30).map(entRow))}
+    <h2>${esc(t("web.ins.token_list"))}</h2>${insTable([t("web.ins.token"), t("web.ins.call"), t("web.ins.created"), t("web.ins.deployer"), t("web.ins.buyers")],
+      toks.map((x) => `<tr><td>${esc(x.ticker || short(x.mint))} <span class="copy" data-copy="${esc(x.mint)}">⧉</span></td><td class="small">${esc(new Date(x.call_ts * 1000).toLocaleString("vi-VN"))}</td>
+        <td class="small">${x.created_ts ? esc(new Date(x.created_ts * 1000).toLocaleString("vi-VN")) : esc(x.status)}</td><td>${x.deployer ? acct(x.deployer) : "—"}</td>
+        <td class="num">${x.n_buyers ?? 0} (${x.n_pre_call ?? 0} ${esc(t("web.ins.before"))})</td></tr>`))}`;
+  bindIns();
+}
+function bindIns() {
+  document.querySelectorAll("table.ins").forEach((tb) => {   // label each cell for the narrow-screen card layout
+    const hs = [...tb.querySelectorAll("th")].map((h) => h.textContent);
+    tb.querySelectorAll("tbody tr").forEach((tr) => [...tr.children].forEach((td, i) => { td.dataset.l = hs[i] || ""; }));
+  });
+  const b = $("#insRun");
+  if (b) b.onclick = async () => { b.disabled = true; try { await api("/api/insiders/run", { method: "POST" }); toast(t("web.ins.started")); } catch (e) { toast(t("web.error")); } renderInsiders(true); };
+}
+
 /* ---------------------------------------------------------------- router + polling */
 function stopPoll() { clearInterval(S.timer); S.timer = null; }
 function startPoll(fn, ms) {
@@ -1161,6 +1217,7 @@ function route() {
   if (p0 === "watch") { setTab("watch"); renderWatch(); startPoll(() => renderWatch(true), POLL.watch); return; }
   if (p0 === "narrative") { setTab("more"); renderNarrative(); stopPoll(); return; }
   if (p0 === "events") { setTab("more"); renderEvents(); startPoll(() => renderEvents(true), POLL.events); return; }
+  if (p0 === "insiders") { setTab("more"); renderInsiders(); startPoll(() => { if (S.insRunning) renderInsiders(true); }, 5000); return; }
   if (p0 === "status") { setTab("more"); renderStatus(); startPoll(() => renderStatus(true), POLL.status); return; }
   if (p0 === "smart") { setTab("more"); $("#view").innerHTML = `<h1>${esc(t("tab.smart_money"))}</h1><div class="token-head">${esc(t("na.smart_money"))}</div><div class="disclaimer">${esc(t("na.rule"))}</div>`; stopPoll(); return; }
   setTab("more"); renderMore(); stopPoll();

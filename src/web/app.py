@@ -489,6 +489,18 @@ def create_app(engine: ScannerEngine | None = None, start_scanner: bool = True,
         shadow = state.get("shadow")
         return shadow.status() if shadow else JSONResponse({"error": "shadow_not_started"}, status_code=503)
 
+    @app.get("/api/insiders")
+    async def insiders_api():
+        """Insider scan of the call channel's tokens (research only; the Helius key stays on the server)."""
+        return _insiders().status()
+
+    @app.post("/api/insiders/run")
+    async def insiders_run():
+        svc = _insiders()
+        if not svc.key:
+            return JSONResponse({"error": "helius_key_missing"}, status_code=503)
+        return {"started": svc.start(), "running": svc.running}
+
     @app.get("/api/research/summary")
     async def research_summary():
         r = state["bot"].recorder if state["bot"] else None
@@ -576,6 +588,17 @@ def create_app(engine: ScannerEngine | None = None, start_scanner: bool = True,
 
     app.mount("/static", StaticFiles(directory=STATIC), name="static")
     return app
+
+
+_INSIDERS = None
+
+
+def _insiders():
+    global _INSIDERS
+    if _INSIDERS is None:
+        from insiders.service import InsiderService
+        _INSIDERS = InsiderService()
+    return _INSIDERS
 
 
 def _static_file(name: str, mime: str):
