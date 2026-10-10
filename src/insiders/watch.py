@@ -30,6 +30,8 @@ FUND_MIN_LAMPORTS = 500_000_000
 CHILD_TTL_S = 72 * 3600
 MAX_NEW_TX = 25                  # per wallet per poll (a busy wallet is summarised, not replayed)
 MAX_ALERTS = 600
+B_SLICES = 6                     # tier B is checked one sixth per poll: every wallet about every 30 minutes
+BOT_NEW_COINS = 4                # a wallet touching >= 4 different new coins in 24 h is a sniper bot: muted
 
 
 class Rpc:
@@ -58,6 +60,34 @@ class Rpc:
                     self.errors += 1
                     raise RuntimeError(f"{type(e).__name__}") from None
                 self.sleep(2 * 2 ** k)
+
+
+def watch_tiers(result: dict) -> tuple[dict[str, str], dict[str, str]]:
+    """(tier A every poll, tier B in rotation). A: cluster funders, wallets linked to the extra coins, the extra coins'
+    deployers + non-bot early wallets, wallets that sold for deployers, profitable wallets. B: the old coins'
+    deployers and non-bot early wallets."""
+    a = watch_list(result)
+    tick = result.get("tickers", {})
+    ex = result.get("extra") or {}
+    for c in ex.get("coins", []):
+        if c.get("deployer"):
+            a.setdefault(c["deployer"], f"deployer {c['ticker']} (new list)")
+        for b in c.get("buyers", [])[:40]:
+            if not b.get("bot"):
+                a.setdefault(b["wallet"], f"early #{b['rank']} {c['ticker']} (new list)")
+    for l in ex.get("links", []):
+        if l.get("kind") not in ("exchange", "fee", "deposit"):
+            a.setdefault(l["address"], f"linked to {', '.join(l['new_coins'][:3])}")
+    bots = {w["wallet"] for w in result.get("repeat_wallets", []) if w.get("bot_like")}
+    b: dict[str, str] = {}
+    for t in result.get("tokens", []):
+        if t.get("status") != "ok":
+            continue
+        for x in sorted(t.get("buyers") or [], key=lambda x: (not x.get("pre_call"), x.get("rank", 0)))[:15]:
+            if x["wallet"] not in bots and x["wallet"] not in a:
+                b.setdefault(x["wallet"], f"early #{x['rank']} {tick.get(t['mint']) or t['mint'][:6]}")
+    ok = lambda w: KNOWN_LABELS.get(w, (None, None))[1] not in ("exchange", "fee") and on_curve(w)  # noqa: E731
+    return {w: v for w, v in a.items() if ok(w)}, {w: v for w, v in b.items() if ok(w) and w not in a}
 
 
 def watch_list(result: dict, top_profit: int = 40) -> dict[str, str]:
@@ -132,13 +162,14 @@ def analyse(tx: dict, wallet: str) -> list[dict]:
 
 class Watcher:
     def __init__(self, result: dict, state_path: Path, rpc=None, now=time.time, old_mints: set | None = None):
-        self.base = watch_list(result)
-        self.old = old_mints if old_mints is not None else {t["mint"] for t in result.get("tokens", [])}
+        self.base, self.tier_b = watch_tiers(result)
+        self.old = old_mints if old_mints is not None else (
+            {t["mint"] for t in result.get("tokens", [])} | {c["mint"] for c in (result.get("extra") or {}).get("coins", [])})
         self.tickers = result.get("tickers", {})
         self.path, self.rpc, self.now = Path(state_path), rpc or Rpc(), now
         self.lock = threading.Lock()
         self.state = {"last_sig": {}, "children": {}, "alerts": [], "mint_age": {}, "polls": 0, "last_poll": None,
-                      "last_error": None}
+                      "last_error": None, "muted": {}}
         try:
             self.state.update(json.loads(self.path.read_text(encoding="utf-8")))
         except (OSError, ValueError):
@@ -166,6 +197,9 @@ class Watcher:
     def poll_once(self, progress=lambda m: None) -> list[dict]:
         new_alerts = []
         watched = self.wallets()
+        keys_b = sorted(self.tier_b)
+        k = self.state["polls"] % B_SLICES
+        watched.update({w: self.tier_b[w] for w in keys_b[k::B_SLICES] if w not in self.state.get("muted", {})})
 
         def one(item):
             w, why = item
@@ -219,18 +253,36 @@ class Watcher:
             self.state["children"][ev["to"]] = {"parent": ev["wallet"], "since": self.now(), "why": why[:40]}
             return {**ev, "level": "watch", "note": "now watched for 72 h"}
         mint = ev["mint"]
+        if ev["wallet"] in self.state.setdefault("muted", {}):
+            return None
         if mint in self.old:
             return None if ev["kind"] != "CREATE" else {**ev, "level": "info", "ticker": self.tickers.get(mint)}
         age = self._mint_age(mint)
         if ev["kind"] != "CREATE" and (age is None or age > NEW_COIN_S):
             return None                                       # an old / established coin: not a launch
+        if ev["kind"] != "CREATE" and self._is_bot(ev["wallet"], mint):
+            return None
         return {**ev, "age_h": None if age is None else round(age / 3600, 2),
                 "level": "high" if ev["kind"] == "CREATE" else "medium"}
+
+    def _is_bot(self, wallet: str, mint: str) -> bool:
+        """A wallet buying >= BOT_NEW_COINS different new coins within 24 h snipes everything: mute it."""
+        now = self.now()
+        seen = self.state.setdefault("new_by_wallet", {}).setdefault(wallet, {})
+        seen[mint] = now
+        for m in [m for m, t in seen.items() if now - t > NEW_COIN_S]:
+            del seen[m]
+        if len(seen) >= BOT_NEW_COINS:
+            self.state["muted"][wallet] = now
+            return True
+        return False
 
     def _strong(self, new_alerts: list[dict]) -> None:
         """>= 2 watched wallets on the same new coin within 24 h -> STRONG."""
         now = self.now()
-        recent = [a for a in new_alerts + self.state["alerts"] if a.get("mint") and now - (a.get("ts") or now) < NEW_COIN_S]
+        muted = self.state.get("muted", {})
+        recent = [a for a in new_alerts + self.state["alerts"] if a.get("mint") and now - (a.get("ts") or now) < NEW_COIN_S
+                  and a["wallet"] not in muted]
         by_mint = defaultdict(set)
         for a in recent:
             if a["kind"] in ("CREATE", "BUY", "RECEIVE"):
@@ -251,6 +303,7 @@ class Watcher:
         with self.lock:
             return {"polls": self.state["polls"], "last_poll": self.state["last_poll"],
                     "watched": self.state.get("watched", len(self.base)), "every_s": EVERY_S,
+                    "tier_a": len(self.base), "tier_b": len(self.tier_b), "muted": len(self.state.get("muted", {})),
                     "children": len(self.state["children"]), "last_error": self.state["last_error"],
                     "rpc_calls": self.state.get("rpc_calls"), "last_poll_s": self.state.get("last_poll_s"),
                     "alerts": self.state["alerts"][:200]}

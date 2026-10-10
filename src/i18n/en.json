@@ -1106,5 +1106,15 @@
  "web.ins.lv.high": "high",
  "web.ins.lv.medium": "note",
  "web.ins.lv.watch": "watch",
- "web.ins.lv.info": "info"
+ "web.ins.lv.info": "info",
+ "web.ins.extra": "New coins (extra list) and linked wallets",
+ "web.ins.extra_note": "{n} coins with a CA. Deployer + 40 early wallets each (bots flagged); SOL traced 4 hops from {s} non-bot wallets, {r} addresses reached.",
+ "web.ins.by_ticker": "CA guessed from the ticker",
+ "web.ins.old_wallets": "old wallets",
+ "web.ins.shilled": "First shilled",
+ "web.ins.extra_links": "Wallets linking the new coins to the old group (or to >= 2 new coins)",
+ "web.ins.new_coins": "New coins linked",
+ "web.ins.old_roles": "Role in the 95 old coins",
+ "web.ins.old_lead": "old lead: {n} coins",
+ "web.ins.tiers": "tier A {a} wallets every 5 min, tier B {b} wallets in rotation ~30 min, {m} bots muted"
 }

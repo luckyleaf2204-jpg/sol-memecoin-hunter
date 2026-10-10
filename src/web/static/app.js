@@ -1166,6 +1166,7 @@ async function renderInsiders(silent) {
       ${runBtn}${prog}</div>
     <div class="disclaimer">${esc(t("web.ins.how"))}</div>
     <div id="insWatch">${watchHtml(d.watch, names)}</div>
+    ${extraHtml(r.extra, names)}
     ${pnlHtml(r.pnl, names)}
     ${deepHtml(r.deep, names)}
     <h2>${esc(t("web.ins.behind"))}</h2>${insTable(ehead, real.slice(0, 40).map(entRow))}
@@ -1199,8 +1200,25 @@ function watchHtml(w, names) {
     <td>${a.mint ? coin(a.mint) : acct(a.to)}${a.age_h !== undefined && a.age_h !== null ? ` <span class="c-muted small">${a.age_h} h</span>` : ""}</td>
     <td class="num">${a.sol || ""}</td><td>${acct(a.wallet)}<div class="muted small">${esc(a.why || "")}</div></td></tr>`);
   return `<h2>${esc(t("web.ins.watch"))}</h2><div class="muted small">${esc(t("web.ins.watch_note", { n: w.watched, k: w.children, p: w.polls }))}
+    ${w.tier_a ? " · " + esc(t("web.ins.tiers", { a: w.tier_a, b: w.tier_b, m: w.muted || 0 })) : ""}
     ${w.last_poll ? " · " + esc(t("web.ins.watch_last")) + " " + esc(new Date(w.last_poll * 1000).toLocaleTimeString("vi-VN")) + (w.last_poll_s ? ` (${w.last_poll_s}s)` : "") : ""}</div>
     ${insTable([t("web.ins.when"), t("web.ins.event"), t("web.ins.coin_or_wallet"), "SOL", t("web.ins.by")], rows)}`;
+}
+function extraHtml(x, names) {
+  if (!x) return "";
+  const coins = (x.coins || []).map((c) => {
+    const nb = (c.buyers || []).length, bots = (c.buyers || []).filter((b) => b.bot).length, old = (c.buyers || []).filter((b) => (b.old || []).length).length;
+    return `<tr><td><b>${esc(c.ticker)}</b> <span class="copy" data-copy="${esc(c.mint)}">⧉</span>${c.resolved === "resolved by ticker" ? ` <span class="pill warn">${esc(t("web.ins.by_ticker"))}</span>` : ""}</td>
+      <td class="small">${c.created_ts ? esc(new Date(c.created_ts * 1000).toLocaleString("vi-VN")) : "—"}</td><td class="small">${esc(c.shilled_first || "")}</td>
+      <td>${c.deployer ? acct(c.deployer) : "—"}</td><td class="num">${nb} (${bots} bot, ${old} ${esc(t("web.ins.old_wallets"))})</td></tr>`;
+  });
+  const lab = (l) => (l.label ? ` <span class="pill ok">${esc(l.label)}</span>` : "") + (l.old_lead_coins ? ` <span class="pill bad">${esc(t("web.ins.old_lead", { n: l.old_lead_coins }))}</span>` : "");
+  const links = (x.links || []).slice(0, 40).map((l) => `<tr><td>${acct(l.address)}${lab(l)}</td><td class="small"><b>${esc(l.new_coins.join(", "))}</b></td>
+    <td class="small">${esc((l.old_roles || []).join(", "))}</td><td class="num">${esc([l.hop_back !== null && l.hop_back !== undefined ? "←" + l.hop_back : "", l.hop_fwd ? "→" + l.hop_fwd : ""].filter(Boolean).join(" "))}</td>
+    <td class="small"><details class="ev"><summary>${esc(t("web.ins.paths"))}</summary>${(l.paths || []).map((p) => `<div class="small"><b>${esc(p.token)}</b>: ${moneyPath(p.path)}</div>`).join("")}</details></td></tr>`);
+  return `<h2>${esc(t("web.ins.extra"))}</h2><div class="muted small">${esc(t("web.ins.extra_note", { n: (x.coins || []).length, s: x.roots, r: x.reached }))}</div>
+    ${insTable([t("web.ins.token"), t("web.ins.created"), t("web.ins.shilled"), t("web.ins.deployer"), t("web.ins.buyers")], coins)}
+    <h3>${esc(t("web.ins.extra_links"))}</h3>${insTable([t("web.ins.addr"), t("web.ins.new_coins"), t("web.ins.old_roles"), t("web.ins.hops"), ""], links)}`;
 }
 function sol(v) { return v === null || v === undefined ? "—" : `<span class="${v > 0 ? "c-green" : v < 0 ? "c-red" : ""}">${v > 0 ? "+" : ""}${Number(v).toLocaleString("vi-VN", { maximumFractionDigits: 1 })}</span>`; }
 function pnlHtml(p, names) {

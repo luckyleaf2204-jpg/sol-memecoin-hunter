@@ -1106,5 +1106,15 @@
  "web.ins.lv.high": "cao",
  "web.ins.lv.medium": "chú ý",
  "web.ins.lv.watch": "theo dõi",
- "web.ins.lv.info": "thông tin"
+ "web.ins.lv.info": "thông tin",
+ "web.ins.extra": "Coin mới (danh sách bổ sung) và ví liên quan",
+ "web.ins.extra_note": "{n} coin có CA. Deployer + 40 ví sớm mỗi coin (đánh dấu bot), lần SOL 4 bước từ {s} ví không phải bot, chạm {r} địa chỉ.",
+ "web.ins.by_ticker": "CA đoán theo ticker",
+ "web.ins.old_wallets": "ví cũ",
+ "web.ins.shilled": "Shill lần đầu",
+ "web.ins.extra_links": "Ví nối coin mới với nhóm cũ (hoặc với ≥ 2 coin mới)",
+ "web.ins.new_coins": "Coin mới liên quan",
+ "web.ins.old_roles": "Vai trò ở 95 coin cũ",
+ "web.ins.old_lead": "ví mẹ cũ: {n} coin",
+ "web.ins.tiers": "nhóm A {a} ví mỗi 5 phút, nhóm B {b} ví luân phiên ~30 phút, đã tắt {m} ví bot"
 }

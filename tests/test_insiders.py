@@ -376,3 +376,24 @@ def test_funding_a_fresh_wallet_adds_it_to_the_watch_for_72h(tmp_path):
     assert al[0]["kind"] == "FUND" and BOSS in w.wallets()
     w.now = lambda: 2_000.0 + WT.CHILD_TTL_S + 1
     assert BOSS not in w.wallets()
+
+
+def test_tier_b_rotates_and_snipers_are_muted(tmp_path):
+    r = {"tokens": [{"mint": MINT, "status": "ok", "deployer": WALLET,
+                     "buyers": [{"wallet": w, "rank": i, "pre_call": True} for i, w in enumerate([CEX, BOSS, SINK], 1)]}],
+         "tickers": {}}
+    asked = []
+
+    def rpc(method, params):
+        asked.append(params[0])
+        return []
+    w = WT.Watcher(r, tmp_path / "w.json", rpc=rpc, now=lambda: 2_000.0)
+    assert set(w.base) == {WALLET} and set(w.tier_b) == {CEX, BOSS, SINK}
+    w.poll_once()
+    assert asked.count(WALLET) == 1 and len(set(asked) & {CEX, BOSS, SINK}) == 1      # one slice of tier B
+    for _ in range(WT.B_SLICES - 1):
+        w.poll_once()
+    assert asked.count(WALLET) == WT.B_SLICES and set(asked) >= {CEX, BOSS, SINK}   # all of B within B_SLICES polls
+    for i in range(WT.BOT_NEW_COINS):
+        muted = w._is_bot(CEX, f"m{i}")
+    assert muted and CEX in w.state["muted"]
