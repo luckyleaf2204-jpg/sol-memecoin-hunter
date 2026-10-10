@@ -1221,7 +1221,20 @@ function watchHtml(w, names) {
     · ${esc(t(w.telegram ? "web.ins.tg_on" : "web.ins.tg_off", { n: w.notified || 0 }))}
     ${"Notification" in window && Notification.permission !== "granted" ? `<button class="btn" id="insNotify">${esc(t("web.ins.enable_notif"))}</button>` : ""}
     ${w.last_poll ? " · " + esc(t("web.ins.watch_last")) + " " + esc(new Date(w.last_poll * 1000).toLocaleTimeString("vi-VN")) + (w.last_poll_s ? ` (${w.last_poll_s}s)` : "") : ""}</div>
-    ${insTable([t("web.ins.when"), t("web.ins.event"), t("web.ins.coin_or_wallet"), "SOL", t("web.ins.by")], rows)}`;
+    ${insTable([t("web.ins.when"), t("web.ins.event"), t("web.ins.coin_or_wallet"), "SOL", t("web.ins.by")], rows)}
+    ${paperHtml(w.paper, names)}`;
+}
+function paperHtml(p, names) {
+  if (!p) return "";
+  const s = p.summary || {}, pct = (v, base) => v === null || v === undefined ? "—" : sol(Math.round(1000 * (v / base - 1)) / 10) + "%";
+  const marks = ["15m", "1h", "6h", "24h"];
+  const sumRow = marks.map((k) => { const m = (s.marks || {})[k]; return m ? `<td class="num">${sol(m.avg_pct)}% <span class="c-muted small">(${m.wins}/${m.n} ${esc(t("web.ins.paper_wins"))}, ${sol(m.pnl_usd)} $)</span></td>` : `<td class="num">—</td>`; }).join("");
+  const rows = (p.rows || []).map((x) => `<tr><td>${x.mint ? `<a class="mono" href="https://dexscreener.com/solana/${esc(x.mint)}" target="_blank" rel="noopener">${esc(names[x.mint] || short(x.mint))}</a>` : ""}<div class="muted small">${esc(new Date(x.opened * 1000).toLocaleString("vi-VN"))}${x.n_wallets ? " · ×" + x.n_wallets : ""}</div></td>
+    <td class="num">${x.status === "no_route" ? esc(t("web.ins.paper_noroute")) : pct(x.entry_value, x.usd)}</td>${marks.map((k) => `<td class="num">${pct((x.marks || {})[k], x.usd)}</td>`).join("")}
+    <td class="num">${pct(x.peak, x.usd)} / ${pct(x.trough, x.usd)}</td><td class="small">${esc(t("web.ins.paper_" + x.status))}</td></tr>`);
+  return `<h3>${esc(t("web.ins.paper", { usd: s.usd || 500 }))}</h3><div class="muted small">${esc(t("web.ins.paper_note"))}</div>
+    ${insTable([t("web.ins.paper_marks"), ...marks.map((k) => "+" + k)], [`<tr><td>${esc(t("web.ins.paper_avg", { n: s.positions || 0 }))}</td>${sumRow}</tr>`])}
+    ${insTable([t("web.ins.token"), t("web.ins.paper_instant"), ...marks.map((k) => "+" + k), t("web.ins.paper_peak"), ""], rows)}`;
 }
 function treeNode(n, dir, level) {
   const kids = n.c || [];

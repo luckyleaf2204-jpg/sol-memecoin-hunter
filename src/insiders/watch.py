@@ -163,7 +163,7 @@ def analyse(tx: dict, wallet: str) -> list[dict]:
 
 class Watcher:
     def __init__(self, result: dict, state_path: Path, rpc=None, now=time.time, old_mints: set | None = None,
-                 notify=None, notify_levels: tuple = ("strong",)):
+                 notify=None, notify_levels: tuple = ("strong",), paper_quote=None):
         self.base, self.tier_b = watch_tiers(result)
         self.old = old_mints if old_mints is not None else (
             {t["mint"] for t in result.get("tokens", [])} | {c["mint"] for c in (result.get("extra") or {}).get("coins", [])})
@@ -177,6 +177,8 @@ class Watcher:
             self.state.update(json.loads(self.path.read_text(encoding="utf-8")))
         except (OSError, ValueError):
             pass
+        from insiders.paper import PaperBook
+        self.paper = PaperBook(self.state, quote=paper_quote, now=now) if paper_quote else None
 
     def wallets(self) -> dict[str, str]:
         now = self.now()
@@ -247,6 +249,15 @@ class Watcher:
             self.state["last_poll"] = self.now()
             self.state["watched"] = len(watched)
             self.state["rpc_calls"] = getattr(self.rpc, "calls", None)
+        if self.paper:                                      # $500 paper position per STRONG coin, then valuation
+            try:
+                for a in new_alerts:
+                    p = self.paper.open(a)
+                    if p:
+                        a["paper"] = p["status"]
+                self.paper.update()
+            except Exception as e:                           # quotes failing never stop the watch
+                self.state["last_error"] = f"paper: {type(e).__name__}"
         self.save()
         self._send(new_alerts)
         progress(f"[insider-watch] poll {self.state['polls']}: {len(watched)} wallets, {len(new_alerts)} alerts")
@@ -329,6 +340,7 @@ class Watcher:
                     "tier_a": len(self.base), "tier_b": len(self.tier_b), "muted": len(self.state.get("muted", {})),
                     "telegram": bool(self.notify), "notify_levels": sorted(self.notify_levels),
                     "notified": self.state.get("notified", 0),
+                    "paper": {"summary": self.paper.summary(), "rows": self.paper.rows(60)} if self.paper else None,
                     "children": len(self.state["children"]), "last_error": self.state["last_error"],
                     "rpc_calls": self.state.get("rpc_calls"), "last_poll_s": self.state.get("last_poll_s"),
                     "alerts": self.state["alerts"][:200]}
@@ -369,6 +381,10 @@ def alert_text(a: dict, tickers: dict | None = None) -> str:
         lines.append(f"SOL: {a['sol']}")
     lines.append(f"Ví: <code>{a['wallet']}</code> ({escape(a.get('why') or '')})")
     lines.append(f'<a href="https://solscan.io/tx/{a.get("sig")}">giao dịch</a>')
+    if a.get("paper") == "open":
+        lines.append("📄 Paper: đã vào lệnh giả $500 (theo dõi 24 giờ trên dashboard)")
+    elif a.get("paper") == "no_route":
+        lines.append("📄 Paper: Jupiter chưa có route mua coin này")
     return "\n".join(lines)
 
 

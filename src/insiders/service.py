@@ -51,8 +51,10 @@ class InsiderService:
         from insiders.watch import Watcher, telegram_sender
         tok, chat = os.environ.get("TELEGRAM_BOT_TOKEN"), os.environ.get("TELEGRAM_CHAT_ID")
         levels = tuple(x for x in (os.environ.get("INSIDER_ALERT_LEVELS") or "strong").split(",") if x)
+        from insiders.paper import jupiter_quote
         self.watcher = Watcher(self.result, state_path, notify=telegram_sender(tok, chat) if tok and chat else None,
-                               notify_levels=levels)
+                               notify_levels=levels,
+                               paper_quote=jupiter_quote if (os.environ.get("INSIDER_PAPER") or "1") != "0" else None)
         self.watch_stop = threading.Event()
         threading.Thread(target=self.watcher.run_forever, args=(self.watch_stop,), daemon=True).start()
         return True

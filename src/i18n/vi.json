@@ -1130,5 +1130,16 @@
  "web.ins.tree_flows_to": "Tiền chảy tiếp về:",
  "web.ins.tg_on": "Telegram: BẬT (đã gửi {n})",
  "web.ins.tg_off": "Telegram: chưa bật (cần TELEGRAM_BOT_TOKEN + TELEGRAM_CHAT_ID trên Render)",
- "web.ins.enable_notif": "Bật thông báo trên máy này"
+ "web.ins.enable_notif": "Bật thông báo trên máy này",
+ "web.ins.paper": "Paper: vào ${usd} mỗi báo động MẠNH",
+ "web.ins.paper_note": "Giá mua / bán từ báo giá thật của Jupiter cho đúng cỡ lệnh (gồm trượt giá), trừ ~$1 phí. Không tính độ trễ khớp lệnh thật. Cột = lãi/lỗ nếu bán ở mốc đó.",
+ "web.ins.paper_marks": "Trung bình",
+ "web.ins.paper_avg": "{n} lệnh",
+ "web.ins.paper_wins": "lời",
+ "web.ins.paper_instant": "Bán ngay (chi phí vào/ra)",
+ "web.ins.paper_peak": "Đỉnh / đáy",
+ "web.ins.paper_open": "đang giữ",
+ "web.ins.paper_closed": "đã đóng (24 giờ)",
+ "web.ins.paper_no_route": "không mua được",
+ "web.ins.paper_noroute": "không có route"
 }

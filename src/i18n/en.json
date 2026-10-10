@@ -1130,5 +1130,16 @@
  "web.ins.tree_flows_to": "Money flows on to:",
  "web.ins.tg_on": "Telegram: ON ({n} sent)",
  "web.ins.tg_off": "Telegram: off (needs TELEGRAM_BOT_TOKEN + TELEGRAM_CHAT_ID on Render)",
- "web.ins.enable_notif": "Enable notifications on this device"
+ "web.ins.enable_notif": "Enable notifications on this device",
+ "web.ins.paper": "Paper: ${usd} on every STRONG alert",
+ "web.ins.paper_note": "Buy / sell from real Jupiter quotes for this size (price impact included), ~$1 fees deducted. Real fill delay not modelled. Columns = result if sold at that mark.",
+ "web.ins.paper_marks": "Average",
+ "web.ins.paper_avg": "{n} trades",
+ "web.ins.paper_wins": "won",
+ "web.ins.paper_instant": "Sell at once (round-trip cost)",
+ "web.ins.paper_peak": "Peak / trough",
+ "web.ins.paper_open": "holding",
+ "web.ins.paper_closed": "closed (24 h)",
+ "web.ins.paper_no_route": "could not buy",
+ "web.ins.paper_noroute": "no route"
 }

@@ -455,3 +455,52 @@ def test_new_wallet_funded_then_buying_right_away_makes_a_strong_alert(tmp_path)
     al = w.poll_once()
     strong = [a for a in al if a["level"] == "strong"]
     assert {a["wallet"] for a in strong} == {WALLET, BOSS} and strong[0]["n_wallets"] == 2
+
+
+# ---------------------------------------------------------------- paper $500 on STRONG alerts
+from insiders import paper as PP  # noqa: E402
+
+
+def test_paper_opens_once_per_strong_coin_and_values_at_the_marks():
+    clock = {"t": 10_000.0}
+    price = {"v": 1.0}                                                 # USDC per 1e6 raw tokens
+
+    def quote(inp, out, amount):
+        if inp == PP.USDC:
+            return int(amount / price["v"])                           # tokens for $amount
+        return int(amount * price["v"] * 0.95)                       # selling loses 5 % (impact)
+    st = {}
+    book = PP.PaperBook(st, usd=500, quote=quote, now=lambda: clock["t"])
+    assert book.open({"level": "medium", "mint": NEWMINT}) is None   # only STRONG
+    p = book.open({"level": "strong", "mint": NEWMINT, "n_wallets": 2})
+    assert p["status"] == "open" and p["entry_value"] == round(500 * 0.95 - PP.FEE_USD, 2)
+    assert book.open({"level": "strong", "mint": NEWMINT}) is None   # once per coin
+    for dt, px in ((900, 2.0), (3600, 3.0), (6 * 3600, 0.5), (24 * 3600, 0.1)):
+        clock["t"] = 10_000.0 + dt
+        price["v"] = px
+        book.update()
+    m = p["marks"]
+    assert m["15m"] == round(500 * 2 * 0.95 - 1, 2) and m["24h"] == round(500 * 0.1 * 0.95 - 1, 2)
+    assert p["status"] == "closed"
+    s = book.summary()
+    assert s["positions"] == 1 and s["marks"]["1h"]["wins"] == 1 and s["marks"]["24h"]["avg_pct"] < 0
+
+
+def test_paper_no_route_is_recorded_not_traded():
+    book = PP.PaperBook({}, usd=500, quote=lambda i, o, a: None)
+    assert book.open({"level": "strong", "mint": NEWMINT})["status"] == "no_route"
+    assert book.summary()["positions"] == 0 and book.summary()["no_route"] == 1
+
+
+def test_watch_opens_a_paper_trade_on_a_strong_alert(tmp_path):
+    sol = 10 ** 9
+    txs = {"b1": wtx(WALLET, "b1", 1_500, NEWMINT, (0, 5), (2 * sol, sol)),
+           "b2": wtx(CEX, "b2", 1_600, NEWMINT, (0, 9), (3 * sol, sol))}
+    rpc = FakeRpc({WALLET: [{"signature": "old"}], CEX: [{"signature": "old2"}]}, txs)
+    r = {"tokens": [{"mint": MINT, "status": "ok", "deployer": w} for w in (WALLET, CEX)], "tickers": {}}
+    w = WT.Watcher(r, tmp_path / "w.json", rpc=rpc, now=lambda: 2_000.0, paper_quote=lambda i, o, a: a)
+    w.poll_once()
+    rpc.sigs = {WALLET: [{"signature": "b1"}, {"signature": "old"}], CEX: [{"signature": "b2"}, {"signature": "old2"}]}
+    w.poll_once()
+    st = w.status()["paper"]
+    assert st["summary"]["positions"] == 1 and st["rows"][0]["mint"] == NEWMINT
