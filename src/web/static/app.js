@@ -1165,6 +1165,7 @@ async function renderInsiders(silent) {
       <div class="kv"><span class="k">${esc(t("web.ins.generated"))}</span><span class="v">${esc(r.generated_at)} · RPC ${r.rpc_calls} · ${esc(t("web.ins.traced"))} ${r.traced_wallets}</span></div>
       ${runBtn}${prog}</div>
     <div class="disclaimer">${esc(t("web.ins.how"))}</div>
+    ${deepHtml(r.deep, names)}
     <h2>${esc(t("web.ins.behind"))}</h2>${insTable(ehead, real.slice(0, 40).map(entRow))}
     <h2>${esc(t("web.ins.hop2"))}</h2>${insTable([t("web.ins.addr"), t("web.ins.n_tokens"), t("web.ins.children"), t("web.ins.tokens")],
       (r.hop2_parents || []).slice(0, 25).map((p) => `<tr><td>${acct(p.address)}</td><td class="num"><b>${p.n_tokens}</b></td><td class="num">${p.n_children}</td><td class="small">${tks(p.tokens, names)}</td></tr>`))}
@@ -1176,6 +1177,23 @@ async function renderInsiders(silent) {
         <td class="small">${x.created_ts ? esc(new Date(x.created_ts * 1000).toLocaleString("vi-VN")) : esc(x.status)}</td><td>${x.deployer ? acct(x.deployer) : "—"}</td>
         <td class="num">${x.n_buyers ?? 0} (${x.n_pre_call ?? 0} ${esc(t("web.ins.before"))})</td></tr>`))}`;
   bindIns();
+}
+function moneyPath(p) {
+  // p: [{from, to, dir, sol}] from the address back to a seed; print each hop in the direction the SOL moved
+  return p.map((h) => h.dir === "back" ? `${esc(short(h.to))} → ${esc(short(h.from))}` : `${esc(short(h.from))} → ${esc(short(h.to))}`)
+    .map((x, i) => x + ` <span class="c-muted">(${p[i].sol} SOL)</span>`).join(" · ");
+}
+function deepHtml(d, names) {
+  if (!d) return "";
+  const lab = (x) => (x.label ? ` <span class="pill ${x.kind === "exchange" ? "" : "ok"}">${esc(x.label)}</span>` : "") +
+    (x.pays_into ? ` <span class="pill warn">${esc(t("web.ins.pays_into"))} ${esc(x.pays_into)}</span>` : "");
+  const hops = (x) => [x.hop_back !== null && x.hop_back !== undefined ? "←" + x.hop_back : "", x.hop_fwd ? "→" + x.hop_fwd : ""].filter(Boolean).join(" ");
+  const rows = (d.top || []).slice(0, 60).map((x) => `<tr><td>${acct(x.address)}${lab(x)}</td><td class="num"><b>${x.n_tokens}</b></td>
+    <td class="num">${esc(hops(x))}</td><td class="num">${x.sol_out} / ${x.sol_in}</td>
+    <td class="small">${tks(x.tokens, names)}<details class="ev"><summary>${esc(t("web.ins.paths"))}</summary>${(x.paths || []).map((p) =>
+      `<div class="small"><b>${esc(names[p.token] || short(p.token))}</b>: ${moneyPath(p.path)}</div>`).join("")}</details></td></tr>`);
+  return `<h2>${esc(t("web.ins.deep"))}</h2><div class="muted small">${esc(t("web.ins.deep_note", { hops: d.hops, n: d.reached }))}${d.from_earlier_scan ? " · " + esc(t("web.ins.deep_old")) : ""}</div>
+    ${insTable([t("web.ins.addr"), t("web.ins.n_tokens"), t("web.ins.hops"), t("web.ins.sol_out_in"), t("web.ins.tokens")], rows)}`;
 }
 function bindIns() {
   document.querySelectorAll("table.ins").forEach((tb) => {   // label each cell for the narrow-screen card layout

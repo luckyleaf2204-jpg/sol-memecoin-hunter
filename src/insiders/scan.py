@@ -56,6 +56,20 @@ KNOWN_LABELS = {
     "2snHHreXbpJ7UwZxPe37gnUNf7Wx7wv6UKDSR2JckKuS": ("deBridge Bridge Vault", "exchange"),
     "F7p3dFrjRTbtRp8FRF6qHLomXbKRBzpvBLjtQcfcgmNe": ("Relay Solver (bridge)", "exchange"),
     "D2L6yPZ2FmmmTKPgzaMKdhu6EWZcTpLy1Vhx8uvZe7NZ": ("Helius Tipping Account 2", "fee"),
+    "2ojv9BAiHUrvsm9gxDe7fJSzbNZSJcxZvf8dqmWGHG8S": ("Binance 1", "exchange"),
+    "GJRs4FwHtemZ5ZE9x3FNvJ8TMwitKTh21yxdRPqn7npE": ("Coinbase Hot Wallet 2", "exchange"),
+    "H8sMJSCQxfKiFTCfDR3DUMLPwcRbM61LGFJ8N4dK3WjS": ("Coinbase 1", "exchange"),
+    "5VCwKtCXgCJ6kit5FybXjvriW3xELsFDhYrPSqtJNmcD": ("OKX Hot Wallet", "exchange"),
+    "7HeD6sLLqAnKVRuSfc1Ko3BSPMNKWgGTiWLKXJF31vKM": ("Bloom fees (trading bot)", "fee"),
+    "8vza6LLMZRNJaJC6JW9Lca4bBr32rYHLn7JNypcBjj2N": ("Gate deposit address (one account)", "deposit"),
+    "1qtWcUopTKX6BL5YxnVujiSWDFK5jU2zERBYkFftfwJ": ("OKX deposit address (one account)", "deposit"),
+    "4ivhK6SCQwpSAfKkGdNqKosQsooouAaPJqZ5rTV8NpT9": ("OKX deposit address (one account)", "deposit"),
+    "2Nu3J4xsBBCet7dHkqdHrYMbcdRgzWw1i8Ub4myYmLJH": ("OKX deposit address (one account)", "deposit"),
+    "RB87CXNtNXe57fmgGmXACe257pTSk8Wsh4e4raBQtvr": ("Rollbit deposit address (one account)", "deposit"),
+    "AJENSD55ZJBwipZnEf7UzW2pjxex1cV2jSKPz7aMwJo5": ("Coinbase deposit address (one account)", "deposit"),
+    "A5oEVp2kEtkXvC43Henv7wThUbbL5phZEe4deEMrxeAj": ("Binance deposit address (one account)", "deposit"),
+    "EGnQqe6MPvvNYWLPHtk9mKpbtEQkv4nA7nTeENtViM4z": ("MoonPay Cold Wallet", "exchange"),
+    "6ZRCB7AAqGre6c72PRz3MHLC73VMYvJ8bi9KHf1HFpNk": ("FTX", "exchange"),
     "88xTWZMeKfiTgbfEmPLdsUCQcZinwUfk25EBQZ21XMAZ": ("Huobi", "exchange"),
     "BY4StcU9Y2BpgH8quZzorg31EGE4L1rjomN8FNsCBEcx": ("HTX Hot Wallet", "exchange"),
     "12unoFRA4pZ1UBgjwNranXdqJLEy9vgDwXhqBgpevEPZ": ("Binance deposit address (one account)", "deposit"),
@@ -134,7 +148,8 @@ class Chain:
             with self.lock:
                 r = self.db.execute("SELECT v FROM cache WHERE k=?", (key,)).fetchone()
             if r:
-                self.cached += 1
+                with self.lock:
+                    self.cached += 1
                 return json.loads(r[0])
         if self.calls >= self.budget:
             raise RuntimeError(f"call budget {self.budget} reached")
@@ -144,7 +159,8 @@ class Chain:
             try:
                 req = urllib.request.Request(self.url, data=body, headers={"Content-Type": "application/json"})
                 res = json.loads(urllib.request.urlopen(req, timeout=90).read())
-                self.calls += 1
+                with self.lock:
+                    self.calls += 1
                 if res.get("error"):
                     msg = str(res["error"])[:200]
                     if re.search(r"rate|limit|timeout|busy|unavailable|429", msg, re.I) and k < 3:

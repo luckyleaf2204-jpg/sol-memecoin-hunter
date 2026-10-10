@@ -1068,5 +1068,12 @@
  "web.ins.also_insider": "also early wallet",
  "web.ins.bot": "buys many tokens (bot)",
  "web.ins.evidence": "Evidence: wallet · token · role",
- "web.ins.after": "after call"
+ "web.ins.after": "after call",
+ "web.ins.deep": "Deep trace: wallets linked to the most coins",
+ "web.ins.deep_note": "SOL traced {hops} hops back (who funded) and forward (where it went) from each coin's deployer + early wallets; stops at exchanges / bots / fees. {n} addresses reached.",
+ "web.ins.deep_old": "deep result from an earlier scan",
+ "web.ins.hops": "Hops (← funds, → receives)",
+ "web.ins.sol_out_in": "SOL sent / received",
+ "web.ins.paths": "Money path per coin",
+ "web.ins.pays_into": "pays into"
 }

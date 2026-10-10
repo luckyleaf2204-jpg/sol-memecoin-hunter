@@ -20,6 +20,9 @@ def main():
     ap.add_argument("--out", default=str(S.RESULT_JSON))
     ap.add_argument("--trace-per-token", type=int, default=S.TRACE_PER_TOKEN)
     ap.add_argument("--budget", type=int, default=4000)
+    ap.add_argument("--deep", type=int, default=0, help="also trace N hops back / forward (3-4); 0 = off")
+    ap.add_argument("--deep-budget", type=int, default=8000)
+    ap.add_argument("--reuse", action="store_true", help="deep trace only, on the existing result file")
     a = ap.parse_args()
     if hasattr(sys.stdout, "reconfigure"):
         sys.stdout.reconfigure(encoding="utf-8", line_buffering=True)
@@ -27,9 +30,21 @@ def main():
     if not key:
         sys.exit("HELIUS_API_KEY not set")
     chain = S.Chain(key, S.default_cache(), budget_calls=a.budget)
-    r = S.run(chain, S.load_calls(Path(a.csv)), progress=print, trace_per_token=a.trace_per_token)
+    if a.reuse:
+        r = json.loads(Path(a.out).read_text(encoding="utf-8"))
+    else:
+        r = S.run(chain, S.load_calls(Path(a.csv)), progress=print, trace_per_token=a.trace_per_token)
+    if a.deep:
+        from insiders import deep as D
+        chain.budget = chain.calls + a.deep_budget
+        seeds = D.seeds_from(r, a.trace_per_token)
+        print(f"deep trace: {len(seeds)} seed wallets, {a.deep} hops, budget {a.deep_budget} calls")
+        d = D.deep_trace(chain, seeds, max_hops=a.deep, progress=print)
+        print(f"activity check: {D.check_activity(chain, d, seeds)} busy addresses flagged")
+        r["deep"] = D.summarize(d, seeds, r.get("tickers", {}))
+        r["deep"]["rpc_calls"] = chain.calls
     Path(a.out).write_text(json.dumps(r, ensure_ascii=False, separators=(",", ":")), encoding="utf-8")
-    print(f"done in {r['seconds']} s, rpc calls {r['rpc_calls']}, cache hits {r['cache_hits']} -> {a.out}")
+    print(f"done: rpc calls this run {chain.calls}, cache hits {chain.cached} -> {a.out}")
 
 
 if __name__ == "__main__":

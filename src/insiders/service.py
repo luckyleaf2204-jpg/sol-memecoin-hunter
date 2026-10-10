@@ -57,6 +57,8 @@ class InsiderService:
             else:
                 chain = S.Chain(self.key, S.default_cache())
                 res = S.run(chain, S.load_calls(), progress=self.log.append)
+            if self.result and self.result.get("deep") and not res.get("deep"):
+                res["deep"] = {**self.result["deep"], "from_earlier_scan": True}   # deep trace runs offline
             self.result = res
             try:
                 Path(self.result_path).write_text(json.dumps(res, ensure_ascii=False), encoding="utf-8")

@@ -1068,5 +1068,12 @@
  "web.ins.also_insider": "cũng là ví sớm",
  "web.ins.bot": "bot mua nhiều token",
  "web.ins.evidence": "Bằng chứng: ví · token · vai trò",
- "web.ins.after": "sau call"
+ "web.ins.after": "sau call",
+ "web.ins.deep": "Quét sâu: ví liên quan nhiều coin nhất",
+ "web.ins.deep_note": "Lần SOL {hops} bước về trước (ai nạp) và về sau (tiền đi đâu) từ deployer + ví sớm của mỗi coin; dừng ở sàn / bot / phí. Đã chạm {n} địa chỉ.",
+ "web.ins.deep_old": "kết quả quét sâu từ lần trước",
+ "web.ins.hops": "Số bước (← nạp, → nhận)",
+ "web.ins.sol_out_in": "SOL nạp ra / nhận vào",
+ "web.ins.paths": "Đường đi tiền theo từng coin",
+ "web.ins.pays_into": "nạp vào"
 }

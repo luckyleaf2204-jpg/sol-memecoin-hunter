@@ -158,3 +158,74 @@ def test_api_requires_the_access_code_and_never_returns_the_key(tmp_path, monkey
         assert c.get("/api/insiders").status_code == 401
         r = c.get("/api/insiders", headers={"X-Access-Code": "code-1"})
         assert r.status_code == 200 and r.json()["can_run"] is True and secret not in r.text
+
+
+# ---------------------------------------------------------------- deep trace (3-4 hops)
+from insiders import deep as D  # noqa: E402
+
+
+def graph_flows(g_back, g_fwd, busy=()):
+    """Fake flows(): g_back[a] = {funder: lamports}, g_fwd[a] = {sink: lamports}."""
+    def flows(chain, a, after_ts):
+        f = {k: (v, 1) for k, v in g_back.get(a, {}).items()}
+        s = {k: (v, 2) for k, v in g_fwd.get(a, {}).items()}
+        return {"busy": a in busy, "first_funder": next(iter(f), None), "funders": f, "sinks": s}
+    return flows
+
+
+def test_deep_trace_finds_the_common_funder_three_hops_back(monkeypatch):
+    """seed A <- fa <- ga <- BOSS and seed B <- fb <- BOSS: fresh wallets per token, one boss 2-3 hops back."""
+    sol = 10 * 10 ** 9
+    back = {"A": {"fa": sol}, "fa": {"ga": sol}, "ga": {"BOSS": sol}, "B": {"fb": sol}, "fb": {"BOSS": sol}}
+    monkeypatch.setattr(D, "flows", graph_flows(back, {}))
+    seeds = {"A": {"tokens": {"M1"}, "ts": 0}, "B": {"tokens": {"M2"}, "ts": 0}}
+    d = D.deep_trace(FakeChain({}), seeds, max_hops=3, workers=1)
+    boss = d["nodes"]["BOSS"]
+    assert boss["tok"]["back"] == {"M1", "M2"} and boss["back"] == 2
+    top = D.summarize(d, seeds, {})["top"][0]
+    assert top["address"] == "BOSS" and top["n_tokens"] == 2
+    path = next(p["path"] for p in top["paths"] if p["token"] == "M1")
+    assert [x["from"] for x in path] == ["ga", "fa", "A"]                   # BOSS <- ga <- fa <- seed A
+
+
+def test_deep_trace_stops_at_exchanges_and_marks_deposits(monkeypatch):
+    sol = 10 * 10 ** 9
+    cex = "5tzFkiKscXHK5ZXCGbXZxdw7gTjjD1mBwuoFbhUvuAi9"                    # Binance 2 (labelled)
+    back = {"A": {cex: sol}, "B": {cex: sol}, cex: {"WHALE": sol}}
+    fwd = {"A": {"dep": sol}, "dep": {cex: sol}}
+    monkeypatch.setattr(D, "flows", graph_flows(back, fwd))
+    seeds = {"A": {"tokens": {"M1"}, "ts": 0}, "B": {"tokens": {"M2"}, "ts": 0}}
+    d = D.deep_trace(FakeChain({}), seeds, max_hops=4, workers=1)
+    assert "WHALE" not in d["nodes"]                                         # never traced through an exchange
+    assert d["nodes"]["dep"]["pays_into"] == "Binance 2"
+    s = D.summarize(d, seeds, {})
+    assert all(r["address"] != cex for r in s["top"]) and any(r["address"] == cex for r in s["hubs"])
+
+
+def test_deep_trace_does_not_go_through_busy_wallets(monkeypatch):
+    sol = 10 * 10 ** 9
+    back = {"A": {"fa": sol}, "fa": {"BOT": sol}, "BOT": {"X": sol}, "B": {"fb": sol}, "fb": {"BOT": sol}}
+    monkeypatch.setattr(D, "flows", graph_flows(back, {}, busy={"BOT"}))
+    seeds = {"A": {"tokens": {"M1"}, "ts": 0}, "B": {"tokens": {"M2"}, "ts": 0}}
+    d = D.deep_trace(FakeChain({}), seeds, max_hops=4, workers=1)
+    assert "X" not in d["nodes"] and d["nodes"]["BOT"]["busy"]
+
+
+def test_seeds_skip_sniper_bots():
+    r = {"tokens": [{"mint": "M1", "status": "ok", "deployer": "DEP", "created_ts": 1,
+                     "buyers": [{"wallet": "BOTW", "ts": 2, "pre_call": True, "rank": 1},
+                                {"wallet": "W2", "ts": 3, "pre_call": True, "rank": 2}]}],
+         "repeat_wallets": [{"wallet": "BOTW", "bot_like": True}]}
+    assert set(D.seeds_from(r)) == {"DEP", "W2"}
+
+
+def test_deep_trace_never_mixes_directions(monkeypatch):
+    """X funded seed A's funder (back) and paid Y (forward): Y must NOT inherit A's token."""
+    sol = 10 * 10 ** 9
+    back = {"A": {"fa": sol}, "fa": {"X": sol}}
+    fwd = {"B": {"X": sol}, "X": {"Y": sol}}
+    monkeypatch.setattr(D, "flows", graph_flows(back, fwd))
+    seeds = {"A": {"tokens": {"M1"}, "ts": 0}, "B": {"tokens": {"M2"}, "ts": 0}}
+    d = D.deep_trace(FakeChain({}), seeds, max_hops=4, workers=1)
+    assert d["nodes"]["X"]["tok"]["back"] == {"M1"} and d["nodes"]["X"]["tok"]["fwd"] == {"M2"}
+    assert d["nodes"]["Y"]["tok"]["fwd"] == {"M2"} and not d["nodes"]["Y"]["tok"]["back"]
