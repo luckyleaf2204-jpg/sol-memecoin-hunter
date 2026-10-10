@@ -1179,7 +1179,7 @@ async function renderInsiders(silent) {
   bindIns();
 }
 function moneyPath(p) {
-  // p: [{from, to, dir, sol}] from the address back to a seed; print each hop in the direction the SOL moved
+  // p: [{from, to, dir, sol}] from the address back to an insider wallet; each hop printed in the direction SOL moved
   return p.map((h) => h.dir === "back" ? `${esc(short(h.to))} → ${esc(short(h.from))}` : `${esc(short(h.from))} → ${esc(short(h.to))}`)
     .map((x, i) => x + ` <span class="c-muted">(${p[i].sol} SOL)</span>`).join(" · ");
 }
