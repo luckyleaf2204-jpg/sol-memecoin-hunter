@@ -29,7 +29,7 @@ def vip_list(result: dict) -> dict[str, str]:
     for h in v.get("holders", []):
         out[h["wallet"]] = f"held >= 10 min · {h.get('profit_sol', 0):+.0f} SOL on {', '.join(h.get('coins', [])[:3])}"
     for s in v.get("successors", []):
-        if s.get("kind") == "person":
+        if s.get("kind") == "person" and KNOWN_LABELS.get(s["wallet"], (None, None))[1] not in ("exchange", "fee", "deposit"):
             out.setdefault(s["wallet"], f"received {s.get('sol', 0):.0f} SOL / {s.get('token_tx', 0)} token tx from "
                                         f"{', '.join(f[:6] for f in s.get('from', [])[:3])}")
     return out
@@ -94,6 +94,7 @@ class VipStream:
         if not tx:
             return []
         why = self.wallets().get(wallet, "special wallet")
+        self.state.setdefault("last_seen", {})[wallet] = tx.get("blockTime")
         out = []
         for ev in analyse(tx, wallet):
             with self.w.lock:
@@ -113,6 +114,12 @@ class VipStream:
             if ev["kind"] == "FUND":
                 self._adopt(ev["to"], wallet, sol)
             out.append(a)
+            if ev["kind"] in ("BUY", "RECEIVE", "CREATE") and ev.get("mint"):
+                with self.w.lock:
+                    self.w._qualify(a)                       # the coin gets its tab
+                strong = self._together(ev["mint"], wallet, a)
+                if strong:
+                    out.append(strong)
         got, frm = sol_in(tx, wallet)
         if got >= MIN_SOL:
             out.append({"ts": tx.get("blockTime"), "sig": sig, "wallet": wallet, "kind": "SOL_IN", "from": frm,
@@ -124,6 +131,30 @@ class VipStream:
             self.w.save()
             self.w._send(out)
         return out
+
+    def _together(self, mint: str, wallet: str, a: dict) -> dict | None:
+        """>= 2 different special wallets bought / received the same coin (>= MIN_SOL each) within 24 h: one
+        'vipstrong' alert per coin (Telegram + the paper trade)."""
+        now = self.now()
+        by = self.state.setdefault("by_mint", {})
+        seen = by.setdefault(mint, {})
+        seen[wallet] = now
+        for m in list(by):
+            by[m] = {w: t for w, t in by[m].items() if now - t < 86400}
+            if not by[m]:
+                del by[m]
+        done = self.state.setdefault("strong_done", {})
+        if len(by.get(mint, {})) < 2 or mint in done:
+            return None
+        done[mint] = now
+        s = {**a, "kind": "VIPSTRONG", "level": "vipstrong", "n_wallets": len(by[mint]),
+             "holders": sorted(by[mint])[:10], "why": "≥ 2 special wallets on this coin"}
+        paper = getattr(self.w, "paper", None)
+        if paper:
+            p = paper.open(s)
+            if p:
+                s["paper"] = p["status"]
+        return s
 
     def _adopt(self, to: str, parent: str, sol: float) -> None:
         kind = KNOWN_LABELS.get(to, (None, None))[1]
@@ -189,7 +220,8 @@ class VipStream:
 
     def status(self) -> dict:
         ws = self.wallets()
-        return {**self.stat, "wallets": len(ws), "base": len(self.base),
+        return {**self.stat, "wallets": len(ws), "base": len(self.base), "last_seen": self.state.get("last_seen", {}),
+                "kids": {a: v["parent"] for a, v in self.state["children"].items()},
                 "children": len(self.state["children"]), "events": self.state.get("events", 0), "min_sol": MIN_SOL,
                 "list": [{"wallet": a, "why": why} for a, why in list(ws.items())[:120]]}
 

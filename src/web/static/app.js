@@ -1160,12 +1160,12 @@ async function renderInsiders(silent) {
     <td class="num">${e.funded_wallets} / ${e.funded_sol}</td><td class="num">${e.received_from_wallets} / ${e.received_sol}</td><td class="small">${tks(e.tokens, names)}${ev(e)}</td></tr>`;
   const ehead = [t("web.ins.addr"), t("web.ins.n_tokens"), t("web.ins.funded"), t("web.ins.received"), t("web.ins.tokens")];
   // n_wallets >= 2 is applied by the server
-  $("#ins").innerHTML = `<div class="token-head">
+  const oldHtml = `<div class="token-head">
       <div class="kv"><span class="k">${esc(t("web.ins.scanned"))}</span><span class="v">${okT.length} / ${toks.length} (${esc(Object.entries(stat).map(([k, v]) => k + " " + v).join(", "))})</span></div>
       <div class="kv"><span class="k">${esc(t("web.ins.generated"))}</span><span class="v">${esc(r.generated_at)} · RPC ${r.rpc_calls} · ${esc(t("web.ins.traced"))} ${r.traced_wallets}</span></div>
       ${runBtn}${prog}</div>
     <div class="disclaimer">${esc(t("web.ins.how"))}</div>
-    <div id="insWatch">${watchHtml(d.watch, names)}</div>
+    <!--WATCH-->
     ${treesHtml(r.trees)}
     ${extraHtml(r.extra, names)}
     ${pnlHtml(r.pnl, names)}
@@ -1180,6 +1180,10 @@ async function renderInsiders(silent) {
       toks.map((x) => `<tr><td>${esc(x.ticker || short(x.mint))} <span class="copy" data-copy="${esc(x.mint)}">⧉</span></td><td class="small">${esc(new Date(x.call_ts * 1000).toLocaleString("vi-VN"))}</td>
         <td class="small">${x.created_ts ? esc(new Date(x.created_ts * 1000).toLocaleString("vi-VN")) : esc(x.status)}</td><td>${x.deployer ? acct(x.deployer) : "—"}</td>
         <td class="num">${x.n_buyers ?? 0} (${x.n_pre_call ?? 0} ${esc(t("web.ins.before"))})</td></tr>`))}`;
+  const watchBox = `<div id="insWatch">${watchHtml(d.watch, names)}</div>`;
+  $("#ins").innerHTML = d.watch && d.watch.mode === "vip"
+    ? `${watchBox}<details class="ins-old"><summary>${esc(t("web.ins.old_research"))}</summary>${oldHtml.replace("<!--WATCH-->", "")}</details>`
+    : oldHtml.replace("<!--WATCH-->", watchBox);
   bindIns();
 }
 function moneyPath(p) {
@@ -1260,7 +1264,62 @@ function coinsHtml(coins, names, minSol) {
   return `<h3>${esc(t("web.ins.c.title", { s: minSol || 4 }))}</h3><div class="ins-tabs">${tabs}</div>${head}
     ${insTable([t("web.ins.c.wallet"), t("web.ins.c.bought"), t("web.ins.c.sold"), t("web.ins.c.held"), t("web.ins.c.hold"), t("web.ins.c.pnl"), t("web.ins.c.when")], rows)}`;
 }
+function vipRole(why) {
+  const w = why || "";
+  return w.startsWith("held") ? "holder" : w.startsWith("received") ? "successor" : w.startsWith("new wallet of") ? "child" : "other";
+}
+function agoTxt(ts) {
+  if (!ts) return "—";
+  const s = Math.max(0, Date.now() / 1000 - ts);
+  return s < 120 ? Math.round(s) + "s" : s < 7200 ? Math.round(s / 60) + " " + t("web.ins.minutes") : s < 172800 ? Math.round(s / 3600) + " h" : Math.round(s / 86400) + " d";
+}
+function vipDash(w, names) {
+  const v = w.vip || {}, pf = w.portfolio || {}, solUsd = pf.sol_usd || 0;
+  const lk = (u, txt) => `<a href="${esc(u)}" target="_blank" rel="noopener">${esc(txt)}</a>`;
+  const coinLinks = (m, chart) => `${lk(safeUrl(chart) || "https://dexscreener.com/solana/" + m, "DexScreener")} · ${lk("https://pump.fun/coin/" + m, "pump.fun")} · ${lk("https://solscan.io/token/" + m, "Solscan")}`;
+  const fmtSol = (x) => x === null || x === undefined ? "—" : Number(x).toLocaleString("vi-VN", { maximumFractionDigits: 2 });
+  const live = v.connected ? `<span class="pill ok">${esc(t("web.ins.vip_live"))}</span>` : `<span class="pill warn">${esc(t("web.ins.vip_down"))}</span>`;
+  const tokSol = solUsd ? (pf.total_tokens_usd || 0) / solUsd : null;
+  const head = `<div class="token-head vip-head">
+    <div class="kv"><span class="k">${esc(t("web.ins.vd.stream"))}</span><span class="v">${live} ${v.subscribed || 0}/${v.wallets || 0} ${esc(t("web.ins.c.wallets"))} · ${esc(t("web.ins.vd.pushed", { n: v.pushed || 0 }))}</span></div>
+    <div class="kv"><span class="k">${esc(t("web.ins.vd.group_sol"))}</span><span class="v"><b>${fmtSol(pf.total_sol)} SOL</b>${solUsd ? " · $" + Math.round((pf.total_sol || 0) * solUsd).toLocaleString("vi-VN") : ""}</span></div>
+    <div class="kv"><span class="k">${esc(t("web.ins.vd.group_tokens", { s: pf.min_sol || 1 }))}</span><span class="v"><b>${tokSol !== null ? fmtSol(tokSol) + " SOL" : "—"}</b> · $${Math.round(pf.total_tokens_usd || 0).toLocaleString("vi-VN")}</span></div>
+    ${pf.total_stable_usd >= 1 ? `<div class="kv"><span class="k">${esc(t("web.ins.vd.group_stable"))}</span><span class="v">$${Math.round(pf.total_stable_usd).toLocaleString("vi-VN")}</span></div>` : ""}
+    <div class="kv"><span class="k">${esc(t("web.ins.vd.updated"))}</span><span class="v">${pf.updated ? esc(agoTxt(pf.updated)) + " · " + esc(t("web.ins.vd.every", { s: pf.every_s || 180 })) : esc(t("web.loading"))}${pf.error ? ` <span class="c-muted small">(${esc(pf.error)})</span>` : ""}</span></div>
+    · ${esc(t(w.telegram ? "web.ins.tg_on" : "web.ins.tg_off", { n: w.notified || 0 }))}
+    ${"Notification" in window && Notification.permission !== "granted" ? `<button class="btn" id="insNotify">${esc(t("web.ins.enable_notif"))}</button>` : ""}</div>`;
+  // coins the group holds now (> min SOL each)
+  const held = (pf.coins || []).slice(0, 40).map((c) => `<tr><td><b>${esc(c.symbol ? "$" + c.symbol : short(c.mint))}</b> ${c.name ? `<span class="small">${esc(c.name)}</span>` : ""} <span class="copy" data-copy="${esc(c.mint)}">⧉</span><div class="small">${coinLinks(c.mint, c.chart)}</div></td>
+    <td class="num"><b>${c.n_holders}</b></td><td class="num">${solUsd ? fmtSol(c.usd / solUsd) + " SOL" : "—"}<div class="c-muted small">$${Math.round(c.usd).toLocaleString("vi-VN")}</div></td>
+    <td class="small">${(c.holders || []).slice(0, 6).map((h) => `${acct(h.wallet)} <span class="c-muted">${solUsd ? fmtSol(h.usd / solUsd) : ""} SOL</span>`).join("<br>")}</td></tr>`);
+  // live alerts of the special wallets
+  const alerts = (w.alerts || []).filter((a) => ["vip", "vipstrong"].includes(a.level)).slice(0, 40).map((a) => `<tr><td class="small">${esc(new Date(a.ts * 1000).toLocaleString("vi-VN"))}</td>
+    <td><span class="pill bad">${esc(t("web.ins.lv." + a.level))}${a.n_wallets ? " ×" + a.n_wallets : ""}</span> ${esc(t("web.ins.ev." + a.kind.toLowerCase()))}</td>
+    <td>${a.mint ? `<b>${esc(a.symbol ? "$" + a.symbol : names[a.mint] || short(a.mint))}</b>${a.age_h !== undefined && a.age_h !== null ? ` <span class="c-muted small">${esc(a.age_h < 1 ? Math.round(a.age_h * 60) + " " + t("web.ins.minutes") : a.age_h + " h")}</span>` : ""}<div class="small">${coinLinks(a.mint, a.chart)}</div>` : a.to ? `${esc(t("web.ins.sent_to"))} ${acct(a.to)}` : a.from ? `${esc(t("web.ins.from"))} ${acct(a.from)}` : ""}</td>
+    <td class="num"><b>${a.sol || ""}</b></td><td>${acct(a.wallet)}</td></tr>`);
+  // the wallets
+  const roleKey = { holder: "web.ins.vd.r.holder", successor: "web.ins.vd.r.successor", child: "web.ins.vd.r.child", other: "web.ins.vd.r.other" };
+  const roleCls = { holder: "bad", successor: "warn", child: "warn", other: "" };
+  const seen = v.last_seen || {}, kids = v.kids || {};
+  const wallets = (pf.wallets || []).map((x) => {
+    const r = vipRole(x.why), mine = Object.keys(kids).filter((k) => kids[k] === x.wallet);
+    const chips = (x.tokens || []).slice(0, 4).map((h) => `<span class="pill">${esc(h.symbol ? "$" + h.symbol : short(h.mint))} ${fmtSol(h.sol)}</span>`).join(" ");
+    const all = (x.tokens || []).map((h) => `<div class="small"><b>${esc(h.symbol ? "$" + h.symbol : short(h.mint))}</b> ${fmtSol(h.sol)} SOL ($${Math.round(h.usd).toLocaleString("vi-VN")}) · ${coinLinks(h.mint, h.chart)}</div>`).join("");
+    return `<tr><td><span class="pill ${roleCls[r]}">${esc(t(roleKey[r]))}</span> ${acct(x.wallet)}<div class="muted small">${esc(x.why || "")}</div>
+      ${mine.length ? `<div class="small">${esc(t("web.ins.vd.kids"))}: ${mine.map((k) => acct(k)).join(", ")}</div>` : ""}</td>
+      <td class="num"><b>${fmtSol(x.sol)}</b>${x.stable_usd >= 1 ? `<div class="c-muted small">+ $${Math.round(x.stable_usd).toLocaleString("vi-VN")} ${esc(t("web.ins.vd.stable"))}</div>` : ""}</td><td class="num">${solUsd ? fmtSol(x.tokens_usd / solUsd) : "—"}<div class="c-muted small">$${Math.round(x.tokens_usd).toLocaleString("vi-VN")}</div></td>
+      <td>${chips || `<span class="c-muted small">${esc(t("web.ins.vd.no_tokens"))}</span>`}${(x.tokens || []).length ? `<details class="ev"><summary>${esc(t("web.ins.vd.all", { n: x.tokens.length, d: x.dust }))}</summary>${all}</details>` : ""}</td>
+      <td class="small">${esc(agoTxt(seen[x.wallet]))}</td></tr>`;
+  });
+  return `<h2>${esc(t("web.ins.vd.title"))}</h2><div class="muted small">${esc(t("web.ins.vd.note", { m: w.min_sol || 4, s: pf.min_sol || 1 }))}</div>${head}
+    <h3>${esc(t("web.ins.vd.held", { s: pf.min_sol || 1 }))}</h3>${insTable([t("web.ins.token"), t("web.ins.vd.n_holders"), t("web.ins.vd.value"), t("web.ins.vd.who")], held)}
+    <h3>${esc(t("web.ins.vd.alerts", { m: w.min_sol || 4 }))}</h3>${insTable([t("web.ins.when"), t("web.ins.event"), t("web.ins.coin_or_wallet"), "SOL", t("web.ins.by")], alerts)}
+    ${coinsHtml(w.coins, names, w.min_sol)}
+    ${paperHtml(w.paper, names)}
+    <h3>${esc(t("web.ins.vd.wallets", { n: (pf.wallets || []).length }))}</h3>${insTable([t("web.ins.addr"), t("web.ins.vd.sol"), t("web.ins.vd.tok_value"), t("web.ins.vd.holding"), t("web.ins.vd.last")], wallets)}`;
+}
 function watchHtml(w, names) {
+  if (w && w.mode === "vip") return vipDash(w, names);
   if (!w) return `<h2>${esc(t("web.ins.watch"))}</h2><div class="muted small">${esc(t("web.ins.watch_off"))}</div>`;
   const lv = { vip: "bad", hold: "bad", strong: "bad", high: "bad", medium: "warn", watch: "", info: "" };
   const kind = (a) => t("web.ins.ev." + a.kind.toLowerCase());

@@ -254,7 +254,7 @@ def coin_meta(mint: str, get=_get_json) -> dict:
 
 class Watcher:
     def __init__(self, result: dict, state_path: Path, rpc=None, now=time.time, old_mints: set | None = None,
-                 notify=None, notify_levels: tuple = ("hold", "vip"), paper_quote=None, meta=None):
+                 notify=None, notify_levels: tuple = ("hold", "vip", "vipstrong"), paper_quote=None, meta=None):
         self.base, self.tier_b = watch_tiers(result)
         self.styles = wallet_styles(result)
         self.old = old_mints if old_mints is not None else (
@@ -271,7 +271,7 @@ class Watcher:
         except (OSError, ValueError):
             pass
         from insiders.paper import PaperBook
-        self.paper = PaperBook(self.state, quote=paper_quote, now=now, levels=("hold",)) if paper_quote else None
+        self.paper = PaperBook(self.state, quote=paper_quote, now=now, levels=("hold", "vipstrong")) if paper_quote else None
 
     def wallets(self) -> dict[str, str]:
         now = self.now()
@@ -537,7 +537,7 @@ class Watcher:
         if not self.notify:
             return
         todo = [a for a in alerts if a.get("level") in self.notify_levels]
-        order = {"vip": 0, "hold": 1, "strong": 2, "high": 3, "medium": 4, "watch": 5, "info": 6}
+        order = {"vipstrong": -1, "vip": 0, "hold": 1, "strong": 2, "high": 3, "medium": 4, "watch": 5, "info": 6}
         todo.sort(key=lambda a: order.get(a.get("level"), 9))
         sent = 0
         for a in todo[:15]:
@@ -562,6 +562,8 @@ class Watcher:
                     "telegram": bool(self.notify), "notify_levels": sorted(self.notify_levels),
                     "notified": self.state.get("notified", 0), "min_sol": MIN_SOL, "coins": self.coins_view(),
                     "vip": self.vip.status() if getattr(self, "vip", None) else None,
+                    "mode": getattr(self, "mode", "broad"),
+                    "portfolio": self.portfolio.status() if getattr(self, "portfolio", None) else None,
                     "paper": {"summary": self.paper.summary(), "rows": self.paper.rows(60)} if self.paper else None,
                     "children": len(self.state["children"]), "last_error": self.state["last_error"],
                     "rpc_calls": self.state.get("rpc_calls"), "last_poll_s": self.state.get("last_poll_s"),
@@ -579,8 +581,8 @@ class Watcher:
             stop.wait(max(0.0, every_s - (time.time() - t0)))
 
 
-LEVEL_VI = {"vip": "⚡ VÍ ĐẶC BIỆT", "hold": "🚨🚨 MẠNH · ĐANG GIỮ", "strong": "🚨 MẠNH", "high": "🔴 TẠO COIN", "medium": "🟠 Coin mới", "watch": "🔵 Nạp ví mới", "info": "ℹ️"}
-KIND_VI = {"SELL": "bán coin", "SEND": "chuyển token đi", "SOL_IN": "nhận SOL", "HOLD": "≥ 2 ví nhóm mua ≥ 4 SOL và vẫn giữ sau 10 phút", "CREATE": "tạo coin mới", "BUY": "mua coin mới", "RECEIVE": "nhận coin mới", "FUND": "nạp SOL cho ví mới"}
+LEVEL_VI = {"vipstrong": "🚨⚡ ≥ 2 VÍ ĐẶC BIỆT CÙNG VÀO", "vip": "⚡ VÍ ĐẶC BIỆT", "hold": "🚨🚨 MẠNH · ĐANG GIỮ", "strong": "🚨 MẠNH", "high": "🔴 TẠO COIN", "medium": "🟠 Coin mới", "watch": "🔵 Nạp ví mới", "info": "ℹ️"}
+KIND_VI = {"VIPSTRONG": "≥ 2 ví đặc biệt cùng mua / nhận coin này (≥ 4 SOL mỗi ví)", "SELL": "bán coin", "SEND": "chuyển token đi", "SOL_IN": "nhận SOL", "HOLD": "≥ 2 ví nhóm mua ≥ 4 SOL và vẫn giữ sau 10 phút", "CREATE": "tạo coin mới", "BUY": "mua coin mới", "RECEIVE": "nhận coin mới", "FUND": "nạp SOL cho ví mới"}
 
 
 def alert_text(a: dict, tickers: dict | None = None) -> str:

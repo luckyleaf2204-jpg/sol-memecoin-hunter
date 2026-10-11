@@ -70,6 +70,7 @@ KNOWN_LABELS = {
     "A5oEVp2kEtkXvC43Henv7wThUbbL5phZEe4deEMrxeAj": ("Binance deposit address (one account)", "deposit"),
     "EGnQqe6MPvvNYWLPHtk9mKpbtEQkv4nA7nTeENtViM4z": ("MoonPay Cold Wallet", "exchange"),
     "6ZRCB7AAqGre6c72PRz3MHLC73VMYvJ8bi9KHf1HFpNk": ("FTX", "exchange"),
+    "41zCUJsKk6cMB94DDtm99qWmyMZfp4GkAhhuz4xTwePu": ("Circle Treasury (USDC issuer)", "exchange"),
     "DzSPAYNuhb2RuL2ZtjnzuCQCMLv8AEdwRZTjJrPZSzxD": ("OKX deposit address (one account)", "deposit"),
     "5gZ91xtPoCmeQK3BFz9oAUj1ERMurZvuRHzqVbAQM2hZ": ("OKX deposit address (one account)", "deposit"),
     "57vSaRTqN9iXaemgh4AoDsZ63mcaoshfMK8NP3Z5QNbs": ("KuCoin Hot Wallet", "exchange"),

@@ -688,3 +688,47 @@ def test_vip_websocket_subscribes_and_handles_a_push(tmp_path):
     asyncio.run(vs.run(stop))
     assert vs.stat["subscribed"] == 2 and w.state["vip"]["events"] == 1
     assert w.state["alerts"][0]["wallet"] == WALLET and w.state["alerts"][0]["level"] == "vip"
+
+
+# ---------------------------------------------------------------- balances of the special wallets
+from insiders import portfolio as PO  # noqa: E402
+
+
+def test_portfolio_keeps_only_holdings_worth_more_than_one_sol_and_groups_by_coin():
+    good, junk, mid = "GoodMint1111", "JunkMint2222", "MidMint33333"
+
+    def rpc(m, p):
+        if m == "getBalance":
+            return {"value": 3 * 10 ** 9}
+        if p[1]["programId"] != PO.TOKEN_PROGRAMS[0]:
+            return {"value": []}
+        acc = lambda mint, amt: {"account": {"data": {"parsed": {"info": {"mint": mint, "tokenAmount": {"amount": "1", "uiAmountString": str(amt)}}}}}}  # noqa: E731
+        return {"value": [acc(good, 1000), acc(junk, 5_000_000), acc(mid, 10)]}
+
+    def get(url):
+        if "price" in url:
+            return {PO.SOL: {"usdPrice": 100.0}, good: {"usdPrice": 0.5}, mid: {"usdPrice": 5.0}}   # junk: no price
+        return [{"baseToken": {"address": good, "symbol": "GOOD", "name": "Good"}, "url": "https://dexscreener.com/x"}]
+    pf = PO.Portfolio(lambda: {WALLET: "held", CEX: "received"}, rpc, get=get, now=lambda: 1.0)
+    v = pf.refresh()
+    w = v["wallets"][0]
+    assert w["sol"] == 3.0 and [t["symbol"] for t in w["tokens"]] == ["GOOD"]   # 500 $ = 5 SOL kept
+    assert w["tokens"][0]["sol"] == 5.0 and w["dust"] == 2                         # junk (no price) + 50 $ (0.5 SOL)
+    c = v["coins"][0]
+    assert c["mint"] == good and c["n_holders"] == 2 and v["total_sol"] == 6.0
+    assert junk in pf.prices.dead                                                  # not asked again for 6 h
+
+
+def test_two_special_wallets_on_one_coin_fire_once_and_open_the_paper_trade(tmp_path):
+    sol = 10 ** 9
+    w, r = vip_watcher(tmp_path, quote=lambda i, o, a: a)
+    txs = {"a": wtx(WALLET, "a", 1_900, NEWMINT, (0, 5), (20 * sol, 14 * sol)),
+           "b": wtx(BOSS, "b", 1_950, NEWMINT, (0, 7), (20 * sol, 12 * sol)),
+           "c": wtx(BOSS, "c", 1_960, NEWMINT, (7, 9), (12 * sol, 5 * sol))}
+    vs = VP.VipStream(w, r, rpc=lambda m, p: txs[p[0]], now=lambda: 2_000.0)
+    vs.retry_sleep = False
+    assert not [a for a in vs.handle(WALLET, "a") if a["level"] == "vipstrong"]
+    strong = [a for a in vs.handle(BOSS, "b") if a["level"] == "vipstrong"]
+    assert len(strong) == 1 and strong[0]["n_wallets"] == 2 and strong[0]["paper"] == "open"
+    assert not [a for a in vs.handle(BOSS, "c") if a["level"] == "vipstrong"]    # once per coin
+    assert w.status()["coins"][0]["mint"] == NEWMINT                               # the coin got its tab

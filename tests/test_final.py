@@ -254,4 +254,4 @@ def test_bot_page_has_the_seven_areas_and_route_alias():
         assert f'id="{area}"' in js, area
     assert '"#/" + h.slice(1)' in js                                  # "#bot" works like "#/bot"
     html = (STATIC / "index.html").read_text(encoding="utf-8")
-    assert "app.js?v=web-32" in html and "styles.css?v=web-32" in html  # cache-busting on deploy
+    assert "app.js?v=web-33" in html and "styles.css?v=web-33" in html  # cache-busting on deploy
