@@ -1264,6 +1264,103 @@ function coinsHtml(coins, names, minSol) {
   return `<h3>${esc(t("web.ins.c.title", { s: minSol || 4 }))}</h3><div class="ins-tabs">${tabs}</div>${head}
     ${insTable([t("web.ins.c.wallet"), t("web.ins.c.bought"), t("web.ins.c.sold"), t("web.ins.c.held"), t("web.ins.c.hold"), t("web.ins.c.pnl"), t("web.ins.c.when")], rows)}`;
 }
+function fmtDur(sec) {
+  if (sec === null || sec === undefined || isNaN(sec)) return "—";
+  const s = Math.abs(sec), sign = sec < 0 ? "−" : "";
+  return sign + (s < 90 ? Math.round(s) + "s" : s < 5400 ? Math.round(s / 60) + "m" : s < 172800 ? Math.floor(s / 3600) + "h" + (Math.round(s % 3600 / 60) ? " " + Math.round(s % 3600 / 60) + "m" : "") : Math.round(s / 86400) + "d");
+}
+function fmtUsdK(v) {
+  if (v === null || v === undefined || isNaN(v)) return "—";
+  return v >= 1e9 ? "$" + (v / 1e9).toFixed(2) + "B" : v >= 1e6 ? "$" + (v / 1e6).toFixed(2) + "M" : v >= 1e3 ? "$" + (v / 1e3).toFixed(1) + "K" : "$" + v.toFixed(0);
+}
+function boardTrade(tr, coin, solUsd) {
+  // [ts, kind, sol, tokens_raw, sig] -> price (SOL / token), market cap (USD) at that trade
+  const sup = coin.supply || {}, dec = sup.decimals ?? 6, ui = tr[3] / Math.pow(10, dec);
+  const price = tr[2] > 0 && ui > 0 ? tr[2] / ui : null;
+  return { ts: tr[0], kind: tr[1], sol: tr[2], ui, sig: tr[4], price, mc: price && sup.ui && solUsd ? price * sup.ui * solUsd : null };
+}
+function boardHtml(board, names, solUsd) {
+  board = board || [];
+  if (!board.length) return `<h2>${esc(t("web.ins.b.title"))}</h2><div class="muted small">${esc(t("web.ins.b.none"))}</div>`;
+  let sel = LS.get("insBoard", "");
+  if (!board.some((c) => c.mint === sel)) sel = board[0].mint;
+  const label = (c) => c.symbol ? "$" + c.symbol : short(c.mint);
+  const tabs = board.map((c) => `<button class="btn ${c.mint === sel ? "primary" : ""} ${c.strong ? "strong" : ""}" data-insboard="${esc(c.mint)}">${c.strong ? "🚨 " : ""}${esc(label(c))}
+    <span class="small">${c.wallets.length} ${esc(t("web.ins.c.wallets"))}${c.created_ts ? " · " + esc(t("web.ins.b.first_in", { d: fmtDur(c.first_ts - c.created_ts) })) : ""}</span></button>`).join("");
+  const c = board.find((x) => x.mint === sel);
+  const lk = (u, txt) => `<a href="${esc(u)}" target="_blank" rel="noopener">${esc(txt)}</a>`;
+  const kindCls = { BUY: "ok", CREATE: "ok", RECEIVE: "warn", SELL: "bad", SEND: "bad" };
+  const roleKey = { holder: "web.ins.vd.r.holder", successor: "web.ins.vd.r.successor", child: "web.ins.vd.r.child", other: "web.ins.vd.r.other" };
+  const rows = [];
+  for (const w of c.wallets) {
+    const r = vipRole(w.why), dec = (c.supply || {}).decimals ?? 6, inUi = w.tok_in / Math.pow(10, dec);
+    const heldTxt = w.held_ui === null || w.held_ui === undefined ? esc(t("web.ins.b.held_unknown"))
+      : `<b>${Number(w.held_ui).toLocaleString("vi-VN", { maximumFractionDigits: 0 })}</b> ${esc(t("web.ins.b.tokens"))}${inUi > 0 ? ` (${Math.round(100 * w.held_ui / inUi)}% ${esc(t("web.ins.b.of_bought"))})` : ""}`;
+    rows.push(`<tr class="b-wallet"><td colspan="8"><span class="pill ${r === "holder" ? "bad" : "warn"}">${esc(t(roleKey[r]))}</span> ${acct(w.wallet)}
+      · ${esc(t("web.ins.b.bought_sold", { b: Number(w.buy_sol).toFixed(2), s: Number(w.sell_sol).toFixed(2) }))} · ${esc(t("web.ins.b.held_now"))}: <span class="b-held" data-held="${w.held_ui ?? ""}">${heldTxt}</span></td></tr>`);
+    for (const tr of w.trades) {
+      const x = boardTrade(tr, c, solUsd);
+      rows.push(`<tr><td class="small">${esc(new Date(x.ts * 1000).toLocaleString("vi-VN"))}</td>
+        <td><span class="pill ${kindCls[x.kind] || ""}">${esc(t("web.ins.b.k." + x.kind.toLowerCase()))}</span></td>
+        <td class="num">${c.created_ts ? esc(fmtDur(x.ts - c.created_ts)) : "—"}</td>
+        <td class="num"><b>${esc(fmtUsdK(x.mc))}</b></td>
+        <td class="num small">${x.price ? x.price.toExponential(3) + " SOL" : "—"}</td>
+        <td class="num">${x.sol ? Number(x.sol).toFixed(2) : "—"}</td>
+        <td class="num small">${Number(x.ui).toLocaleString("vi-VN", { maximumFractionDigits: 0 })}</td>
+        <td>${x.sig ? lk("https://solscan.io/tx/" + x.sig, "tx") : ""}</td></tr>`);
+    }
+  }
+  const chart = safeUrl(c.chart) || "https://dexscreener.com/solana/" + c.mint;
+  return `<h2>${esc(t("web.ins.b.title"))}</h2><div class="muted small">${esc(t("web.ins.b.note"))}</div>
+    <div class="ins-tabs">${tabs}</div>
+    <div class="token-head"><b>${esc(label(c))}</b> ${c.name ? esc(c.name) : ""} <span class="mono small">${esc(short(c.mint))}</span> <span class="copy" data-copy="${esc(c.mint)}">⧉</span>
+      ${c.strong ? `<span class="pill bad">${esc(t("web.ins.lv.vipstrong"))}</span>` : ""}
+      <div class="small">${lk(chart, "DexScreener")} · ${lk("https://pump.fun/coin/" + c.mint, "pump.fun")} · ${lk("https://solscan.io/token/" + c.mint, "Solscan")}
+      ${c.created_ts ? " · " + esc(t("web.ins.b.opened", { t: new Date(c.created_ts * 1000).toLocaleString("vi-VN"), a: fmtDur(Date.now() / 1000 - c.created_ts) })) : ""}</div></div>
+    <div id="insChart" class="b-chart" data-mint="${esc(c.mint)}"><div class="spin small">${esc(t("web.loading"))}</div></div>
+    ${insTable([t("web.ins.when"), t("web.ins.b.side"), t("web.ins.b.after_open"), t("web.ins.b.mc"), t("web.ins.b.price"), "SOL", t("web.ins.b.tokens"), ""], rows)}`;
+}
+async function drawBoardChart() {
+  const el = $("#insChart"); if (!el) return;
+  const mint = el.dataset.mint;
+  S.insCharts = S.insCharts || {};
+  let hit = S.insCharts[mint];
+  if (!hit || Date.now() - hit.t > 60000) {
+    try { hit = { t: Date.now(), d: await api("/api/insiders/chart?mint=" + encodeURIComponent(mint)) }; S.insCharts[mint] = hit; } catch (_) { if (!hit) { el.innerHTML = `<div class="muted small">${esc(t("web.error"))}</div>`; return; } }
+  }
+  const board = (S.insBoardData || []), coin = board.find((c) => c.mint === mint);
+  if (!coin || $("#insChart") !== el) return;
+  const sup = (coin.supply || {}).ui, solUsd = S.insSolUsd || 0, cs = (hit.d.candles || []).filter((c) => c[4] > 0);
+  if (!cs.length || !sup) { el.innerHTML = `<div class="muted small">${esc(t("web.ins.b.no_chart"))}</div>`; return; }
+  const trades = coin.wallets.flatMap((w) => w.trades.map((tr) => ({ ...boardTrade(tr, coin, solUsd), wallet: w.wallet }))).filter((x) => x.mc);
+  const W = 800, H = 320, L = 58, R = 8, T = 10, B = 26;
+  const t0 = Math.min(cs[0][0], ...trades.map((x) => x.ts)), t1 = Math.max(cs[cs.length - 1][0] + 60 * (hit.d.agg || 1), ...trades.map((x) => x.ts));
+  const mcs = cs.flatMap((c) => [c[2] * sup, c[3] * sup]).concat(trades.map((x) => x.mc)).filter((v) => v > 0);
+  let lo = Math.log10(Math.min(...mcs) * 0.9), hi = Math.log10(Math.max(...mcs) * 1.1);
+  if (hi - lo < 0.3) { lo -= 0.15; hi += 0.15; }
+  const X = (ts) => L + (W - L - R) * (ts - t0) / Math.max(1, t1 - t0), Y = (mc) => T + (H - T - B) * (1 - (Math.log10(mc) - lo) / (hi - lo));
+  const cw = Math.max(1, Math.min(8, (W - L - R) / cs.length * 0.7));
+  let svg = `<svg viewBox="0 0 ${W} ${H}" class="b-svg" preserveAspectRatio="none">`;
+  for (let k = Math.ceil(lo); k <= Math.floor(hi); k++) for (const f of [1, 3]) {
+    const v = f * Math.pow(10, k); if (Math.log10(v) < lo || Math.log10(v) > hi) continue;
+    svg += `<line x1="${L}" x2="${W - R}" y1="${Y(v)}" y2="${Y(v)}" class="b-grid"/><text x="4" y="${Y(v) + 4}" class="b-ax">${fmtUsdK(v)}</text>`;
+  }
+  for (let i = 0; i <= 4; i++) { const ts = t0 + (t1 - t0) * i / 4; svg += `<text x="${X(ts) - (i === 4 ? 40 : i ? 20 : 0)}" y="${H - 6}" class="b-ax">${new Date(ts * 1000).toLocaleTimeString("vi-VN", { hour: "2-digit", minute: "2-digit" })}</text>`; }
+  for (const c of cs) {
+    const up = c[4] >= c[1], x = X(c[0]), y1 = Y(Math.max(c[1], c[4]) * sup), y2 = Y(Math.min(c[1], c[4]) * sup);
+    svg += `<line x1="${x}" x2="${x}" y1="${Y(c[2] * sup)}" y2="${Y(c[3] * sup)}" class="${up ? "b-up" : "b-dn"}"/><rect x="${x - cw / 2}" y="${y1}" width="${cw}" height="${Math.max(1, y2 - y1)}" class="${up ? "b-upf" : "b-dnf"}"/>`;
+  }
+  for (const x of trades) {
+    const px = X(x.ts), py = Y(x.mc), buy = ["BUY", "CREATE", "RECEIVE"].includes(x.kind);
+    const pts = buy ? `${px},${py - 9} ${px - 6},${py + 3} ${px + 6},${py + 3}` : `${px},${py + 9} ${px - 6},${py - 3} ${px + 6},${py - 3}`;
+    svg += `<polygon points="${pts}" class="${buy ? "b-mbuy" : "b-msell"}"><title>${esc(short(x.wallet))} · ${esc(t("web.ins.b.k." + x.kind.toLowerCase()))} ${x.sol ? Number(x.sol).toFixed(2) + " SOL" : ""} · MC ${fmtUsdK(x.mc)} · ${esc(new Date(x.ts * 1000).toLocaleTimeString("vi-VN"))}</title></polygon>`;
+  }
+  svg += `</svg>`;
+  const last = cs[cs.length - 1][4] * sup;
+  el.innerHTML = `<div class="small b-cap">${esc(t("web.ins.b.mc_now"))}: <b>${fmtUsdK(last)}</b> · ${esc(t("web.ins.b.candles", { n: cs.length, a: hit.d.agg || 1 }))} · <span class="b-key-b">▲</span> ${esc(t("web.ins.b.k.buy"))} <span class="b-key-s">▼</span> ${esc(t("web.ins.b.k.sell"))}</div>${svg}`;
+  // current value of what each wallet still holds, at the last price
+  document.querySelectorAll(".b-held[data-held]").forEach((h) => { const u = parseFloat(h.dataset.held); if (u > 0 && !h.dataset.done) { h.dataset.done = 1; h.insertAdjacentHTML("beforeend", ` ≈ <b>${fmtUsdK(u * cs[cs.length - 1][4])}</b>${solUsd ? " (" + (u * cs[cs.length - 1][4] / solUsd).toFixed(2) + " SOL)" : ""}`); } });
+}
 function vipRole(why) {
   const w = why || "";
   return w.startsWith("held") ? "holder" : w.startsWith("received") ? "successor" : w.startsWith("new wallet of") ? "child" : "other";
@@ -1311,10 +1408,11 @@ function vipDash(w, names) {
       <td>${chips || `<span class="c-muted small">${esc(t("web.ins.vd.no_tokens"))}</span>`}${(x.tokens || []).length ? `<details class="ev"><summary>${esc(t("web.ins.vd.all", { n: x.tokens.length, d: x.dust }))}</summary>${all}</details>` : ""}</td>
       <td class="small">${esc(agoTxt(seen[x.wallet]))}</td></tr>`;
   });
+  S.insBoardData = w.board || []; S.insSolUsd = solUsd;
   return `<h2>${esc(t("web.ins.vd.title"))}</h2><div class="muted small">${esc(t("web.ins.vd.note", { m: w.min_sol || 4, s: pf.min_sol || 1 }))}</div>${head}
+    ${boardHtml(w.board, names, solUsd)}
     <h3>${esc(t("web.ins.vd.held", { s: pf.min_sol || 1 }))}</h3>${insTable([t("web.ins.token"), t("web.ins.vd.n_holders"), t("web.ins.vd.value"), t("web.ins.vd.who")], held)}
     <h3>${esc(t("web.ins.vd.alerts", { m: w.min_sol || 4 }))}</h3>${insTable([t("web.ins.when"), t("web.ins.event"), t("web.ins.coin_or_wallet"), "SOL", t("web.ins.by")], alerts)}
-    ${coinsHtml(w.coins, names, w.min_sol)}
     ${paperHtml(w.paper, names)}
     <h3>${esc(t("web.ins.vd.wallets", { n: (pf.wallets || []).length }))}</h3>${insTable([t("web.ins.addr"), t("web.ins.vd.sol"), t("web.ins.vd.tok_value"), t("web.ins.vd.holding"), t("web.ins.vd.last")], wallets)}`;
 }
@@ -1434,6 +1532,8 @@ function bindIns() {
   });
   document.querySelectorAll("[data-insfilter]").forEach((b) => { b.onclick = () => { LS.set("insFilter", b.dataset.insfilter); refreshWatch(); }; });
   document.querySelectorAll("[data-insflip]").forEach((b) => { b.onclick = () => { LS.set("insHideFlip", !LS.get("insHideFlip", true)); refreshWatch(); }; });
+  document.querySelectorAll("[data-insboard]").forEach((b) => { b.onclick = () => { LS.set("insBoard", b.dataset.insboard); refreshWatch(); }; });
+  if ($("#insChart")) drawBoardChart();
   document.querySelectorAll("[data-inscoin]").forEach((b) => { b.onclick = () => { LS.set("insCoin", b.dataset.inscoin); refreshWatch(); }; });
   const nb = $("#insNotify");
   if (nb) nb.onclick = async () => { try { await Notification.requestPermission(); } catch (_) { /* unsupported */ } beep(); refreshWatch(); };

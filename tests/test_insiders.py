@@ -732,3 +732,65 @@ def test_two_special_wallets_on_one_coin_fire_once_and_open_the_paper_trade(tmp_
     assert len(strong) == 1 and strong[0]["n_wallets"] == 2 and strong[0]["paper"] == "open"
     assert not [a for a in vs.handle(BOSS, "c") if a["level"] == "vipstrong"]    # once per coin
     assert w.status()["coins"][0]["mint"] == NEWMINT                               # the coin got its tab
+
+
+# ---------------------------------------------------------------- early-signal board
+from insiders import chart as CH  # noqa: E402
+
+
+def test_new_wallet_funded_with_half_a_sol_is_followed_without_an_alert(tmp_path):
+    sol = 10 ** 9
+    w, r = vip_watcher(tmp_path)
+    fresh = "8xvHWupToGmcv5NoWek7J11LFGGJ7Nkx9Myp6n9LcSLH"
+    txs = {"f": wtx(WALLET, "f", 1_900, transfer=(fresh, sol))}                    # 1 SOL: below the alert level
+    vs = VP.VipStream(w, r, rpc=lambda m, p: txs.get(p[0]), now=lambda: 2_000.0)
+    vs.retry_sleep = False
+    assert vs.handle(WALLET, "f") == [] and fresh in vs.wallets()
+
+
+def test_board_lists_every_trade_with_supply_and_what_is_still_held(tmp_path):
+    sol = 10 ** 9
+    w, r = vip_watcher(tmp_path)
+    txs = {"a": wtx(WALLET, "a", 1_900, NEWMINT, (0, 5_000_000), (20 * sol, 14 * sol)),
+           "b": wtx(WALLET, "b", 1_960, NEWMINT, (5_000_000, 2_000_000), (14 * sol, 18 * sol))}
+
+    def rpc(m, p):
+        if m == "getTokenSupply":
+            return {"value": {"uiAmountString": "1000000000", "decimals": 6}}
+        return txs[p[0]]
+    vs = VP.VipStream(w, r, rpc=rpc, now=lambda: 2_000.0)
+    vs.retry_sleep = False
+    w.vip = vs
+    vs.handle(WALLET, "a")
+    vs.handle(WALLET, "b")
+
+    class PF:
+        raw = {WALLET: (1.0, [(NEWMINT, 2.0)])}
+        updated = 2_000.0
+    w.portfolio = PF()
+    b = w.board_view()[0]
+    assert b["mint"] == NEWMINT and b["supply"] == {"ui": 1e9, "decimals": 6}
+    me = b["wallets"][0]
+    assert [x[1] for x in me["trades"]] == ["BUY", "SELL"] and me["trades"][0][2] == 6.0 and me["held_ui"] == 2.0
+
+
+def test_charts_merge_curve_and_amm_candles_and_cache():
+    calls = []
+
+    def get(url):
+        calls.append(url)
+        if url.endswith("/pools?page=1"):
+            return {"data": [
+                {"attributes": {"address": "CURVE", "reserve_in_usd": "10"}, "relationships": {
+                    "dex": {"data": {"id": "pump-fun"}}, "base_token": {"data": {"id": "solana_M"}}}},
+                {"attributes": {"address": "AMM", "reserve_in_usd": "900"}, "relationships": {
+                    "dex": {"data": {"id": "pumpswap"}}, "base_token": {"data": {"id": "solana_M"}}}}]}
+        if "/CURVE/" in url:
+            return {"data": {"attributes": {"ohlcv_list": [[60, 1, 2, 1, 2, 10], [120, 2, 3, 2, 3, 10]]}}}
+        return {"data": {"attributes": {"ohlcv_list": [[120, 2, 4, 2, 4, 99], [180, 4, 5, 4, 5, 50]]}}}
+    ch = CH.Charts(get=get, now=lambda: 1_000.0)
+    d = ch.candles("M", created_ts=0)
+    assert [c[0] for c in d["candles"]] == [60, 120, 180] and d["candles"][1][5] == 99   # overlap: larger volume
+    n = len(calls)
+    ch.candles("M", created_ts=0)
+    assert len(calls) == n                                                          # cached

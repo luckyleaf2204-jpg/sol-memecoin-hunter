@@ -497,6 +497,12 @@ def create_app(engine: ScannerEngine | None = None, start_scanner: bool = True,
         """Insider scan of the call channel's tokens (research only; the Helius key stays on the server)."""
         return _insiders().status()
 
+    @app.get("/api/insiders/chart")
+    async def insiders_chart(mint: str):
+        if not re.fullmatch(r"[1-9A-HJ-NP-Za-km-z]{32,44}", mint or ""):
+            return JSONResponse({"error": "mint"}, status_code=400)
+        return await asyncio.to_thread(_insiders().chart, mint)
+
     @app.get("/api/insiders/watch")
     async def insiders_watch():
         w = getattr(_insiders(), "watcher", None)

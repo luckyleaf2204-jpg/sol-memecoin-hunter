@@ -426,6 +426,10 @@ class Watcher:
                                                     "n_sell": 0, "n_in": 0, "n_out": 0, "tok_in": 0, "tok_out": 0,
                                                     "first_ts": ev["ts"], "last_ts": ev["ts"]})
         w["last_ts"] = ev["ts"]
+        tr = w.setdefault("trades", [])                      # every trade, for the early-signal board
+        if not any(x[4] == ev.get("sig") and x[1] == ev["kind"] for x in tr[-5:]):
+            tr.append([ev["ts"], ev["kind"], ev.get("sol") or 0, ev.get("tokens") or 0, ev.get("sig")])
+            del tr[:-60]
         if ev["kind"] in ("BUY", "CREATE"):
             w["buy_sol"] = round(w["buy_sol"] + ev["sol"], 4)
             w["n_buy"] += 1
@@ -488,6 +492,36 @@ class Watcher:
                             "sol": round(sum(c["wallets"][w]["buy_sol"] for w in holders), 3),
                             "holders": holders[:10], **{k: c.get(k) for k in ("symbol", "name", "chart", "mcap", "age_h")}})
         return out
+
+    def board_view(self, limit: int = 30) -> list[dict]:
+        """Coins the special wallets traded (newest activity first, two-wallet coins first): every trade of every
+        wallet, the coin's supply / creation for MC and age, and what each wallet still holds now."""
+        pf = getattr(self, "portfolio", None)
+        raw = (pf.raw if pf is not None else {}) or {}
+        supply = self.state.get("supply", {})
+        meta = self.state.get("meta", {})
+        strong = (self.state.get("vip") or {}).get("strong_done", {})
+        out = []
+        for m, c in self.state.get("coins", {}).items():
+            ws = [(w, x) for w, x in c["wallets"].items() if x.get("trades")]
+            if not ws:
+                continue
+            wallets = []
+            for w, x in ws:
+                held = None
+                if w in raw:
+                    held = next((a for mm, a in raw[w][1] if mm == m), 0.0)
+                wallets.append({"wallet": w, "why": x.get("why"), "trades": x["trades"], "buy_sol": x["buy_sol"],
+                                "sell_sol": x["sell_sol"], "tok_in": x["tok_in"], "tok_out": x["tok_out"],
+                                "held_ui": held})
+            wallets.sort(key=lambda r: r["trades"][0][0])
+            info = meta.get(m, {})
+            out.append({"mint": m, "symbol": c.get("symbol") or info.get("symbol"), "name": c.get("name") or info.get("name"),
+                        "chart": c.get("chart"), "created_ts": info.get("created_ts"), "supply": supply.get(m),
+                        "strong": m in strong or c.get("strong"), "last_ts": c.get("last_ts"),
+                        "first_ts": min(r["trades"][0][0] for r in wallets), "wallets": wallets})
+        out.sort(key=lambda c: (not c["strong"], -len(c["wallets"]), -(c["last_ts"] or 0)))
+        return out[:limit]
 
     def coins_view(self, limit: int = 40) -> list[dict]:
         out = []
@@ -563,6 +597,8 @@ class Watcher:
                     "notified": self.state.get("notified", 0), "min_sol": MIN_SOL, "coins": self.coins_view(),
                     "vip": self.vip.status() if getattr(self, "vip", None) else None,
                     "mode": getattr(self, "mode", "broad"),
+                    "board": self.board_view() if getattr(self, "vip", None) else None,
+                    "portfolio_ts": getattr(getattr(self, "portfolio", None), "updated", None),
                     "portfolio": self.portfolio.status() if getattr(self, "portfolio", None) else None,
                     "paper": {"summary": self.paper.summary(), "rows": self.paper.rows(60)} if self.paper else None,
                     "children": len(self.state["children"]), "last_error": self.state["last_error"],

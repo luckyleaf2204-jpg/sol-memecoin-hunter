@@ -20,6 +20,7 @@ from insiders.watch import MIN_SOL, Rpc, analyse
 
 WS_URL = os.environ.get("INSIDER_WS") or "wss://api.mainnet-beta.solana.com"
 CHILD_TTL_S = 7 * 86400
+ADOPT_MIN_SOL = float(os.environ.get("INSIDER_ADOPT_MIN_SOL") or 0.5)   # a new wallet funded with this joins
 MAX_WALLETS = 300
 
 
@@ -99,6 +100,10 @@ class VipStream:
         for ev in analyse(tx, wallet):
             with self.w.lock:
                 self.w._ledger(ev, why)
+            if ev.get("mint") and ev["kind"] != "FUND":
+                self._coin_facts(ev["mint"])
+            if ev["kind"] == "FUND" and (ev.get("sol") or 0) >= ADOPT_MIN_SOL:
+                self._adopt(ev["to"], wallet, ev["sol"])          # followed from 0.5 SOL, alerted from MIN_SOL
             sol = ev.get("sol") or 0
             if ev["kind"] in ("RECEIVE", "SEND") and ev.get("mint") and not sol:
                 v = self.w._value_sol(ev["mint"], ev.get("tokens") or 0)
@@ -111,8 +116,6 @@ class VipStream:
                 a.update({k: info.get(k) for k in ("name", "symbol", "mcap", "chart")})
                 if info.get("created_ts"):
                     a["age_h"] = round(max(0.0, self.now() - info["created_ts"]) / 3600, 2)
-            if ev["kind"] == "FUND":
-                self._adopt(ev["to"], wallet, sol)
             out.append(a)
             if ev["kind"] in ("BUY", "RECEIVE", "CREATE") and ev.get("mint"):
                 with self.w.lock:
@@ -155,6 +158,18 @@ class VipStream:
             if p:
                 s["paper"] = p["status"]
         return s
+
+    def _coin_facts(self, mint: str) -> None:
+        """Supply / decimals (for the market cap) and name / creation (for the age) of a coin, once."""
+        sup = self.w.state.setdefault("supply", {})
+        if mint not in sup:
+            try:
+                v = (self.rpc("getTokenSupply", [mint]) or {}).get("value") or {}
+                sup[mint] = {"ui": float(v.get("uiAmountString") or 0), "decimals": int(v.get("decimals") or 0)}
+            except Exception:                                 # facts are a nicety: never block the alert
+                pass
+        if mint not in self.w.state.get("meta", {}):
+            self.w._meta(mint)
 
     def _adopt(self, to: str, parent: str, sol: float) -> None:
         kind = KNOWN_LABELS.get(to, (None, None))[1]

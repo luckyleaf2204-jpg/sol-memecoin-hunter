@@ -44,6 +44,15 @@ class InsiderService:
                 "progress": list(self.log), "can_run": bool(self.key), "result": light(self.result),
                 "watch": self.watcher.status() if getattr(self, "watcher", None) else None}
 
+    def chart(self, mint: str) -> dict:
+        """Candles for the early-signal board (GeckoTerminal; cached)."""
+        if not getattr(self, "charts", None):
+            from insiders.chart import Charts
+            self.charts = Charts()
+        w = getattr(self, "watcher", None)
+        created = ((w.state.get("meta") or {}).get(mint) or {}).get("created_ts") if w else None
+        return self.charts.candles(mint, created)
+
     def start_watch(self, state_path: Path) -> bool:
         """Start the 5-minute deployer watch in a daemon thread (public RPC; no key needed)."""
         if getattr(self, "watcher", None) or not self.result:

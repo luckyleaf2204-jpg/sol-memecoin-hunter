@@ -129,6 +129,7 @@ class Portfolio:
         self.wallets_fn, self.rpc, self.now = wallets_fn, rpc, now
         self.prices = Prices(get=get, now=now)
         self.view: dict | None = None
+        self.raw: dict = {}
         self.updated = None
         self.error = None
         self.seconds = None
@@ -149,6 +150,7 @@ class Portfolio:
             for w, h in ex.map(one, list(wallets)):
                 if h is not None:
                     raw[w] = h
+        self.raw = raw
         mints = {m for _, toks in raw.values() for m, _ in toks} | {SOL}
         self.prices.refresh(mints)
         self.view = build(wallets, raw, self.prices, self.prices.usd.get(SOL))
