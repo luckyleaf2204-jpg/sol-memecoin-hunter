@@ -20,6 +20,12 @@ from insiders.watch import MIN_SOL, Rpc, analyse
 
 WS_URL = os.environ.get("INSIDER_WS") or "wss://api.mainnet-beta.solana.com"
 CHILD_TTL_S = 7 * 86400
+STRONG_WINDOW_S = int(os.environ.get("INSIDER_STRONG_WINDOW_S") or 86400)   # >= 2 families inside this (blockTime)
+STRONG_REPEAT_S = 86400          # a coin can be STRONG again a day later
+WORKERS = 3
+QUEUE_MAX = 2000
+SILENT_S = 120                   # no message at all for this long: the socket is dead, reconnect
+SWEEP_S = 600                    # expired children are unsubscribed this often
 ADOPT_MIN_SOL = float(os.environ.get("INSIDER_ADOPT_MIN_SOL") or 0.5)   # a new wallet funded with this joins
 MAX_WALLETS = 300
 
@@ -69,12 +75,34 @@ class VipStream:
         self.queue: asyncio.Queue | None = None
         self.ws = None
         self.subs: dict[int, str] = {}
+        self.result = result
 
     def wallets(self) -> dict[str, str]:
+        """The base list always first and always whole; live children (newest kept) fill the rest up to MAX_WALLETS."""
         now = self.now()
-        kids = {a: f"new wallet of {v['parent'][:6]}… ({v['sol']} SOL)" for a, v in self.state["children"].items()
-                if now - v["since"] < CHILD_TTL_S}
-        return dict(list({**self.base, **kids}.items())[:MAX_WALLETS])
+        kids = sorted(((a, v) for a, v in self.state["children"].items() if now - v["since"] < CHILD_TTL_S),
+                      key=lambda x: -x[1]["since"])[:max(0, MAX_WALLETS - len(self.base))]
+        return {**self.base, **{a: f"new wallet of {v['parent'][:6]}… ({v['sol']} SOL)" for a, v in kids}}
+
+    def family(self, wallet: str) -> str:
+        """One vote per person: a child counts as its root parent, a successor as the holder that funded it."""
+        seen = set()
+        kids = self.state.get("children", {})
+        while wallet in kids and wallet not in seen:
+            seen.add(wallet)
+            wallet = kids[wallet]["parent"]
+        for s in (self.result.get("vip") or {}).get("successors", []):
+            if s["wallet"] == wallet and s.get("from"):
+                return sorted(s["from"])[0]
+        return wallet
+
+    def prune_children(self) -> list[str]:
+        """Drop children older than CHILD_TTL_S from the state; returns them (to unsubscribe)."""
+        now = self.now()
+        old = [a for a, v in self.state["children"].items() if now - v["since"] >= CHILD_TTL_S]
+        for a in old:
+            del self.state["children"][a]
+        return old
 
     # ---------------------------------------------------------------- analysis of one pushed transaction
     def handle(self, wallet: str, sig: str) -> list[dict]:
@@ -97,7 +125,8 @@ class VipStream:
         why = self.wallets().get(wallet, "special wallet")
         self.state.setdefault("last_seen", {})[wallet] = tx.get("blockTime")
         out = []
-        for ev in analyse(tx, wallet):
+        evs = analyse(tx, wallet)
+        for ev in evs:
             with self.w.lock:
                 self.w._ledger(ev, why)
             if ev.get("mint") and ev["kind"] != "FUND":
@@ -120,11 +149,12 @@ class VipStream:
             if ev["kind"] in ("BUY", "RECEIVE", "CREATE") and ev.get("mint"):
                 with self.w.lock:
                     self.w._qualify(a)                       # the coin gets its tab
-                strong = self._together(ev["mint"], wallet, a)
+                strong = self._together(ev["mint"], wallet, a, tx.get("blockTime"))
                 if strong:
                     out.append(strong)
         got, frm = sol_in(tx, wallet)
-        if got >= MIN_SOL:
+        moved = any(e["kind"] in ("SELL", "SEND", "FUND") for e in evs)   # the SOL is a sale's proceeds: said already
+        if got >= MIN_SOL and not moved and frm not in self.wallets():
             out.append({"ts": tx.get("blockTime"), "sig": sig, "wallet": wallet, "kind": "SOL_IN", "from": frm,
                         "sol": round(got, 3), "why": why, "level": "vip"})
         if out:
@@ -135,23 +165,27 @@ class VipStream:
             self.w._send(out)
         return out
 
-    def _together(self, mint: str, wallet: str, a: dict) -> dict | None:
-        """>= 2 different special wallets bought / received the same coin (>= MIN_SOL each) within 24 h: one
-        'vipstrong' alert per coin (Telegram + the paper trade)."""
-        now = self.now()
+    def _together(self, mint: str, wallet: str, a: dict, ts: float | None = None) -> dict | None:
+        """>= 2 different special-wallet FAMILIES bought / received the same coin (>= MIN_SOL each) within
+        STRONG_WINDOW_S of chain time (blockTime): a 'vipstrong' alert (Telegram + the paper trade). A parent and its
+        children, or a holder and its successors, are one vote. The same coin can be STRONG again after a day."""
+        ts = ts or self.now()
         by = self.state.setdefault("by_mint", {})
         seen = by.setdefault(mint, {})
-        seen[wallet] = now
+        seen[wallet] = max(ts, seen.get(wallet, 0))
         for m in list(by):
-            by[m] = {w: t for w, t in by[m].items() if now - t < 86400}
+            by[m] = {w: t for w, t in by[m].items() if ts - t < STRONG_WINDOW_S}
             if not by[m]:
                 del by[m]
         done = self.state.setdefault("strong_done", {})
-        if len(by.get(mint, {})) < 2 or mint in done:
+        for m in [m for m, t in done.items() if ts - t >= STRONG_REPEAT_S]:
+            del done[m]
+        fams = {self.family(w) for w in by.get(mint, {})}
+        if len(fams) < 2 or mint in done:
             return None
-        done[mint] = now
-        s = {**a, "kind": "VIPSTRONG", "level": "vipstrong", "n_wallets": len(by[mint]),
-             "holders": sorted(by[mint])[:10], "why": "≥ 2 special wallets on this coin"}
+        done[mint] = ts
+        s = {**a, "kind": "VIPSTRONG", "level": "vipstrong", "n_wallets": len(by[mint]), "n_families": len(fams),
+             "holders": sorted(by[mint])[:10], "why": "≥ 2 special wallet families on this coin"}
         paper = getattr(self.w, "paper", None)
         if paper:
             p = paper.open(s)
@@ -176,6 +210,13 @@ class VipStream:
         if kind in ("exchange", "fee", "deposit") or not on_curve(to) or to in self.base:
             return
         if to not in self.state["children"]:
+            self.prune_children()
+            kids = self.state["children"]
+            if len(self.base) + len(kids) >= MAX_WALLETS and kids:     # full: the oldest child makes room
+                oldest = min(kids, key=lambda a: kids[a]["since"])
+                del kids[oldest]
+                if self.ws is not None and self.queue is not None:
+                    self.queue.put_nowait(("unsubscribe", oldest))
             self.state["children"][to] = {"parent": parent, "since": self.now(), "sol": sol}
             if self.ws is not None and self.queue is not None:
                 self.queue.put_nowait(("subscribe", to))
@@ -190,6 +231,21 @@ class VipStream:
         connect = self.connect or (lambda: websockets.connect(self.url, max_size=2 ** 22, ping_interval=20,
                                                                ping_timeout=30))
         backoff = 1.0
+        work: asyncio.Queue = asyncio.Queue(maxsize=QUEUE_MAX)      # (wallet, signature) for the workers
+        queued: set[str] = set()
+
+        async def worker():
+            while True:
+                addr, sig = await work.get()
+                try:
+                    await asyncio.to_thread(self.handle, addr, sig)
+                except Exception as e:                               # one bad transaction never stops the stream
+                    self.stat["error"] = f"handle: {type(e).__name__}"
+                finally:
+                    queued.discard(sig)
+                    work.task_done()
+
+        workers = [asyncio.create_task(worker()) for _ in range(WORKERS)]
         while not stop.is_set():
             pending: dict[int, str] = {}
             try:
@@ -200,37 +256,70 @@ class VipStream:
                         await self._subscribe(ws, addr, k)
                     self.stat.update(connected=True, error=None)
                     backoff, nxt = 1.0, len(pending) + 1
+                    heard, swept = time.monotonic(), time.monotonic()
                     while not stop.is_set():
                         while not self.queue.empty():
-                            _, addr = self.queue.get_nowait()
-                            pending[nxt] = addr
-                            await self._subscribe(ws, addr, nxt)
+                            op, addr = self.queue.get_nowait()
+                            if op == "unsubscribe":
+                                sid = next((s for s, a in self.subs.items() if a == addr), None)
+                                if sid is not None:
+                                    await ws.send(json.dumps({"jsonrpc": "2.0", "id": nxt, "method": "logsUnsubscribe",
+                                                              "params": [sid]}))
+                                    self.subs.pop(sid, None)
+                            else:
+                                pending[nxt] = addr
+                                await self._subscribe(ws, addr, nxt)
                             nxt += 1
+                        if time.monotonic() - swept > SWEEP_S:              # expired children leave the socket
+                            swept = time.monotonic()
+                            for addr in self.prune_children():
+                                self.queue.put_nowait(("unsubscribe", addr))
                         try:
                             raw = await asyncio.wait_for(ws.recv(), 5)
                         except asyncio.TimeoutError:
+                            if time.monotonic() - heard > SILENT_S:
+                                raise ConnectionError(f"silent for {SILENT_S} s") from None
                             continue
-                        msg = json.loads(raw)
+                        heard = time.monotonic()
                         self.stat["last_msg"] = self.now()
-                        if "id" in msg and msg.get("id") in pending:          # subscription confirmed
-                            self.subs[msg["result"]] = pending.pop(msg["id"])
+                        try:
+                            msg = json.loads(raw)
+                        except ValueError:
+                            self.stat["bad_json"] = self.stat.get("bad_json", 0) + 1
+                            continue
+                        if not isinstance(msg, dict):
+                            continue
+                        if "error" in msg:                                   # a refused (un)subscribe: try later
+                            addr = pending.pop(msg.get("id"), None)
+                            self.stat["sub_errors"] = self.stat.get("sub_errors", 0) + 1
+                            if addr:
+                                self.queue.put_nowait(("subscribe", addr))
+                            continue
+                        if msg.get("id") in pending:                         # subscription confirmed
+                            addr = pending.pop(msg["id"])
+                            if msg.get("result") is not None:
+                                self.subs[msg["result"]] = addr
                             self.stat["subscribed"] = len(self.subs)
                             continue
                         prm = msg.get("params") or {}
                         val = ((prm.get("result") or {}).get("value") or {})
                         addr = self.subs.get(prm.get("subscription"))
-                        if addr and val.get("signature") and val.get("err") is None:
+                        sig = val.get("signature")
+                        if addr and sig and val.get("err") is None and sig not in queued and sig not in self.seen:
                             self.stat["pushed"] += 1
                             try:
-                                await asyncio.to_thread(self.handle, addr, val["signature"])
-                            except Exception as e:                   # one bad transaction never stops the stream
-                                self.stat["error"] = f"handle: {type(e).__name__}"
+                                work.put_nowait((addr, sig))                 # never wait on a slow fetch here
+                                queued.add(sig)
+                            except asyncio.QueueFull:
+                                self.stat["missed"] += 1
             except Exception as e:                                   # dropped: reconnect and resubscribe
                 self.stat.update(connected=False, error=f"{type(e).__name__}: {str(e)[:80]}")
                 self.stat["reconnects"] += 1
                 self.ws = None
                 await asyncio.sleep(backoff)
                 backoff = min(60.0, backoff * 2)
+        for t in workers:
+            t.cancel()
         self.stat["connected"] = False
 
     def status(self) -> dict:

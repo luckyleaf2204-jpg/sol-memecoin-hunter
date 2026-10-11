@@ -293,6 +293,7 @@ def test_pnl_prices_the_dev_buy_inside_the_create_transaction():
 from insiders import watch as WT  # noqa: E402
 
 NEWMINT = "7uqfEqdd9strJVYiju6kasjCj6AzjBF2S1GmWRhdpump"
+TWIN = "8xvHWupToGmcv5NoWek7J11LFGGJ7Nkx9Myp6n9LcSLH"
 
 
 def wtx(wallet, sig, ts, mint=None, tok=(0, 0), sol=(0, 0), create=False, transfer=None):
@@ -725,11 +726,15 @@ def test_two_special_wallets_on_one_coin_fire_once_and_open_the_paper_trade(tmp_
     txs = {"a": wtx(WALLET, "a", 1_900, NEWMINT, (0, 5), (20 * sol, 14 * sol)),
            "b": wtx(BOSS, "b", 1_950, NEWMINT, (0, 7), (20 * sol, 12 * sol)),
            "c": wtx(BOSS, "c", 1_960, NEWMINT, (7, 9), (12 * sol, 5 * sol))}
+    txs["d"] = wtx(TWIN, "d", 1_970, NEWMINT, (0, 5), (20 * sol, 14 * sol))
+    r["vip"]["holders"].append({"wallet": TWIN, "profit_sol": 5.0, "coins": ["X"]})   # a second, unrelated holder
     vs = VP.VipStream(w, r, rpc=lambda m, p: txs[p[0]], now=lambda: 2_000.0)
     vs.retry_sleep = False
     assert not [a for a in vs.handle(WALLET, "a") if a["level"] == "vipstrong"]
-    strong = [a for a in vs.handle(BOSS, "b") if a["level"] == "vipstrong"]
-    assert len(strong) == 1 and strong[0]["n_wallets"] == 2 and strong[0]["paper"] == "open"
+    # BOSS is WALLET's successor: the same person, one vote
+    assert not [a for a in vs.handle(BOSS, "b") if a["level"] == "vipstrong"]
+    strong = [a for a in vs.handle(TWIN, "d") if a["level"] == "vipstrong"]
+    assert len(strong) == 1 and strong[0]["n_families"] == 2 and strong[0]["paper"] == "open"
     assert not [a for a in vs.handle(BOSS, "c") if a["level"] == "vipstrong"]    # once per coin
     assert w.status()["coins"][0]["mint"] == NEWMINT                               # the coin got its tab
 
@@ -816,3 +821,155 @@ def test_board_hides_wallets_whose_buys_stay_under_the_threshold(tmp_path):
     b = w.board_view()
     assert [c["mint"] for c in b] == [NEWMINT]                                     # the dust-only coin has no tab
     assert [x["wallet"] for x in b[0]["wallets"]] == [WALLET]                      # the 0.3 SOL buyer is hidden
+
+
+# ---------------------------------------------------------------- expert review: P0 / P1 fixes
+def test_strong_uses_chain_time_window_and_can_fire_again_a_day_later(tmp_path, monkeypatch):
+    sol = 10 ** 9
+    monkeypatch.setattr(VP, "STRONG_WINDOW_S", 900)
+    w, r = vip_watcher(tmp_path)
+    r["vip"]["holders"].append({"wallet": TWIN, "profit_sol": 5.0, "coins": ["X"]})
+    buy = lambda who, s, ts: wtx(who, s, ts, NEWMINT, (0, 5), (20 * sol, 14 * sol))  # noqa: E731
+    txs = {"a": buy(WALLET, "a", 10_000), "b": buy(TWIN, "b", 12_000),               # 33 min apart: not together
+           "c": buy(WALLET, "c", 12_300),                                             # 5 min after b: together
+           "d": buy(TWIN, "d", 12_300 + 86_400), "e": buy(WALLET, "e", 12_400 + 86_400)}
+    vs = VP.VipStream(w, r, rpc=lambda m, p: txs[p[0]], now=lambda: 1.0)              # machine clock is irrelevant
+    vs.retry_sleep = False
+    lv = lambda s, who: [a for a in vs.handle(who, s) if a["level"] == "vipstrong"]  # noqa: E731
+    assert not lv("a", WALLET) and not lv("b", TWIN)
+    assert len(lv("c", WALLET)) == 1
+    assert not lv("d", TWIN)
+    assert len(lv("e", WALLET)) == 1                                                  # a day later: STRONG again
+
+
+def test_sol_in_is_not_repeated_for_sale_proceeds_or_list_transfers(tmp_path):
+    sol = 10 ** 9
+    w, r = vip_watcher(tmp_path)
+
+    def recv(sig, src, tok=None):
+        tx = wtx(WALLET, sig, 1_900, NEWMINT if tok else None, tok or (0, 0), (sol, 9 * sol))
+        tx["transaction"]["message"]["instructions"].append(
+            {"parsed": {"type": "transfer", "info": {"source": src, "destination": WALLET, "lamports": 8 * sol}}})
+        return tx
+    txs = {"sale": recv("sale", CEX, (5, 0)), "plain": recv("plain", CEX), "inner": recv("inner", BOSS)}
+    vs = VP.VipStream(w, r, rpc=lambda m, p: txs[p[0]], now=lambda: 2_000.0)
+    vs.retry_sleep = False
+    kinds = lambda s: [a["kind"] for a in vs.handle(WALLET, s)]  # noqa: E731
+    assert "SOL_IN" not in kinds("sale")                  # the SELL already said it
+    assert "SOL_IN" in kinds("plain")
+    assert "SOL_IN" not in kinds("inner")                 # from a wallet of the list: an internal move
+
+
+def test_children_are_capped_newest_first_and_expire(tmp_path, monkeypatch):
+    w, r = vip_watcher(tmp_path)
+    clock = [1_000.0]
+    vs = VP.VipStream(w, r, rpc=lambda m, p: None, now=lambda: clock[0])
+    monkeypatch.setattr(VP, "MAX_WALLETS", len(vs.base) + 1)
+    vs._adopt(TWIN, WALLET, 2.0)
+    clock[0] += 10
+    vs._adopt(CEX, WALLET, 2.0)                           # full: the older child makes room
+    assert set(vs.state["children"]) == {CEX} and set(vs.base) <= set(vs.wallets())
+    clock[0] += VP.CHILD_TTL_S
+    assert vs.prune_children() == [CEX] and set(vs.wallets()) == set(vs.base)
+
+
+def test_websocket_survives_bad_messages_and_slow_transactions(tmp_path):
+    w, r = vip_watcher(tmp_path)
+    stop = threading.Event()
+    done, sent = [], []
+    msgs = ["{not json", json.dumps({"jsonrpc": "2.0", "id": 1, "result": 11}),
+            json.dumps({"jsonrpc": "2.0", "id": 2, "error": {"code": -32000, "message": "busy"}})]
+
+    def note(sig):
+        return json.dumps({"method": "logsNotification", "params": {"subscription": 11,
+                           "result": {"value": {"signature": sig, "err": None}}}})
+    msgs += [note("slow"), note("fast")]
+
+    class WS:
+        async def send(self, s):
+            sent.append(json.loads(s))
+
+        async def recv(self):
+            if msgs:
+                return msgs.pop(0)
+            if len(done) >= 2:
+                stop.set()
+            await asyncio.sleep(0.02)
+            raise asyncio.TimeoutError
+
+    class Ctx:
+        async def __aenter__(self):
+            return WS()
+
+        async def __aexit__(self, *a):
+            return False
+    vs = VP.VipStream(w, r, connect=lambda: Ctx(), now=lambda: 2_000.0)
+
+    def handle(addr, sig):
+        time.sleep(0.4 if sig == "slow" else 0)
+        done.append(sig)
+    vs.handle = handle
+    asyncio.run(asyncio.wait_for(vs.run(stop), 10))
+    assert done == ["fast", "slow"]                        # the slow fetch did not hold the fast one back
+    assert vs.stat["bad_json"] == 1 and vs.stat["sub_errors"] == 1 and vs.stat["reconnects"] == 0
+    subs = [m["params"][0]["mentions"][0] for m in sent if m["method"] == "logsSubscribe"]
+    assert subs.count(BOSS) == 2                           # the refused subscription was asked again
+
+
+def test_rpc_waits_retry_after_and_does_not_retry_final_errors():
+    import urllib.error
+    slept = []
+    rpc = WT.Rpc(gap_s=0, sleep=slept.append)
+    answers = [urllib.error.HTTPError("u", 429, "busy", {"Retry-After": "3"}, None), b'{"result": 7}']
+
+    def op(req):
+        a = answers.pop(0)
+        if isinstance(a, Exception):
+            raise a
+        return a
+    rpc._open = op
+    assert rpc("getSlot", []) == 7 and max(slept) >= 3
+    calls = []
+    rpc._open = lambda req: calls.append(1) or b'{"error": {"code": -32602, "message": "bad params"}}'
+    with pytest.raises(RuntimeError):
+        rpc("getSlot", [])
+    assert len(calls) == 1                                 # a final answer is not asked again
+
+
+def test_insider_modules_never_sign_or_send_transactions():
+    import pathlib
+    import re
+    forbidden = re.compile(r"Keypair|solders|nacl\.signing|sendTransaction|sendRawTransaction|/swap/v1/swap\b|"
+                           r"/swap-instructions|private_key|secret_key")
+    for f in pathlib.Path(WT.__file__).parent.glob("*.py"):
+        assert not forbidden.search(f.read_text(encoding="utf-8")), f.name
+
+
+# ---------------------------------------------------------------- wallet quality per (wallet, coin)
+from insiders import pairs as PR  # noqa: E402
+
+
+def test_pair_win_needs_a_hold_and_a_profit_and_counts_unsold_positions():
+    hold_win = [[0, "buy", 2.0, 100], [900, "sell", 3.0, 60], [2000, "sell", 1.0, 40]]
+    flip = [[0, "buy", 2.0, 100], [60, "sell", 4.0, 100]]
+    hold_loss = [[0, "buy", 2.0, 100], [900, "sell", 1.0, 100]]
+    unsold = [[0, "buy", 2.0, 100]]
+    assert PR.pair_result(hold_win, 5000)["win"] is True
+    assert PR.pair_result(flip, 5000)["win"] is False                              # sold half within a minute
+    assert PR.pair_result(hold_loss, 5000)["win"] is False                         # held, but lost
+    u = PR.pair_result(unsold, 5000, mark_sol_per_token=0.05)
+    assert u["unsold"] and u["hold_s"] == 5000 and u["win"] is True and u["pnl_mult"] == 2.5
+    assert PR.pair_result(unsold, 5000)["win"] is False                            # no price: marked at zero
+    free = PR.pair_result([[0, "in", 0, 100], [900, "sell", 1.0, 100]], 5000)
+    assert free["cost"] == "transfer" and free["pnl_mult"] is None and free["win"] is True
+
+
+def test_main_list_needs_two_winning_coins():
+    def w(win):
+        return {"win": win, "pnl_sol": 1.0}
+    pairs = {("A", "m1"): w(True), ("A", "m2"): w(True), ("B", "m1"): w(True), ("B", "m3"): w(False),
+             ("X", "m1"): w(True), ("X", "m2"): w(True)}
+    main, watch, wins = PR.build_lists(pairs, exclude={"X"})
+    assert main == {"A"} and watch == {"B"} and "X" not in wins
+    s = PR.summary(pairs, main, watch, drop={"A"})
+    assert s["main"] == 0 and s["watch"] == 1

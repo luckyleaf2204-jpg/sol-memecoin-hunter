@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import json
 import os
+import random
 import threading
 import time
 import urllib.error
@@ -48,26 +49,54 @@ class Rpc:
         self._last = 0.0
         self._lock = threading.Lock()
 
-    def __call__(self, method: str, params: list):
-        with self._lock:                                     # requests start >= gap_s apart (public RPC limits)
+    RETRY_CODES = (-32005, -32429, 429)                      # node busy / rate limited: worth another try
+
+    def _pace(self) -> None:
+        with self._lock:                                     # every try starts >= gap_s after the previous one
             wait = self.gap_s - (time.time() - self._last)
             if wait > 0:
                 self.sleep(wait)
             self._last = time.time()
+
+    def _open(self, req):
+        return urllib.request.urlopen(req, timeout=40).read()
+
+    def __call__(self, method: str, params: list):
         body = json.dumps({"jsonrpc": "2.0", "id": 1, "method": method, "params": params}).encode()
+        why = "?"
         for k in range(4):
+            self._pace()
             try:
                 req = urllib.request.Request(self.url, data=body, headers={"Content-Type": "application/json"})
-                res = json.loads(urllib.request.urlopen(req, timeout=40).read())
-                self.calls += 1
-                if res.get("error"):
-                    raise RuntimeError(str(res["error"])[:120])
-                return res.get("result")
-            except (urllib.error.URLError, TimeoutError, ConnectionError, RuntimeError) as e:
-                if k == 3:
-                    self.errors += 1
-                    raise RuntimeError(f"{type(e).__name__}") from None
-                self.sleep(2 * 2 ** k)
+                res = json.loads(self._open(req))
+            except urllib.error.HTTPError as e:
+                why = f"HTTP {e.code}"
+                if e.code in (429, 502, 503, 504):
+                    try:
+                        wait = float((e.headers or {}).get("Retry-After") or 0)
+                    except (TypeError, ValueError):
+                        wait = 0
+                    self.sleep(min(max(wait, 2 * 2 ** k), 30) + random.random())
+                    continue
+                self.errors += 1
+                raise RuntimeError(why) from None
+            except (urllib.error.URLError, TimeoutError, ConnectionError, ValueError) as e:
+                why = type(e).__name__                       # network / broken JSON: retry with backoff
+                self.sleep(2 * 2 ** k + random.random())
+                continue
+            self.calls += 1
+            err = res.get("error")
+            if err:
+                code = err.get("code") if isinstance(err, dict) else None
+                if code in self.RETRY_CODES:
+                    why = f"rpc {code}"
+                    self.sleep(2 * 2 ** k + random.random())
+                    continue
+                self.errors += 1
+                raise RuntimeError(str(err)[:120])            # a final answer (bad params, not found...): no retry
+            return res.get("result")
+        self.errors += 1
+        raise RuntimeError(f"retries exhausted: {why}")
 
 
 def wallet_styles(result: dict) -> dict[str, dict]:
