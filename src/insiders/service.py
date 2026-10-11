@@ -77,6 +77,15 @@ class InsiderService:
             from insiders.watch import Rpc
             self.watcher.vip = VipStream(self.watcher, self.result)
             self.watcher.vip.start(self.watch_stop)
+            if (os.environ.get("INSIDER_SHADOW") or "1") != "0":     # live measurement of every signal (paper)
+                from insiders.shadow import Shadow
+                w = self.watcher
+
+                def sold_half(mint, wallet):
+                    x = ((w.state.get("coins") or {}).get(mint) or {}).get("wallets", {}).get(wallet) or {}
+                    return bool(x.get("tok_in")) and x.get("tok_out", 0) >= x["tok_in"] / 2
+                w.shadow = Shadow(w.state, sold_half=sold_half, meta=w._meta, lock=w.lock)
+                threading.Thread(target=w.shadow.run_forever, args=(self.watch_stop, w.save), daemon=True).start()
             self.watcher.portfolio = Portfolio(self.watcher.vip.wallets, Rpc(gap_s=0.25))
             threading.Thread(target=self.watcher.portfolio.run_forever, args=(self.watch_stop,), daemon=True).start()
         return True

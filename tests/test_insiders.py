@@ -973,3 +973,104 @@ def test_main_list_needs_two_winning_coins():
     assert main == {"A"} and watch == {"B"} and "X" not in wins
     s = PR.summary(pairs, main, watch, drop={"A"})
     assert s["main"] == 0 and s["watch"] == 1
+
+
+# ---------------------------------------------------------------- shadow measurement of live signals
+from insiders import shadow as SH  # noqa: E402
+
+
+class Clock:
+    def __init__(self, t=1_000.0):
+        self.t = t
+
+    def __call__(self):
+        return self.t
+
+
+def shadow(prices, sold=None):
+    clk, state = Clock(), {}
+    feed = {"p": prices}
+    sh = SH.Shadow(state, prices=lambda ids: {m: {"usdPrice": feed["p"]} for m in ids} if feed["p"] else {},
+                   now=clk, sold_half=sold or (lambda m, w: False))
+    return sh, clk, feed
+
+
+def test_shadow_one_single_signal_per_coin_and_day_later_wallets_join():
+    sh, clk, feed = shadow(1.0)
+    assert sh.signal("single", NEWMINT, WALLET, 1_000, 5.0, "main")["entry"] == 1.0
+    assert sh.signal("single", NEWMINT, BOSS, 1_100, 6.0, "none") is None
+    x = sh.s["signals"][0]
+    assert [w["wallet"] for w in x["wallets"]] == [WALLET, BOSS] and x["tier"] == "main"
+    assert sh.signal("strong", NEWMINT, BOSS, 1_100, 6.0, "main")["kind"] == "strong"   # its own record
+    assert sh.signal("single", NEWMINT, BOSS, 1_000 + 90_000, 6.0, "none") is not None  # a day later: new
+
+
+def test_shadow_waits_for_a_price_then_gives_up():
+    sh, clk, feed = shadow(None)
+    x = sh.signal("single", NEWMINT, WALLET, 1_000, 5.0, "watch")
+    assert x["status"] == "wait_price"
+    clk.t += 60
+    feed["p"] = 2.0
+    sh.tick()
+    assert x["status"] == "live" and x["entry"] == 2.0 and x["entry_ts"] == clk.t     # the delay is real
+    feed["p"] = None
+    y = sh.signal("single", MINT, WALLET, 1_000, 5.0, "watch")
+    clk.t += SH.NO_PRICE_GIVEUP_S + 1
+    sh.tick()
+    assert y["status"] == "no_price"
+
+
+def run_path(path, sold=None):
+    """Prices every 30 s along `path` (multiples of the entry); returns the record."""
+    sh, clk, feed = shadow(1.0, sold)
+    x = sh.signal("single", NEWMINT, WALLET, 1_000, 5.0, "main")
+    for m in path:
+        clk.t += 30
+        feed["p"] = m
+        sh.tick()
+    return x, sh
+
+
+def test_paper_takes_half_at_2x_then_trails():
+    x, _ = run_path([1.5, 2.2, 3.0, 2.0])               # half at 2.2, peak 3.0, -33 % from the peak: out
+    p = x["paper"]
+    assert p["status"] == "closed" and p["exit"] == "trail" and p["half"]
+    exp = (500 / 1.03) * (0.5 * 2.2 + 0.5 * 2.0) * 0.97 - 500
+    assert abs(p["pnl_usd"] - round(exp, 2)) < 0.02
+    assert x["max"]["15m"] == 3.0 and x["dip"] == 1.0
+
+
+def test_paper_stop_time_wallet_exit_and_crash():
+    assert run_path([0.9, 0.6])[0]["paper"]["exit"] == "stop"
+    assert run_path([1.1] * 61)[0]["paper"]["exit"] == "time30"            # never 1.5x in 30 min
+    assert run_path([1.6] * 121)[0]["paper"]["exit"] == "time60"
+    assert run_path([1.2], sold=lambda m, w: True)[0]["paper"]["exit"] == "wallet_exit"
+    assert run_path([1.8, 0.5])[0]["paper"]["exit"] == "crash"              # -72 % between two polls
+
+
+def test_shadow_summary_counts_hits_with_intervals_and_without_the_best():
+    sh, clk, feed = shadow(1.0)
+    for i, peak in enumerate([3.0, 1.2, 2.5]):
+        x = sh.signal("single", f"M{i}", WALLET, 1_000, 5.0, "main")
+        x["max"].update({"1h": peak, "24h": peak})
+        x["paper"].update(status="closed", pnl_usd=100.0 * (peak - 1.5), exit="trail")
+    clk.t += 90_000
+    row = next(r for r in sh.summary() if r["tier"] == "main")
+    assert row["n"] == 3 and row["hit2x_24h"] == 2 and row["ci_24h"] == SH.wilson(2, 3)
+    assert row["paper_usd"] == 220.0 and row["paper_usd_wo_best"] == 70.0         # 150 - 30 + 100; best (150) out
+    assert SH.wilson(0, 0) is None
+
+
+def test_vip_buy_records_a_shadow_signal_with_the_family_tier(tmp_path):
+    sol = 10 ** 9
+    w, r = vip_watcher(tmp_path)
+    txs = {"a": wtx(BOSS, "a", 1_900, NEWMINT, (0, 5), (20 * sol, 14 * sol))}
+    vs = VP.VipStream(w, r, rpc=lambda m, p: txs[p[0]], now=lambda: 2_000.0)
+    vs.retry_sleep = False
+    vs.tiers = {WALLET: "main"}                          # BOSS is WALLET's successor: inherits main
+    w.shadow = SH.Shadow(w.state, prices=lambda ids: {m: {"usdPrice": 1.0} for m in ids}, now=lambda: 2_000.0,
+                         lock=w.lock)
+    vs.handle(BOSS, "a")
+    x = w.state["shadow"]["signals"][0]
+    assert x["kind"] == "single" and x["tier"] == "main" and x["wallets"][0]["family"] == WALLET
+    assert w.status()["shadow"]["rows"][0]["mint"] == NEWMINT

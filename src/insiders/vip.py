@@ -15,8 +15,9 @@ import threading
 import time
 from collections import deque
 
+from insiders.pairs import tiers as pair_tiers
 from insiders.scan import KNOWN_LABELS, on_curve
-from insiders.watch import MIN_SOL, Rpc, analyse
+from insiders.watch import MIN_SOL, STABLES, WSOL, Rpc, analyse
 
 WS_URL = os.environ.get("INSIDER_WS") or "wss://api.mainnet-beta.solana.com"
 CHILD_TTL_S = 7 * 86400
@@ -76,6 +77,10 @@ class VipStream:
         self.ws = None
         self.subs: dict[int, str] = {}
         self.result = result
+        try:                                                  # main / watch tier of each wallet (signal quality)
+            self.tiers = pair_tiers(result, now(), set(KNOWN_LABELS))
+        except Exception:
+            self.tiers = {}
 
     def wallets(self) -> dict[str, str]:
         """The base list always first and always whole; live children (newest kept) fill the rest up to MAX_WALLETS."""
@@ -95,6 +100,10 @@ class VipStream:
             if s["wallet"] == wallet and s.get("from"):
                 return sorted(s["from"])[0]
         return wallet
+
+    def tier(self, wallet: str) -> str:
+        """The wallet's own tier, else its family's (a child / successor inherits from where its money came)."""
+        return self.tiers.get(wallet) or self.tiers.get(self.family(wallet)) or "none"
 
     def prune_children(self) -> list[str]:
         """Drop children older than CHILD_TTL_S from the state; returns them (to unsubscribe)."""
@@ -150,6 +159,12 @@ class VipStream:
                 with self.w.lock:
                     self.w._qualify(a)                       # the coin gets its tab
                 strong = self._together(ev["mint"], wallet, a, tx.get("blockTime"))
+                sh = getattr(self.w, "shadow", None)
+                if sh is not None and ev["mint"] not in STABLES and ev["mint"] != WSOL:
+                    sh.signal("single", ev["mint"], wallet, tx.get("blockTime"), sol, self.tier(wallet), self.family(wallet))
+                    if strong:
+                        best = min((self.tier(x) for x in strong.get("holders", [])), key=["main", "watch", "none"].index)
+                        sh.signal("strong", ev["mint"], wallet, tx.get("blockTime"), sol, best, self.family(wallet))
                 if strong:
                     out.append(strong)
         got, frm = sol_in(tx, wallet)

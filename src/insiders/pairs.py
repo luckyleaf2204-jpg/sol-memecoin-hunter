@@ -12,7 +12,8 @@ import os
 from collections import Counter, defaultdict
 
 HOLD_S = int(os.environ.get("INSIDER_WIN_HOLD_S") or 600)
-WIN_MIN_SOL = float(os.environ.get("INSIDER_WIN_MIN_SOL") or 0.05)    # profit "zero" from rounding / fees is not a win
+WIN_MIN_SOL = float(os.environ.get("INSIDER_WIN_MIN_SOL") or 0.5)     # a 0.1 SOL "win" is noise, not information
+WIN_MIN_MULT = float(os.environ.get("INSIDER_WIN_MIN_MULT") or 1.2)   # and at least +20 % on what was spent
 
 
 def pair_result(trades: list, end_ts: float, mark_sol_per_token: float = 0.0, hold_s_min: int = HOLD_S) -> dict | None:
@@ -41,7 +42,7 @@ def pair_result(trades: list, end_ts: float, mark_sol_per_token: float = 0.0, ho
     return {"t0": t0, "t_half": t_half, "hold_s": hold_s, "unsold": unsold, "sol_in": round(sol_in, 4),
             "pnl_sol": round(pnl, 4), "pnl_mult": round(value / sol_in, 4) if sol_in > 0 else None,
             "cost": "buy" if sol_in > 0 else "transfer",
-            "win": hold_s >= hold_s_min and pnl > WIN_MIN_SOL}
+            "win": hold_s >= hold_s_min and pnl > WIN_MIN_SOL and (sol_in <= 0 or value / sol_in >= WIN_MIN_MULT)}
 
 
 def pairs_from(result: dict, end_ts: float, marks: dict | None = None, upto: float | None = None,
@@ -64,6 +65,12 @@ def build_lists(pairs: dict, exclude: set | None = None) -> tuple[set, set, Coun
     exclude = exclude or set()
     wins = Counter(w for (w, _m), r in pairs.items() if r and r["win"] and w not in exclude)
     return {w for w, n in wins.items() if n >= 2}, {w for w, n in wins.items() if n == 1}, wins
+
+
+def tiers(result: dict, now: float, exclude: set | None = None) -> dict[str, str]:
+    """{wallet: 'main' | 'watch'} from the whole PnL history (for live signals: the past is all known)."""
+    main, watch, _ = build_lists(pairs_from(result, now), exclude)
+    return {**{w: "watch" for w in watch}, **{w: "main" for w in main}}
 
 
 def summary(pairs: dict, main: set, watch: set, drop: set | None = None) -> dict:

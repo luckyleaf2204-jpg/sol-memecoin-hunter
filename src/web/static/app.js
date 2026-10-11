@@ -1413,8 +1413,41 @@ function vipDash(w, names) {
     ${boardHtml(w.board, names, solUsd)}
     <h3>${esc(t("web.ins.vd.held", { s: pf.min_sol || 1 }))}</h3>${insTable([t("web.ins.token"), t("web.ins.vd.n_holders"), t("web.ins.vd.value"), t("web.ins.vd.who")], held)}
     <h3>${esc(t("web.ins.vd.alerts", { m: w.min_sol || 4 }))}</h3>${insTable([t("web.ins.when"), t("web.ins.event"), t("web.ins.coin_or_wallet"), "SOL", t("web.ins.by")], alerts)}
+    ${shadowHtml(w.shadow, names)}
     ${paperHtml(w.paper, names)}
     <h3>${esc(t("web.ins.vd.wallets", { n: (pf.wallets || []).length }))}</h3>${insTable([t("web.ins.addr"), t("web.ins.vd.sol"), t("web.ins.vd.tok_value"), t("web.ins.vd.holding"), t("web.ins.vd.last")], wallets)}`;
+}
+function shadowHtml(sh, names) {
+  if (!sh) return "";
+  const kindKey = { single: "web.ins.vd.sh_single", strong: "web.ins.vd.sh_strong" };
+  const tierKey = { main: "web.ins.vd.sh_main", watch: "web.ins.vd.sh_watch", none: "web.ins.vd.sh_none", all: "web.ins.vd.sh_all" };
+  const exitKey = { tp2x: "web.ins.vd.sh_x_tp", stop: "web.ins.vd.sh_x_stop", trail: "web.ins.vd.sh_x_trail", time30: "web.ins.vd.sh_x_time30",
+    time60: "web.ins.vd.sh_x_time60", wallet_exit: "web.ins.vd.sh_x_wallet", crash: "web.ins.vd.sh_x_crash", end: "web.ins.vd.sh_x_end" };
+  const tierCls = { main: "bad", watch: "warn", none: "", all: "" };
+  const mx = (v) => v === null || v === undefined ? "—" : "×" + Number(v).toLocaleString("vi-VN", { maximumFractionDigits: 2 });
+  const money = (v) => v === null || v === undefined ? "—" : `<span class="${v >= 0 ? "c-ok" : "c-bad"}">${v >= 0 ? "+" : "−"}$${Math.abs(Math.round(v)).toLocaleString("vi-VN")}</span>`;
+  const hit = (k, n, ci) => n ? `<b>${k}/${n}</b>${ci ? ` <span class="c-muted small">(${Math.round(ci[0] * 100)}–${Math.round(ci[1] * 100)}%)</span>` : ""}` : `<span class="c-muted small">${esc(t("web.ins.vd.sh_wait"))}</span>`;
+  const sum = (sh.summary || []).map((r) => `<tr><td>${esc(t(kindKey[r.kind] || "common.unknown"))}</td>
+    <td><span class="pill ${tierCls[r.tier] || ""}">${esc(t(tierKey[r.tier] || "common.unknown"))}</span></td><td class="num"><b>${r.n}</b></td>
+    <td class="num">${hit(r.hit2x_1h, r.n_1h, r.ci_1h)}</td><td class="num">${hit(r.hit2x_24h, r.n_24h, r.ci_24h)}</td><td class="num">${mx(r.med_24h)}</td>
+    <td class="num">${r.paper_n ? `${r.paper_win}/${r.paper_n}` : "—"}${r.paper_open ? ` <span class="c-muted small">+${r.paper_open} ${esc(t("web.ins.vd.sh_open"))}</span>` : ""}</td>
+    <td class="num">${r.paper_n ? money(r.paper_usd) : "—"}</td><td class="num">${r.paper_n ? money(r.paper_usd_wo_best) : "—"}</td>
+    <td class="small">${Object.entries(r.exits || {}).map(([k, n]) => `${esc(t(exitKey[k] || "common.unknown"))} ${n}`).join(" · ")}</td></tr>`);
+  const lk = (u, txt) => `<a href="${esc(u)}" target="_blank" rel="noopener">${esc(txt)}</a>`;
+  const rows = (sh.rows || []).slice(0, 50).map((x) => {
+    const pp = x.paper || {};
+    const st = pp.status === "open" ? `<span class="pill warn">${esc(t("web.ins.vd.sh_open"))}</span>` : pp.status === "closed" ? `${money(pp.pnl_usd)} <span class="small">${esc(t(exitKey[pp.exit] || "common.unknown"))}</span>` : `<span class="c-muted small">${esc(t(x.status === "no_price" ? "web.ins.vd.sh_noprice" : "web.ins.vd.sh_wait"))}</span>`;
+    return `<tr><td class="small">${esc(new Date(x.ts * 1000).toLocaleString("vi-VN"))}</td>
+      <td><b>${esc(x.symbol ? "$" + x.symbol : names[x.mint] || short(x.mint))}</b> <span class="copy" data-copy="${esc(x.mint)}">⧉</span><div class="small">${lk("https://dexscreener.com/solana/" + x.mint, "DexScreener")} · ${lk("https://pump.fun/coin/" + x.mint, "pump.fun")}</div></td>
+      <td>${esc(t(kindKey[x.kind] || "common.unknown"))} <span class="pill ${tierCls[x.tier] || ""}">${esc(t(tierKey[x.tier] || "common.unknown"))}</span><div class="small">${(x.wallets || []).slice(0, 3).map((w) => `${acct(w.wallet)} ${Number(w.sol).toFixed(1)} SOL`).join("<br>")}${x.n_wallets > 3 ? ` +${x.n_wallets - 3}` : ""}</div></td>
+      <td class="num">${mx(x.max && x.max["15m"])}</td><td class="num">${mx(x.max && x.max["1h"])}</td><td class="num">${mx(x.max && x.max["24h"])}</td>
+      <td class="num">${x.dip !== null && x.dip !== undefined ? Math.round((x.dip - 1) * 100) + "%" : "—"}</td><td>${st}</td></tr>`;
+  });
+  const ru = sh.rules || {};
+  return `<h3>${esc(t("web.ins.vd.sh_title"))}</h3>
+    <div class="muted small">${esc(t("web.ins.vd.sh_note", { usd: sh.usd || 500, slip: Math.round((sh.slip || 0.03) * 100), tp: ru.tp || 2, stop: Math.round((1 - (ru.stop || 0.65)) * 100), trail: Math.round((ru.trail || 0.3) * 100) }))}</div>
+    ${sum.length ? insTable([t("web.ins.vd.sh_kind"), t("web.ins.vd.sh_tier"), t("web.ins.vd.sh_n"), t("web.ins.vd.sh_hit1h"), t("web.ins.vd.sh_hit24h"), t("web.ins.vd.sh_med24h"), t("web.ins.vd.sh_pwin"), t("web.ins.vd.sh_pusd"), t("web.ins.vd.sh_pwo"), t("web.ins.vd.sh_exits")], sum) : `<div class="muted small">${esc(t("web.ins.vd.sh_empty"))}</div>`}
+    ${rows.length ? `<details class="ev" open><summary>${esc(t("web.ins.vd.sh_rows", { n: (sh.rows || []).length }))}</summary>${insTable([t("web.ins.when"), t("web.ins.token"), t("web.ins.vd.sh_kind"), "15m", "1h", "24h", t("web.ins.vd.sh_dip"), "Paper"], rows)}</details>` : ""}`;
 }
 function watchHtml(w, names) {
   if (w && w.mode === "vip") return vipDash(w, names);

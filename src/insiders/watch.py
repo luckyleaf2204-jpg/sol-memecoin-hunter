@@ -616,9 +616,21 @@ class Watcher:
             self.state["notified"] = self.state.get("notified", 0) + sent
 
     def save(self) -> None:
+        """Serialised under the lock; a dict changed by another thread mid-dump is simply dumped again."""
+        for _ in range(3):
+            try:
+                with self.lock:
+                    data = json.dumps(self.state)
+                break
+            except RuntimeError:
+                time.sleep(0.05)
+        else:
+            return
         try:
             self.path.parent.mkdir(parents=True, exist_ok=True)
-            self.path.write_text(json.dumps(self.state), encoding="utf-8")
+            tmp = self.path.with_suffix(".tmp")
+            tmp.write_text(data, encoding="utf-8")
+            tmp.replace(self.path)                           # never a half-written state file
         except OSError:
             pass
 
@@ -635,6 +647,7 @@ class Watcher:
                     "portfolio_ts": getattr(getattr(self, "portfolio", None), "updated", None),
                     "portfolio": self.portfolio.status() if getattr(self, "portfolio", None) else None,
                     "paper": {"summary": self.paper.summary(), "rows": self.paper.rows(60)} if self.paper else None,
+                    "shadow": self.shadow.view() if getattr(self, "shadow", None) else None,
                     "children": len(self.state["children"]), "last_error": self.state["last_error"],
                     "rpc_calls": self.state.get("rpc_calls"), "last_poll_s": self.state.get("last_poll_s"),
                     "alerts": self.state["alerts"][:200]}
