@@ -494,18 +494,45 @@ def test_paper_no_route_is_recorded_not_traded():
     assert book.summary()["positions"] == 0 and book.summary()["no_route"] == 1
 
 
-def test_watch_opens_a_paper_trade_on_a_strong_alert(tmp_path):
+def test_hold_confirmation_opens_the_paper_trade_and_flippers_do_not_count(tmp_path):
+    """Two group wallets buy >= 4 SOL; 10 minutes later both still hold -> one MẠNH · ĐANG GIỮ alert + paper.
+    A third wallet that sold half within 5 minutes is a flip: no confirmation from it, and a second flip mutes it."""
     sol = 10 ** 9
-    txs = {"b1": wtx(WALLET, "b1", 1_500, NEWMINT, (0, 5), (12 * sol, 6 * sol)),
-           "b2": wtx(CEX, "b2", 1_600, NEWMINT, (0, 9), (13 * sol, 8 * sol))}
-    rpc = FakeRpc({WALLET: [{"signature": "old"}], CEX: [{"signature": "old2"}]}, txs)
-    r = {"tokens": [{"mint": MINT, "status": "ok", "deployer": w} for w in (WALLET, CEX)], "tickers": {}}
-    w = WT.Watcher(r, tmp_path / "w.json", rpc=rpc, now=lambda: 2_000.0, paper_quote=lambda i, o, a: a)
+    clock = {"t": 2_000.0}
+    txs = {"b1": wtx(WALLET, "b1", 1_990, NEWMINT, (0, 5), (12 * sol, 6 * sol)),
+           "b2": wtx(CEX, "b2", 1_995, NEWMINT, (0, 9), (13 * sol, 8 * sol)),
+           "b3": wtx(BOSS, "b3", 1_990, NEWMINT, (0, 10), (12 * sol, 6 * sol)),
+           "x3": wtx(BOSS, "x3", 2_050, NEWMINT, (10, 2), (6 * sol, 14 * sol))}           # flips in 60 s
+    rpc = FakeRpc({WALLET: [{"signature": "o1"}], CEX: [{"signature": "o2"}], BOSS: [{"signature": "o3"}]}, txs)
+    r = {"tokens": [{"mint": MINT, "status": "ok", "deployer": w} for w in (WALLET, CEX, BOSS)], "tickers": {}}
+    w = WT.Watcher(r, tmp_path / "w.json", rpc=rpc, now=lambda: clock["t"], paper_quote=lambda i, o, a: a)
     w.poll_once()
-    rpc.sigs = {WALLET: [{"signature": "b1"}, {"signature": "old"}], CEX: [{"signature": "b2"}, {"signature": "old2"}]}
-    w.poll_once()
-    st = w.status()["paper"]
-    assert st["summary"]["positions"] == 1 and st["rows"][0]["mint"] == NEWMINT
+    rpc.sigs = {WALLET: [{"signature": "b1"}, {"signature": "o1"}], CEX: [{"signature": "b2"}, {"signature": "o2"}],
+                BOSS: [{"signature": "x3"}, {"signature": "b3"}, {"signature": "o3"}]}
+    al = w.poll_once()
+    assert not any(a["level"] == "hold" for a in al)                                # not 10 minutes yet
+    assert w.status()["paper"]["summary"]["positions"] == 0
+    ledger = w.state["coins"][NEWMINT]["wallets"]
+    assert ledger[BOSS]["flip"] is True and ledger[BOSS]["half_s"] == 60
+    clock["t"] = 2_000.0 + WT.HOLD_CONFIRM_S + 5
+    rpc.sigs = {WALLET: [{"signature": "b1"}], CEX: [{"signature": "b2"}], BOSS: [{"signature": "x3"}]}
+    al = w.poll_once()
+    hold = [a for a in al if a["level"] == "hold"]
+    assert len(hold) == 1 and hold[0]["n_wallets"] == 2 and set(hold[0]["holders"]) == {WALLET, CEX}
+    assert w.status()["paper"]["summary"]["positions"] == 1
+    assert not [a for a in w.poll_once() if a["level"] == "hold"]                   # once per coin
+    w._ledger({"ts": 3_000, "kind": "BUY", "mint": "OTHERpump", "wallet": BOSS, "sol": 5.0, "tokens": 4}, "x")
+    w._ledger({"ts": 3_030, "kind": "SELL", "mint": "OTHERpump", "wallet": BOSS, "sol": 6.0, "tokens": 4}, "x")
+    assert BOSS in w.state["muted"]                                                 # second flip: muted
+
+
+def test_wallet_styles_from_history():
+    r = {"pnl": {"rows": [
+        {"wallet": "F", "trades": [[0, "buy", 1, 10], [30, "sell", 2, 10]]},
+        {"wallet": "H", "trades": [[0, "buy", 1, 10], [900, "sell", 2, 6]]},
+        {"wallet": "H", "trades": [[0, "buy", 1, 10], [20, "sell", 2, 6]]}]}}
+    st = WT.wallet_styles(r)
+    assert st["F"]["style"] == "flip" and st["H"]["style"] == "hold" and st["H"]["positions"] == 2
 
 
 def test_alerts_carry_name_links_age_and_busy_new_coins_are_not_missed(tmp_path):

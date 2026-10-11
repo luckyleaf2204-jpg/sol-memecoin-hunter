@@ -32,6 +32,9 @@ CHILD_TTL_S = 72 * 3600
 MAX_NEW_TX = 25                  # per wallet per poll (a busy wallet is summarised, not replayed)
 MAX_ALERTS = 600
 MIN_SOL = float(os.environ.get("INSIDER_MIN_SOL") or 4)   # alerts only for buys / receipts / fundings >= this
+FLIP_S = int(os.environ.get("INSIDER_FLIP_S") or 300)          # half sold within this after the buy = a flip
+HOLD_CONFIRM_S = int(os.environ.get("INSIDER_HOLD_S") or 600)  # STRONG confirmed when still held this long
+FLIPS_TO_MUTE = 2
 COIN_KEEP_S = 48 * 3600          # a coin that never qualified is forgotten after 48 h of silence
 MAX_COINS = 120
 B_SLICES = 15                    # tier B is checked 1/15 per poll: every wallet about every 30 minutes
@@ -64,6 +67,30 @@ class Rpc:
                     self.errors += 1
                     raise RuntimeError(f"{type(e).__name__}") from None
                 self.sleep(2 * 2 ** k)
+
+
+def wallet_styles(result: dict) -> dict[str, dict]:
+    """From the priced trades on the channel's coins: how fast each wallet sold half of what it bought.
+    'flip' = every position half-sold within FLIP_S (sniper-like); 'hold' = some position held >= HOLD_CONFIRM_S."""
+    halves: dict[str, list] = defaultdict(list)
+    for x in (result.get("pnl") or {}).get("rows", []):
+        tr = sorted(x.get("trades") or [])
+        inn = out = 0
+        b0 = None
+        for ts, side, _sol, tk in tr:
+            if side in ("buy", "in"):
+                inn += tk
+                b0 = ts if b0 is None else b0
+            elif b0 is not None and side in ("sell", "out"):
+                out += tk
+                if inn and out >= inn / 2:
+                    halves[x["wallet"]].append(ts - b0)
+                    break
+    out_ = {}
+    for w, hs in halves.items():
+        style = "hold" if max(hs) >= HOLD_CONFIRM_S else ("flip" if max(hs) < FLIP_S else "mixed")
+        out_[w] = {"style": style, "median_half_s": sorted(hs)[len(hs) // 2], "positions": len(hs)}
+    return out_
 
 
 def watch_tiers(result: dict) -> tuple[dict[str, str], dict[str, str]]:
@@ -224,8 +251,9 @@ def coin_meta(mint: str, get=_get_json) -> dict:
 
 class Watcher:
     def __init__(self, result: dict, state_path: Path, rpc=None, now=time.time, old_mints: set | None = None,
-                 notify=None, notify_levels: tuple = ("strong",), paper_quote=None, meta=None):
+                 notify=None, notify_levels: tuple = ("hold",), paper_quote=None, meta=None):
         self.base, self.tier_b = watch_tiers(result)
+        self.styles = wallet_styles(result)
         self.old = old_mints if old_mints is not None else (
             {t["mint"] for t in result.get("tokens", [])} | {c["mint"] for c in (result.get("extra") or {}).get("coins", [])})
         self.tickers = result.get("tickers", {})
@@ -240,7 +268,7 @@ class Watcher:
         except (OSError, ValueError):
             pass
         from insiders.paper import PaperBook
-        self.paper = PaperBook(self.state, quote=paper_quote, now=now) if paper_quote else None
+        self.paper = PaperBook(self.state, quote=paper_quote, now=now, levels=("hold",)) if paper_quote else None
 
     def wallets(self) -> dict[str, str]:
         now = self.now()
@@ -320,6 +348,8 @@ class Watcher:
                 new_alerts += found
         self._strong(new_alerts)
         with self.lock:
+            new_alerts += self._confirm_holds()
+        with self.lock:
             self.state["alerts"] = (new_alerts[::-1] + self.state["alerts"])[:MAX_ALERTS]
             self.state["polls"] += 1
             self.state["last_poll"] = self.now()
@@ -369,7 +399,8 @@ class Watcher:
             return None                                       # an old / established coin: not a launch
         if ev["kind"] != "CREATE" and self._is_bot(ev["wallet"], mint):
             return None
-        return {**ev, "age_h": None if age is None else round(age / 3600, 2),
+        st = self.styles.get(ev["wallet"], {})
+        return {**ev, "age_h": None if age is None else round(age / 3600, 2), "style": st.get("style"),
                 "level": "high" if ev["kind"] == "CREATE" else "medium"}
 
     def _value_sol(self, mint: str, tokens: int) -> float | None:
@@ -406,6 +437,14 @@ class Watcher:
         elif ev["kind"] == "SEND":
             w["n_out"] += 1
             w["tok_out"] += ev.get("tokens") or 0
+        if w.get("half_s") is None and w["tok_in"] and w["tok_out"] >= w["tok_in"] / 2:
+            w["half_s"] = (ev["ts"] or 0) - (w["first_ts"] or 0)      # how long it held before half was gone
+            if w["half_s"] < FLIP_S:
+                w["flip"] = True
+                fl = self.state.setdefault("flips", {})
+                fl[ev["wallet"]] = fl.get(ev["wallet"], 0) + 1
+                if fl[ev["wallet"]] >= FLIPS_TO_MUTE:
+                    self.state.setdefault("muted", {})[ev["wallet"]] = self.now()
         now = self.now()
         for m in [m for m, x in coins.items() if not x["qualified"] and now - (x["last_ts"] or 0) > COIN_KEEP_S]:
             del coins[m]
@@ -426,6 +465,27 @@ class Watcher:
             for m in sorted(q, key=lambda m: self.state["coins"][m]["last_ts"] or 0)[:len(q) - MAX_COINS]:
                 del self.state["coins"][m]
 
+    def _confirm_holds(self) -> list[dict]:
+        """A coin where >= 2 group wallets (not flippers, not muted) bought >= MIN_SOL and still hold >= half
+        HOLD_CONFIRM_S after their first buy: one 'hold' alert (MẠNH · ĐANG GIỮ) per coin."""
+        now, out = self.now(), []
+        muted = self.state.get("muted", {})
+        for m, c in self.state.get("coins", {}).items():
+            if not c.get("qualified") or c.get("hold_alerted"):
+                continue
+            holders = [w for w, x in c["wallets"].items()
+                       if x["buy_sol"] >= MIN_SOL and w not in muted and not x.get("flip")
+                       and self.styles.get(w, {}).get("style") != "flip"
+                       and now - (x["first_ts"] or now) >= HOLD_CONFIRM_S and x["tok_out"] < x["tok_in"] / 2]
+            if len(holders) >= 2:
+                c["hold_alerted"] = True
+                lead = max(holders, key=lambda w: c["wallets"][w]["buy_sol"])
+                out.append({"ts": now, "sig": None, "wallet": lead, "kind": "HOLD", "mint": m, "level": "hold",
+                            "n_wallets": len(holders), "why": c["wallets"][lead].get("why"),
+                            "sol": round(sum(c["wallets"][w]["buy_sol"] for w in holders), 3),
+                            "holders": holders[:10], **{k: c.get(k) for k in ("symbol", "name", "chart", "mcap", "age_h")}})
+        return out
+
     def coins_view(self, limit: int = 40) -> list[dict]:
         out = []
         paper = (self.state.get("paper") or {}).get("positions", {})
@@ -434,7 +494,7 @@ class Watcher:
                 continue
             ws = sorted(({"wallet": w, **v} for w, v in c["wallets"].items()), key=lambda x: -x["buy_sol"])
             out.append({"mint": m, **{k: c.get(k) for k in ("symbol", "name", "chart", "mcap", "age_h", "strong",
-                                                             "first_ts", "last_ts")},
+                                                             "hold_alerted", "first_ts", "last_ts")},
                         "n_wallets": len(ws), "buy_sol": round(sum(x["buy_sol"] for x in ws), 3),
                         "sell_sol": round(sum(x["sell_sol"] for x in ws), 3), "wallets": ws,
                         "paper": paper.get(m, {}).get("status")})
@@ -462,7 +522,7 @@ class Watcher:
                   and a["wallet"] not in muted]
         by_mint = defaultdict(set)
         for a in recent:
-            if a["kind"] in ("CREATE", "BUY", "RECEIVE"):
+            if a["kind"] in ("CREATE", "BUY", "RECEIVE") and a.get("style") != "flip":
                 by_mint[a["mint"]].add(a["wallet"])
         for a in new_alerts:
             n = len(by_mint.get(a.get("mint"), ()))
@@ -474,7 +534,7 @@ class Watcher:
         if not self.notify:
             return
         todo = [a for a in alerts if a.get("level") in self.notify_levels]
-        order = {"strong": 0, "high": 1, "medium": 2, "watch": 3, "info": 4}
+        order = {"hold": 0, "strong": 1, "high": 2, "medium": 3, "watch": 4, "info": 5}
         todo.sort(key=lambda a: order.get(a.get("level"), 9))
         sent = 0
         for a in todo[:15]:
@@ -515,8 +575,8 @@ class Watcher:
             stop.wait(max(0.0, every_s - (time.time() - t0)))
 
 
-LEVEL_VI = {"strong": "🚨 MẠNH", "high": "🔴 TẠO COIN", "medium": "🟠 Coin mới", "watch": "🔵 Nạp ví mới", "info": "ℹ️"}
-KIND_VI = {"CREATE": "tạo coin mới", "BUY": "mua coin mới", "RECEIVE": "nhận coin mới", "FUND": "nạp SOL cho ví mới"}
+LEVEL_VI = {"hold": "🚨🚨 MẠNH · ĐANG GIỮ", "strong": "🚨 MẠNH", "high": "🔴 TẠO COIN", "medium": "🟠 Coin mới", "watch": "🔵 Nạp ví mới", "info": "ℹ️"}
+KIND_VI = {"HOLD": "≥ 2 ví nhóm mua ≥ 4 SOL và vẫn giữ sau 10 phút", "CREATE": "tạo coin mới", "BUY": "mua coin mới", "RECEIVE": "nhận coin mới", "FUND": "nạp SOL cho ví mới"}
 
 
 def alert_text(a: dict, tickers: dict | None = None) -> str:
@@ -525,7 +585,7 @@ def alert_text(a: dict, tickers: dict | None = None) -> str:
     tickers = tickers or {}
     head = LEVEL_VI.get(a.get("level"), a.get("level", ""))
     if a.get("n_wallets"):
-        head += f" ×{a['n_wallets']} ví cùng vào"
+        head += f" ×{a['n_wallets']} ví" + ("" if a.get("level") == "hold" else " cùng vào")
     lines = [f"<b>{head}</b>: ví theo dõi {KIND_VI.get(a['kind'], a['kind'])}"]
     if a.get("mint"):
         m = a["mint"]

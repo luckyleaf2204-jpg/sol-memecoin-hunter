@@ -1195,7 +1195,7 @@ function pingNew(w, names) {             // sound + vibration + system notificat
   const al = (w && w.alerts) || []; if (!al.length) return;
   const top = al[0].ts || 0, last = Number(LS.get("insLastAlert", 0)) || 0;
   if (!last) { LS.set("insLastAlert", top); return; }
-  const fresh = al.filter((a) => (a.ts || 0) > last && a.level === "strong");    // only STRONG rings
+  const fresh = al.filter((a) => (a.ts || 0) > last && a.level === "hold");      // only MẠNH · ĐANG GIỮ rings
   LS.set("insLastAlert", Math.max(top, last));
   if (!fresh.length) return;
   beep(); if (navigator.vibrate) navigator.vibrate([200, 100, 200]);
@@ -1227,31 +1227,35 @@ function coinsHtml(coins, names, minSol) {
   let sel = LS.get("insCoin", "");
   if (!coins.some((c) => c.mint === sel)) sel = coins[0].mint;
   const label = (c) => c.symbol ? "$" + c.symbol : short(c.mint);
-  const tabs = coins.map((c) => `<button class="btn ${c.mint === sel ? "primary" : ""} ${c.strong ? "strong" : ""}" data-inscoin="${esc(c.mint)}">${esc(label(c))}
+  const tabs = coins.map((c) => `<button class="btn ${c.mint === sel ? "primary" : ""} ${c.strong || c.hold_alerted ? "strong" : ""}" data-inscoin="${esc(c.mint)}">${c.hold_alerted ? "🚨 " : ""}${esc(label(c))}
     <span class="small">${c.n_wallets} ${esc(t("web.ins.c.wallets"))} · ${Number(c.buy_sol).toFixed(1)} SOL</span></button>`).join("");
   const c = coins.find((x) => x.mint === sel);
   const lk = (u, txt) => `<a href="${esc(u)}" target="_blank" rel="noopener">${esc(txt)}</a>`;
+  const nowS = Date.now() / 1000;
+  const holdTxt = (w) => w.half_s !== undefined && w.half_s !== null
+    ? (w.flip ? `<span class="pill">${esc(t("web.ins.c.flip", { s: Math.round(w.half_s) }))}</span>` : esc(t("web.ins.c.held_for", { m: Math.round(w.half_s / 60) })))
+    : (w.tok_in > 0 ? `<b>${esc(t("web.ins.c.holding", { m: Math.max(0, Math.round((nowS - w.first_ts) / 60)) }))}</b>` : "—");
   const held = (w) => w.tok_in > 0 ? Math.max(0, Math.round(100 * (1 - w.tok_out / w.tok_in))) + "%" : (w.tok_out > 0 ? "0%" : "—");
   const rows = (c.wallets || []).map((w) => {
     const g = insGroup(w);
     return `<tr><td><span class="pill ${INS_GROUP_CLS[g]}">${esc(t(INS_GROUP_KEY[g]))}</span> ${acct(w.wallet)}<div class="muted small">${esc(w.why || "")}</div></td>
       <td class="num">${Number(w.buy_sol).toFixed(2)} <span class="c-muted small">(${w.n_buy}${w.n_in ? " +" + w.n_in + " " + esc(t("web.ins.c.received")) : ""})</span></td>
       <td class="num">${Number(w.sell_sol).toFixed(2)} <span class="c-muted small">(${w.n_sell}${w.n_out ? " +" + w.n_out + " " + esc(t("web.ins.c.sent")) : ""})</span></td>
-      <td class="num">${held(w)}</td><td class="num">${sol(Math.round(100 * (w.sell_sol - w.buy_sol)) / 100)}</td>
+      <td class="num">${held(w)}</td><td class="small">${holdTxt(w)}</td><td class="num">${sol(Math.round(100 * (w.sell_sol - w.buy_sol)) / 100)}</td>
       <td class="small">${esc(new Date(w.first_ts * 1000).toLocaleTimeString("vi-VN"))} → ${esc(new Date(w.last_ts * 1000).toLocaleTimeString("vi-VN"))}</td></tr>`;
   });
   const chart = safeUrl(c.chart) || "https://dexscreener.com/solana/" + c.mint;
   const head = `<div class="token-head"><b>${esc(label(c))}</b> ${c.name ? esc(c.name) : ""} <span class="mono small">${esc(short(c.mint))}</span> <span class="copy" data-copy="${esc(c.mint)}">⧉</span>
-    ${c.strong ? `<span class="pill bad">${esc(t("web.ins.lv.strong"))}</span>` : ""}${c.paper ? ` <span class="pill">${esc(t("web.ins.c.paper"))}: ${esc(t({ open: "web.ins.paper_open", closed: "web.ins.paper_closed", no_route: "web.ins.paper_no_route" }[c.paper] || "common.unknown"))}</span>` : ""}
+    ${c.hold_alerted ? `<span class="pill bad">${esc(t("web.ins.lv.hold"))}</span>` : c.strong ? `<span class="pill bad">${esc(t("web.ins.lv.strong"))}</span>` : ""}${c.paper ? ` <span class="pill">${esc(t("web.ins.c.paper"))}: ${esc(t({ open: "web.ins.paper_open", closed: "web.ins.paper_closed", no_route: "web.ins.paper_no_route" }[c.paper] || "common.unknown"))}</span>` : ""}
     <div class="small">${lk(chart, "DexScreener")} · ${lk("https://pump.fun/coin/" + c.mint, "pump.fun")} · ${lk("https://solscan.io/token/" + c.mint, "Solscan")}
     ${c.age_h !== undefined && c.age_h !== null ? " · " + esc(t("web.ins.c.age", { h: c.age_h })) : ""}${c.mcap ? " · MC " + esc(usd(c.mcap)) : ""}</div>
     <div class="small">${esc(t("web.ins.c.totals", { n: c.n_wallets, b: Number(c.buy_sol).toFixed(2), s: Number(c.sell_sol).toFixed(2) }))}</div></div>`;
   return `<h3>${esc(t("web.ins.c.title", { s: minSol || 4 }))}</h3><div class="ins-tabs">${tabs}</div>${head}
-    ${insTable([t("web.ins.c.wallet"), t("web.ins.c.bought"), t("web.ins.c.sold"), t("web.ins.c.held"), t("web.ins.c.pnl"), t("web.ins.c.when")], rows)}`;
+    ${insTable([t("web.ins.c.wallet"), t("web.ins.c.bought"), t("web.ins.c.sold"), t("web.ins.c.held"), t("web.ins.c.hold"), t("web.ins.c.pnl"), t("web.ins.c.when")], rows)}`;
 }
 function watchHtml(w, names) {
   if (!w) return `<h2>${esc(t("web.ins.watch"))}</h2><div class="muted small">${esc(t("web.ins.watch_off"))}</div>`;
-  const lv = { strong: "bad", high: "bad", medium: "warn", watch: "", info: "" };
+  const lv = { hold: "bad", strong: "bad", high: "bad", medium: "warn", watch: "", info: "" };
   const kind = (a) => t("web.ins.ev." + a.kind.toLowerCase());
   const lk = (u, txt) => `<a href="${esc(u)}" target="_blank" rel="noopener">${esc(txt)}</a>`;
   const coin = (m, a) => {
@@ -1263,15 +1267,18 @@ function watchHtml(w, names) {
       ${a.age_h !== undefined && a.age_h !== null ? ` · <b>${esc(a.age_h < 1 ? Math.round(a.age_h * 60) + " " + t("web.ins.minutes") : a.age_h + " h")}</b>` : ""}${a.mcap ? " · MC " + esc(usd(a.mcap)) : ""}</div>`;
   };
   const all = w.alerts || [];
-  const f = LS.get("insFilter", "all");
-  const pick = all.filter((a) => f === "team" ? INS_TEAM.includes(insGroup(a)) : f === "strong" ? a.level === "strong" : true);
-  const nTeam = all.filter((a) => INS_TEAM.includes(insGroup(a))).length, nStrong = all.filter((a) => a.level === "strong").length;
+  const f = LS.get("insFilter", "all"), hideFlip = LS.get("insHideFlip", true);
+  const isFlip = (a) => a.style === "flip";
+  const pick = all.filter((a) => !(hideFlip && isFlip(a)) &&
+    (f === "team" ? INS_TEAM.includes(insGroup(a)) : f === "strong" ? ["strong", "hold"].includes(a.level) : true));
+  const nTeam = all.filter((a) => INS_TEAM.includes(insGroup(a))).length, nStrong = all.filter((a) => ["strong", "hold"].includes(a.level)).length;
+  const nFlip = all.filter(isFlip).length;
   const fb = (k, label, n) => `<button class="btn ${f === k ? "primary" : ""}" data-insfilter="${k}">${esc(label)} (${n})</button>`;
-  const filters = `<div class="ins-filters">${fb("all", t("web.ins.f.all"), all.length)}${fb("team", t("web.ins.f.team"), nTeam)}${fb("strong", t("web.ins.f.strong"), nStrong)}</div>`;
+  const filters = `<div class="ins-filters">${fb("all", t("web.ins.f.all"), all.length)}${fb("team", t("web.ins.f.team"), nTeam)}${fb("strong", t("web.ins.f.strong"), nStrong)}<button class="btn ${hideFlip ? "primary" : ""}" data-insflip="1">${esc(t("web.ins.f.hideflip"))} (${nFlip})</button></div>`;
   const rows = pick.slice(0, 80).map((a) => `<tr><td class="small">${esc(new Date(a.ts * 1000).toLocaleString("vi-VN"))}</td>
     <td><span class="pill ${lv[a.level] || ""}">${esc(t("web.ins.lv." + a.level))}${a.n_wallets ? " ×" + a.n_wallets : ""}</span> ${esc(kind(a))}</td>
     <td>${a.mint ? coin(a.mint, a) : `${esc(t("web.ins.new_wallet"))} ${acct(a.to)}`}</td>
-    <td class="num">${a.sol || ""}</td><td><span class="pill ${INS_GROUP_CLS[insGroup(a)]}">${esc(t(INS_GROUP_KEY[insGroup(a)]))}</span> ${acct(a.wallet)}<div class="muted small">${esc(a.why || "")}</div></td></tr>`);
+    <td class="num">${a.sol || ""}</td><td><span class="pill ${INS_GROUP_CLS[insGroup(a)]}">${esc(t(INS_GROUP_KEY[insGroup(a)]))}</span>${isFlip(a) ? ` <span class="pill">${esc(t("web.ins.g.flip"))}</span>` : ""} ${acct(a.wallet)}<div class="muted small">${esc(a.why || "")}</div></td></tr>`);
   return `<h2>${esc(t("web.ins.watch"))}</h2><div class="muted small">${esc(t("web.ins.watch_note", { n: w.watched, k: w.children, p: w.polls }))}
     ${w.tier_a ? " · " + esc(t("web.ins.tiers", { a: w.tier_a, b: w.tier_b, m: w.muted || 0 })) : ""}
     · ${esc(t(w.telegram ? "web.ins.tg_on" : "web.ins.tg_off", { n: w.notified || 0 }))}
@@ -1359,6 +1366,7 @@ function bindIns() {
     tb.querySelectorAll("tbody tr").forEach((tr) => [...tr.children].forEach((td, i) => { td.dataset.l = hs[i] || ""; }));
   });
   document.querySelectorAll("[data-insfilter]").forEach((b) => { b.onclick = () => { LS.set("insFilter", b.dataset.insfilter); refreshWatch(); }; });
+  document.querySelectorAll("[data-insflip]").forEach((b) => { b.onclick = () => { LS.set("insHideFlip", !LS.get("insHideFlip", true)); refreshWatch(); }; });
   document.querySelectorAll("[data-inscoin]").forEach((b) => { b.onclick = () => { LS.set("insCoin", b.dataset.inscoin); refreshWatch(); }; });
   const nb = $("#insNotify");
   if (nb) nb.onclick = async () => { try { await Notification.requestPermission(); } catch (_) { /* unsupported */ } beep(); refreshWatch(); };

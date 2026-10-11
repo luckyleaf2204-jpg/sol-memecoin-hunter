@@ -1131,7 +1131,7 @@
  "web.ins.tg_on": "Telegram: ON ({n} sent)",
  "web.ins.tg_off": "Telegram: off (needs TELEGRAM_BOT_TOKEN + TELEGRAM_CHAT_ID on Render)",
  "web.ins.enable_notif": "Enable notifications on this device",
- "web.ins.paper": "Paper: ${usd} on every STRONG alert",
+ "web.ins.paper": "Paper: ${usd} on every STRONG · HOLDING alert",
  "web.ins.paper_note": "Buy / sell from real Jupiter quotes for this size (price impact included), ~$1 fees deducted. Real fill delay not modelled. Columns = result if sold at that mark.",
  "web.ins.paper_marks": "Average",
  "web.ins.paper_avg": "{n} trades",
@@ -1168,5 +1168,13 @@
  "web.ins.c.held": "Still held",
  "web.ins.c.pnl": "Sold − bought (SOL)",
  "web.ins.c.when": "First → last",
- "web.ins.alert_list": "Alert list (only trades >= {s} SOL)"
+ "web.ins.alert_list": "Alert list (only trades >= {s} SOL)",
+ "web.ins.lv.hold": "STRONG · HOLDING",
+ "web.ins.ev.hold": ">= 2 group wallets bought >= 4 SOL and still hold after 10 min",
+ "web.ins.f.hideflip": "Hide flippers",
+ "web.ins.g.flip": "FLIPPER",
+ "web.ins.c.hold": "Hold",
+ "web.ins.c.flip": "flip: half sold after {s}s",
+ "web.ins.c.held_for": "held {m} min, then sold half",
+ "web.ins.c.holding": "holding for {m} min"
 }

@@ -1131,7 +1131,7 @@
  "web.ins.tg_on": "Telegram: BẬT (đã gửi {n})",
  "web.ins.tg_off": "Telegram: chưa bật (cần TELEGRAM_BOT_TOKEN + TELEGRAM_CHAT_ID trên Render)",
  "web.ins.enable_notif": "Bật thông báo trên máy này",
- "web.ins.paper": "Paper: vào ${usd} mỗi báo động MẠNH",
+ "web.ins.paper": "Paper: vào ${usd} mỗi báo động MẠNH · ĐANG GIỮ",
  "web.ins.paper_note": "Giá mua / bán từ báo giá thật của Jupiter cho đúng cỡ lệnh (gồm trượt giá), trừ ~$1 phí. Không tính độ trễ khớp lệnh thật. Cột = lãi/lỗ nếu bán ở mốc đó.",
  "web.ins.paper_marks": "Trung bình",
  "web.ins.paper_avg": "{n} lệnh",
@@ -1168,5 +1168,13 @@
  "web.ins.c.held": "Còn giữ",
  "web.ins.c.pnl": "Bán − mua (SOL)",
  "web.ins.c.when": "Lần đầu → gần nhất",
- "web.ins.alert_list": "Danh sách cảnh báo (chỉ lệnh ≥ {s} SOL)"
+ "web.ins.alert_list": "Danh sách cảnh báo (chỉ lệnh ≥ {s} SOL)",
+ "web.ins.lv.hold": "MẠNH · ĐANG GIỮ",
+ "web.ins.ev.hold": "≥ 2 ví nhóm mua ≥ 4 SOL và vẫn giữ sau 10 phút",
+ "web.ins.f.hideflip": "Ẩn ví lướt",
+ "web.ins.g.flip": "LƯỚT",
+ "web.ins.c.hold": "Giữ",
+ "web.ins.c.flip": "lướt: bán nửa sau {s}s",
+ "web.ins.c.held_for": "giữ {m} phút rồi bán nửa",
+ "web.ins.c.holding": "đang giữ {m} phút"
 }
