@@ -1143,5 +1143,15 @@
  "web.ins.paper_no_route": "không mua được",
  "web.ins.paper_noroute": "không có route",
  "web.ins.minutes": "phút",
- "web.ins.new_wallet": "ví mới:"
+ "web.ins.new_wallet": "ví mới:",
+ "web.ins.g.deployer": "DEPLOYER",
+ "web.ins.g.seller": "BÁN HỘ DEV",
+ "web.ins.g.funder": "VÍ MẸ",
+ "web.ins.g.linked": "VÍ LIÊN KẾT",
+ "web.ins.g.child": "VÍ MỚI (nhóm nạp)",
+ "web.ins.g.profit": "VÍ LÃI LỚN",
+ "web.ins.g.early": "VÍ SỚM",
+ "web.ins.f.all": "Tất cả",
+ "web.ins.f.team": "Nhóm deployer",
+ "web.ins.f.strong": "Chỉ MẠNH"
 }

@@ -1,7 +1,7 @@
 /* Service worker: caches the app shell only. API data is private and live, so /api/* is never cached. */
-const CACHE = "hunter-shell-v32";
+const CACHE = "hunter-shell-v33";
 const SHELL = [
-  "/", "/static/styles.css?v=web-28", "/static/app.js?v=web-28", "/i18n/vi.json", "/manifest.webmanifest",
+  "/", "/static/styles.css?v=web-29", "/static/app.js?v=web-29", "/i18n/vi.json", "/manifest.webmanifest",
   "/apple-touch-icon.png", "/favicon.png", "/static/icons/icon-192.png", "/static/icons/icon-512.png",
 ];
 

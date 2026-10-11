@@ -1207,6 +1207,20 @@ async function refreshWatch() {           // only the alert table: open details 
   const box = $("#insWatch"); if (!box) return;
   try { const d = await api("/api/insiders/watch"); box.innerHTML = watchHtml(d.watch, d.tickers || {}); pingNew(d.watch, d.tickers || {}); bindIns(); } catch (_) { /* next tick */ }
 }
+function insGroup(a) {                    // which part of the group the alerting wallet is (from why it is watched)
+  const w = a.why || "";
+  if (w.startsWith("new wallet funded by")) return "child";
+  if (w.startsWith("deployer")) return "deployer";
+  if (w.startsWith("sold for deployer")) return "seller";
+  if (w.startsWith("cluster funder")) return "funder";
+  if (w.startsWith("linked to")) return "linked";
+  if (w.startsWith("profit")) return "profit";
+  return "early";
+}
+const INS_TEAM = ["deployer", "seller", "funder", "linked", "child"];
+const INS_GROUP_KEY = { deployer: "web.ins.g.deployer", seller: "web.ins.g.seller", funder: "web.ins.g.funder", linked: "web.ins.g.linked",
+  child: "web.ins.g.child", profit: "web.ins.g.profit", early: "web.ins.g.early" };
+const INS_GROUP_CLS = { deployer: "bad", seller: "bad", funder: "bad", linked: "warn", child: "warn", profit: "", early: "" };
 function watchHtml(w, names) {
   if (!w) return `<h2>${esc(t("web.ins.watch"))}</h2><div class="muted small">${esc(t("web.ins.watch_off"))}</div>`;
   const lv = { strong: "bad", high: "bad", medium: "warn", watch: "", info: "" };
@@ -1220,15 +1234,22 @@ function watchHtml(w, names) {
       <div class="small">${lk(chart, "DexScreener")} · ${lk("https://pump.fun/coin/" + m, "pump.fun")} · ${lk("https://solscan.io/token/" + m, "Solscan")}
       ${a.age_h !== undefined && a.age_h !== null ? ` · <b>${esc(a.age_h < 1 ? Math.round(a.age_h * 60) + " " + t("web.ins.minutes") : a.age_h + " h")}</b>` : ""}${a.mcap ? " · MC " + esc(usd(a.mcap)) : ""}</div>`;
   };
-  const rows = (w.alerts || []).slice(0, 60).map((a) => `<tr><td class="small">${esc(new Date(a.ts * 1000).toLocaleString("vi-VN"))}</td>
+  const all = w.alerts || [];
+  const f = LS.get("insFilter", "all");
+  const pick = all.filter((a) => f === "team" ? INS_TEAM.includes(insGroup(a)) : f === "strong" ? a.level === "strong" : true);
+  const nTeam = all.filter((a) => INS_TEAM.includes(insGroup(a))).length, nStrong = all.filter((a) => a.level === "strong").length;
+  const fb = (k, label, n) => `<button class="btn ${f === k ? "primary" : ""}" data-insfilter="${k}">${esc(label)} (${n})</button>`;
+  const filters = `<div class="ins-filters">${fb("all", t("web.ins.f.all"), all.length)}${fb("team", t("web.ins.f.team"), nTeam)}${fb("strong", t("web.ins.f.strong"), nStrong)}</div>`;
+  const rows = pick.slice(0, 80).map((a) => `<tr><td class="small">${esc(new Date(a.ts * 1000).toLocaleString("vi-VN"))}</td>
     <td><span class="pill ${lv[a.level] || ""}">${esc(t("web.ins.lv." + a.level))}${a.n_wallets ? " ×" + a.n_wallets : ""}</span> ${esc(kind(a))}</td>
     <td>${a.mint ? coin(a.mint, a) : `${esc(t("web.ins.new_wallet"))} ${acct(a.to)}`}</td>
-    <td class="num">${a.sol || ""}</td><td>${acct(a.wallet)}<div class="muted small">${esc(a.why || "")}</div></td></tr>`);
+    <td class="num">${a.sol || ""}</td><td><span class="pill ${INS_GROUP_CLS[insGroup(a)]}">${esc(t(INS_GROUP_KEY[insGroup(a)]))}</span> ${acct(a.wallet)}<div class="muted small">${esc(a.why || "")}</div></td></tr>`);
   return `<h2>${esc(t("web.ins.watch"))}</h2><div class="muted small">${esc(t("web.ins.watch_note", { n: w.watched, k: w.children, p: w.polls }))}
     ${w.tier_a ? " · " + esc(t("web.ins.tiers", { a: w.tier_a, b: w.tier_b, m: w.muted || 0 })) : ""}
     · ${esc(t(w.telegram ? "web.ins.tg_on" : "web.ins.tg_off", { n: w.notified || 0 }))}
     ${"Notification" in window && Notification.permission !== "granted" ? `<button class="btn" id="insNotify">${esc(t("web.ins.enable_notif"))}</button>` : ""}
     ${w.last_poll ? " · " + esc(t("web.ins.watch_last")) + " " + esc(new Date(w.last_poll * 1000).toLocaleTimeString("vi-VN")) + (w.last_poll_s ? ` (${w.last_poll_s}s)` : "") : ""}</div>
+    ${filters}
     ${insTable([t("web.ins.when"), t("web.ins.event"), t("web.ins.coin_or_wallet"), "SOL", t("web.ins.by")], rows)}
     ${paperHtml(w.paper, names)}`;
 }
@@ -1307,6 +1328,7 @@ function bindIns() {
     const hs = [...tb.querySelectorAll("th")].map((h) => h.textContent);
     tb.querySelectorAll("tbody tr").forEach((tr) => [...tr.children].forEach((td, i) => { td.dataset.l = hs[i] || ""; }));
   });
+  document.querySelectorAll("[data-insfilter]").forEach((b) => { b.onclick = () => { LS.set("insFilter", b.dataset.insfilter); refreshWatch(); }; });
   const nb = $("#insNotify");
   if (nb) nb.onclick = async () => { try { await Notification.requestPermission(); } catch (_) { /* unsupported */ } beep(); refreshWatch(); };
   const b = $("#insRun");

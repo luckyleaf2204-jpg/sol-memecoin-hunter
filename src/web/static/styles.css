@@ -365,3 +365,6 @@ details.ev div { padding: 2px 0; }
 .tn.leaf::before { content: "• "; color: var(--muted); }
 .tk { margin-left: 10px; padding-left: 8px; border-left: 1px dashed var(--border); }
 .tn .pill { font-size: 10px; padding: 1px 6px; }
+
+.ins-filters { display: flex; gap: 6px; flex-wrap: wrap; margin: 8px 0; }
+.ins-filters .btn { padding: 6px 10px; font-size: 12px; }

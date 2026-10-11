@@ -1143,5 +1143,15 @@
  "web.ins.paper_no_route": "could not buy",
  "web.ins.paper_noroute": "no route",
  "web.ins.minutes": "min",
- "web.ins.new_wallet": "new wallet:"
+ "web.ins.new_wallet": "new wallet:",
+ "web.ins.g.deployer": "DEPLOYER",
+ "web.ins.g.seller": "SOLD FOR DEV",
+ "web.ins.g.funder": "FUNDER",
+ "web.ins.g.linked": "LINKED",
+ "web.ins.g.child": "NEW WALLET (group-funded)",
+ "web.ins.g.profit": "BIG PROFIT",
+ "web.ins.g.early": "EARLY",
+ "web.ins.f.all": "All",
+ "web.ins.f.team": "Deployer group",
+ "web.ins.f.strong": "STRONG only"
 }
