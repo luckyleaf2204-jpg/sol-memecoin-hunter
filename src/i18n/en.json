@@ -1240,5 +1240,6 @@
  "web.ins.b.k.create": "create + buy",
  "web.ins.b.k.receive": "received",
  "web.ins.b.k.sell": "sell",
- "web.ins.b.k.send": "sent out"
+ "web.ins.b.k.send": "sent out",
+ "web.ins.b.filter": "Only wallets that bought >= {s} SOL of the coin in total (micro trades hidden)."
 }

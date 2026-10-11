@@ -1240,5 +1240,6 @@
  "web.ins.b.k.create": "tạo + mua",
  "web.ins.b.k.receive": "nhận",
  "web.ins.b.k.sell": "bán",
- "web.ins.b.k.send": "chuyển đi"
+ "web.ins.b.k.send": "chuyển đi",
+ "web.ins.b.filter": "Chỉ hiện ví đã mua coin đó tổng ≥ {s} SOL (lệnh nhỏ, ví lướt vài phần SOL bị ẩn)."
 }

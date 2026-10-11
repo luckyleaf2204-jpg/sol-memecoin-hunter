@@ -32,6 +32,7 @@ CHILD_TTL_S = 72 * 3600
 MAX_NEW_TX = 25                  # per wallet per poll (a busy wallet is summarised, not replayed)
 MAX_ALERTS = 600
 MIN_SOL = float(os.environ.get("INSIDER_MIN_SOL") or 4)   # alerts only for buys / receipts / fundings >= this
+BOARD_MIN_SOL = float(os.environ.get("INSIDER_BOARD_MIN_SOL") or 4)   # a wallet shows on the board from this buy total
 FLIP_S = int(os.environ.get("INSIDER_FLIP_S") or 300)          # half sold within this after the buy = a flip
 HOLD_CONFIRM_S = int(os.environ.get("INSIDER_HOLD_S") or 600)  # STRONG confirmed when still held this long
 FLIPS_TO_MUTE = 2
@@ -503,7 +504,8 @@ class Watcher:
         strong = (self.state.get("vip") or {}).get("strong_done", {})
         out = []
         for m, c in self.state.get("coins", {}).items():
-            ws = [(w, x) for w, x in c["wallets"].items() if x.get("trades")]
+            # only wallets that put real money in: total buys of this coin >= BOARD_MIN_SOL (dust / micro snipes out)
+            ws = [(w, x) for w, x in c["wallets"].items() if x.get("trades") and x.get("buy_sol", 0) >= BOARD_MIN_SOL]
             if not ws:
                 continue
             wallets = []
@@ -522,6 +524,9 @@ class Watcher:
                         "first_ts": min(r["trades"][0][0] for r in wallets), "wallets": wallets})
         out.sort(key=lambda c: (not c["strong"], -len(c["wallets"]), -(c["last_ts"] or 0)))
         return out[:limit]
+
+    def board_min_sol(self) -> float:
+        return BOARD_MIN_SOL
 
     def coins_view(self, limit: int = 40) -> list[dict]:
         out = []
@@ -597,7 +602,7 @@ class Watcher:
                     "notified": self.state.get("notified", 0), "min_sol": MIN_SOL, "coins": self.coins_view(),
                     "vip": self.vip.status() if getattr(self, "vip", None) else None,
                     "mode": getattr(self, "mode", "broad"),
-                    "board": self.board_view() if getattr(self, "vip", None) else None,
+                    "board": self.board_view() if getattr(self, "vip", None) else None, "board_min_sol": BOARD_MIN_SOL,
                     "portfolio_ts": getattr(getattr(self, "portfolio", None), "updated", None),
                     "portfolio": self.portfolio.status() if getattr(self, "portfolio", None) else None,
                     "paper": {"summary": self.paper.summary(), "rows": self.paper.rows(60)} if self.paper else None,

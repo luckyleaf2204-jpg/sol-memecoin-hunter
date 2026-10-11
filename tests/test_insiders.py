@@ -794,3 +794,25 @@ def test_charts_merge_curve_and_amm_candles_and_cache():
     n = len(calls)
     ch.candles("M", created_ts=0)
     assert len(calls) == n                                                          # cached
+
+
+
+def test_board_hides_wallets_whose_buys_stay_under_the_threshold(tmp_path):
+    sol = 10 ** 9
+    w, r = vip_watcher(tmp_path)
+    txs = {"big": wtx(WALLET, "big", 1_900, NEWMINT, (0, 5), (20 * sol, 14 * sol)),       # 6 SOL
+           "tiny": wtx(BOSS, "tiny", 1_910, NEWMINT, (0, 5), (2 * sol, int(1.7 * sol))),  # 0.3 SOL
+           "dust": wtx(BOSS, "dust", 1_920, "OTHERpump", (0, 5), (2 * sol, int(1.9 * sol)))}
+
+    def rpc(m, p):
+        if m == "getTokenSupply":
+            return {"value": {"uiAmountString": "1000000000", "decimals": 6}}
+        return txs[p[0]]
+    vs = VP.VipStream(w, r, rpc=rpc, now=lambda: 2_000.0)
+    vs.retry_sleep = False
+    w.vip = vs
+    for s_ in ("big", "tiny", "dust"):
+        vs.handle(WALLET if s_ == "big" else BOSS, s_)
+    b = w.board_view()
+    assert [c["mint"] for c in b] == [NEWMINT]                                     # the dust-only coin has no tab
+    assert [x["wallet"] for x in b[0]["wallets"]] == [WALLET]                      # the 0.3 SOL buyer is hidden

@@ -1281,7 +1281,7 @@ function boardTrade(tr, coin, solUsd) {
 }
 function boardHtml(board, names, solUsd) {
   board = board || [];
-  if (!board.length) return `<h2>${esc(t("web.ins.b.title"))}</h2><div class="muted small">${esc(t("web.ins.b.none"))}</div>`;
+  if (!board.length) return `<h2>${esc(t("web.ins.b.title"))}</h2><div class="muted small">${esc(t("web.ins.b.none"))} ${esc(t("web.ins.b.filter", { s: S.insBoardMin || 4 }))}</div>`;
   let sel = LS.get("insBoard", "");
   if (!board.some((c) => c.mint === sel)) sel = board[0].mint;
   const label = (c) => c.symbol ? "$" + c.symbol : short(c.mint);
@@ -1311,7 +1311,7 @@ function boardHtml(board, names, solUsd) {
     }
   }
   const chart = safeUrl(c.chart) || "https://dexscreener.com/solana/" + c.mint;
-  return `<h2>${esc(t("web.ins.b.title"))}</h2><div class="muted small">${esc(t("web.ins.b.note"))}</div>
+  return `<h2>${esc(t("web.ins.b.title"))}</h2><div class="muted small">${esc(t("web.ins.b.note"))} ${esc(t("web.ins.b.filter", { s: S.insBoardMin || 4 }))}</div>
     <div class="ins-tabs">${tabs}</div>
     <div class="token-head"><b>${esc(label(c))}</b> ${c.name ? esc(c.name) : ""} <span class="mono small">${esc(short(c.mint))}</span> <span class="copy" data-copy="${esc(c.mint)}">⧉</span>
       ${c.strong ? `<span class="pill bad">${esc(t("web.ins.lv.vipstrong"))}</span>` : ""}
@@ -1408,7 +1408,7 @@ function vipDash(w, names) {
       <td>${chips || `<span class="c-muted small">${esc(t("web.ins.vd.no_tokens"))}</span>`}${(x.tokens || []).length ? `<details class="ev"><summary>${esc(t("web.ins.vd.all", { n: x.tokens.length, d: x.dust }))}</summary>${all}</details>` : ""}</td>
       <td class="small">${esc(agoTxt(seen[x.wallet]))}</td></tr>`;
   });
-  S.insBoardData = w.board || []; S.insSolUsd = solUsd;
+  S.insBoardData = w.board || []; S.insSolUsd = solUsd; S.insBoardMin = w.board_min_sol || 4;
   return `<h2>${esc(t("web.ins.vd.title"))}</h2><div class="muted small">${esc(t("web.ins.vd.note", { m: w.min_sol || 4, s: pf.min_sol || 1 }))}</div>${head}
     ${boardHtml(w.board, names, solUsd)}
     <h3>${esc(t("web.ins.vd.held", { s: pf.min_sol || 1 }))}</h3>${insTable([t("web.ins.token"), t("web.ins.vd.n_holders"), t("web.ins.vd.value"), t("web.ins.vd.who")], held)}
