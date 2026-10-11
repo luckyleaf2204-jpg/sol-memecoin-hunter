@@ -46,10 +46,12 @@ BOT_NEW_COINS = 4                # a wallet touching >= 4 different new coins in
 class Rpc:
     def __init__(self, url: str = PUBLIC_RPC, gap_s: float = 0.25, sleep=time.sleep):
         self.url, self.gap_s, self.sleep, self.calls, self.errors = url, gap_s, sleep, 0, 0
+        self.throttled = 0                                   # 429 / 5xx answers (shown on /healthz)
         self._last = 0.0
         self._lock = threading.Lock()
 
     RETRY_CODES = (-32005, -32429, 429)                      # node busy / rate limited: worth another try
+    max_wait_s = 30.0
 
     def _pace(self) -> None:
         with self._lock:                                     # every try starts >= gap_s after the previous one
@@ -72,11 +74,12 @@ class Rpc:
             except urllib.error.HTTPError as e:
                 why = f"HTTP {e.code}"
                 if e.code in (429, 502, 503, 504):
+                    self.throttled += 1
                     try:
                         wait = float((e.headers or {}).get("Retry-After") or 0)
                     except (TypeError, ValueError):
                         wait = 0
-                    self.sleep(min(max(wait, 2 * 2 ** k), 30) + random.random())
+                    self.sleep(min(max(wait, 2 * 2 ** k), self.max_wait_s) + random.random())
                     continue
                 self.errors += 1
                 raise RuntimeError(why) from None

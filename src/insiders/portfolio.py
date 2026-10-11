@@ -133,11 +133,21 @@ class Portfolio:
         self.updated = None
         self.error = None
         self.seconds = None
+        self.progress = None                                 # (done, total) of the running pass
+        self.partial_every = 10
+
+    def _publish(self, wallets: dict, raw: dict) -> None:
+        mints = {m for _, toks in raw.values() for m, _ in toks} | {SOL}
+        self.prices.refresh(mints)
+        self.raw = dict(raw)
+        self.view = build({w: v for w, v in wallets.items() if w in raw}, raw, self.prices, self.prices.usd.get(SOL))
 
     def refresh(self) -> dict:
         t0 = time.time()
         wallets = self.wallets_fn()
         raw = {}
+        first = self.view is None
+        self.progress = (0, len(wallets))
 
         def one(w):
             try:
@@ -145,21 +155,23 @@ class Portfolio:
             except Exception as e:                            # one wallet failing keeps the others
                 self.error = f"{w[:6]}: {type(e).__name__}"
                 return w, None
-        from concurrent.futures import ThreadPoolExecutor
-        with ThreadPoolExecutor(max_workers=1) as ex:      # the public RPC answers 429 to parallel bursts
-            for w, h in ex.map(one, list(wallets)):
-                if h is not None:
-                    raw[w] = h
-        self.raw = raw
-        mints = {m for _, toks in raw.values() for m, _ in toks} | {SOL}
-        self.prices.refresh(mints)
+        for k, w in enumerate(list(wallets), 1):            # one by one: the public RPC answers 429 to bursts
+            w, h = one(w)
+            if h is not None:
+                raw[w] = h
+            self.progress = (k, len(wallets))
+            if first and k % self.partial_every == 0:         # the first pass shows up while it runs
+                self._publish(wallets, raw)
+                self.updated = self.now()
+        self._publish(wallets, raw)
         self.view = build(wallets, raw, self.prices, self.prices.usd.get(SOL))
         self.updated, self.seconds = self.now(), round(time.time() - t0)
         return self.view
 
     def status(self) -> dict:
         return {**(self.view or {}), "updated": self.updated, "seconds": self.seconds, "error": self.error,
-                "every_s": EVERY_S}
+                "every_s": EVERY_S, "progress": self.progress,
+                "rpc": {"calls": getattr(self.rpc, "calls", None), "throttled": getattr(self.rpc, "throttled", None)}}
 
     def run_forever(self, stop: threading.Event, every_s: int = EVERY_S) -> None:
         while not stop.is_set():
