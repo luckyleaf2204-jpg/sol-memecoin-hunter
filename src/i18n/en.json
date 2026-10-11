@@ -1153,5 +1153,20 @@
  "web.ins.g.early": "EARLY",
  "web.ins.f.all": "All",
  "web.ins.f.team": "Deployer group",
- "web.ins.f.strong": "STRONG only"
+ "web.ins.f.strong": "STRONG only",
+ "web.ins.c.title": "Filtered coins (trades >= {s} SOL) — one tab per coin",
+ "web.ins.c.none": "No coin passed the filter yet.",
+ "web.ins.c.wallets": "wallets",
+ "web.ins.c.received": "received",
+ "web.ins.c.sent": "sent",
+ "web.ins.c.paper": "Paper",
+ "web.ins.c.age": "{h} h old at the alert",
+ "web.ins.c.totals": "{n} group wallets · bought {b} SOL · sold {s} SOL",
+ "web.ins.c.wallet": "Wallet (group)",
+ "web.ins.c.bought": "Bought SOL (times)",
+ "web.ins.c.sold": "Sold SOL (times)",
+ "web.ins.c.held": "Still held",
+ "web.ins.c.pnl": "Sold − bought (SOL)",
+ "web.ins.c.when": "First → last",
+ "web.ins.alert_list": "Alert list (only trades >= {s} SOL)"
 }

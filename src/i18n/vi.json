@@ -1153,5 +1153,20 @@
  "web.ins.g.early": "VÍ SỚM",
  "web.ins.f.all": "Tất cả",
  "web.ins.f.team": "Nhóm deployer",
- "web.ins.f.strong": "Chỉ MẠNH"
+ "web.ins.f.strong": "Chỉ MẠNH",
+ "web.ins.c.title": "Coin đã lọc (lệnh ≥ {s} SOL) — mỗi coin một tab",
+ "web.ins.c.none": "Chưa có coin nào qua bộ lọc.",
+ "web.ins.c.wallets": "ví",
+ "web.ins.c.received": "nhận",
+ "web.ins.c.sent": "chuyển đi",
+ "web.ins.c.paper": "Paper",
+ "web.ins.c.age": "{h} giờ tuổi lúc báo",
+ "web.ins.c.totals": "{n} ví nhóm tham gia · mua {b} SOL · bán {s} SOL",
+ "web.ins.c.wallet": "Ví (nhóm)",
+ "web.ins.c.bought": "Đã mua SOL (lần)",
+ "web.ins.c.sold": "Đã bán SOL (lần)",
+ "web.ins.c.held": "Còn giữ",
+ "web.ins.c.pnl": "Bán − mua (SOL)",
+ "web.ins.c.when": "Lần đầu → gần nhất",
+ "web.ins.alert_list": "Danh sách cảnh báo (chỉ lệnh ≥ {s} SOL)"
 }

@@ -1221,6 +1221,34 @@ const INS_TEAM = ["deployer", "seller", "funder", "linked", "child"];
 const INS_GROUP_KEY = { deployer: "web.ins.g.deployer", seller: "web.ins.g.seller", funder: "web.ins.g.funder", linked: "web.ins.g.linked",
   child: "web.ins.g.child", profit: "web.ins.g.profit", early: "web.ins.g.early" };
 const INS_GROUP_CLS = { deployer: "bad", seller: "bad", funder: "bad", linked: "warn", child: "warn", profit: "", early: "" };
+function coinsHtml(coins, names, minSol) {
+  coins = coins || [];
+  if (!coins.length) return `<h3>${esc(t("web.ins.c.title", { s: minSol || 4 }))}</h3><div class="muted small">${esc(t("web.ins.c.none"))}</div>`;
+  let sel = LS.get("insCoin", "");
+  if (!coins.some((c) => c.mint === sel)) sel = coins[0].mint;
+  const label = (c) => c.symbol ? "$" + c.symbol : short(c.mint);
+  const tabs = coins.map((c) => `<button class="btn ${c.mint === sel ? "primary" : ""} ${c.strong ? "strong" : ""}" data-inscoin="${esc(c.mint)}">${esc(label(c))}
+    <span class="small">${c.n_wallets} ${esc(t("web.ins.c.wallets"))} · ${Number(c.buy_sol).toFixed(1)} SOL</span></button>`).join("");
+  const c = coins.find((x) => x.mint === sel);
+  const lk = (u, txt) => `<a href="${esc(u)}" target="_blank" rel="noopener">${esc(txt)}</a>`;
+  const held = (w) => w.tok_in > 0 ? Math.max(0, Math.round(100 * (1 - w.tok_out / w.tok_in))) + "%" : (w.tok_out > 0 ? "0%" : "—");
+  const rows = (c.wallets || []).map((w) => {
+    const g = insGroup(w);
+    return `<tr><td><span class="pill ${INS_GROUP_CLS[g]}">${esc(t(INS_GROUP_KEY[g]))}</span> ${acct(w.wallet)}<div class="muted small">${esc(w.why || "")}</div></td>
+      <td class="num">${Number(w.buy_sol).toFixed(2)} <span class="c-muted small">(${w.n_buy}${w.n_in ? " +" + w.n_in + " " + esc(t("web.ins.c.received")) : ""})</span></td>
+      <td class="num">${Number(w.sell_sol).toFixed(2)} <span class="c-muted small">(${w.n_sell}${w.n_out ? " +" + w.n_out + " " + esc(t("web.ins.c.sent")) : ""})</span></td>
+      <td class="num">${held(w)}</td><td class="num">${sol(Math.round(100 * (w.sell_sol - w.buy_sol)) / 100)}</td>
+      <td class="small">${esc(new Date(w.first_ts * 1000).toLocaleTimeString("vi-VN"))} → ${esc(new Date(w.last_ts * 1000).toLocaleTimeString("vi-VN"))}</td></tr>`;
+  });
+  const chart = safeUrl(c.chart) || "https://dexscreener.com/solana/" + c.mint;
+  const head = `<div class="token-head"><b>${esc(label(c))}</b> ${c.name ? esc(c.name) : ""} <span class="mono small">${esc(short(c.mint))}</span> <span class="copy" data-copy="${esc(c.mint)}">⧉</span>
+    ${c.strong ? `<span class="pill bad">${esc(t("web.ins.lv.strong"))}</span>` : ""}${c.paper ? ` <span class="pill">${esc(t("web.ins.c.paper"))}: ${esc(t({ open: "web.ins.paper_open", closed: "web.ins.paper_closed", no_route: "web.ins.paper_no_route" }[c.paper] || "common.unknown"))}</span>` : ""}
+    <div class="small">${lk(chart, "DexScreener")} · ${lk("https://pump.fun/coin/" + c.mint, "pump.fun")} · ${lk("https://solscan.io/token/" + c.mint, "Solscan")}
+    ${c.age_h !== undefined && c.age_h !== null ? " · " + esc(t("web.ins.c.age", { h: c.age_h })) : ""}${c.mcap ? " · MC " + esc(usd(c.mcap)) : ""}</div>
+    <div class="small">${esc(t("web.ins.c.totals", { n: c.n_wallets, b: Number(c.buy_sol).toFixed(2), s: Number(c.sell_sol).toFixed(2) }))}</div></div>`;
+  return `<h3>${esc(t("web.ins.c.title", { s: minSol || 4 }))}</h3><div class="ins-tabs">${tabs}</div>${head}
+    ${insTable([t("web.ins.c.wallet"), t("web.ins.c.bought"), t("web.ins.c.sold"), t("web.ins.c.held"), t("web.ins.c.pnl"), t("web.ins.c.when")], rows)}`;
+}
 function watchHtml(w, names) {
   if (!w) return `<h2>${esc(t("web.ins.watch"))}</h2><div class="muted small">${esc(t("web.ins.watch_off"))}</div>`;
   const lv = { strong: "bad", high: "bad", medium: "warn", watch: "", info: "" };
@@ -1249,6 +1277,8 @@ function watchHtml(w, names) {
     · ${esc(t(w.telegram ? "web.ins.tg_on" : "web.ins.tg_off", { n: w.notified || 0 }))}
     ${"Notification" in window && Notification.permission !== "granted" ? `<button class="btn" id="insNotify">${esc(t("web.ins.enable_notif"))}</button>` : ""}
     ${w.last_poll ? " · " + esc(t("web.ins.watch_last")) + " " + esc(new Date(w.last_poll * 1000).toLocaleTimeString("vi-VN")) + (w.last_poll_s ? ` (${w.last_poll_s}s)` : "") : ""}</div>
+    ${coinsHtml(w.coins, names, w.min_sol)}
+    <h3>${esc(t("web.ins.alert_list", { s: w.min_sol || 4 }))}</h3>
     ${filters}
     ${insTable([t("web.ins.when"), t("web.ins.event"), t("web.ins.coin_or_wallet"), "SOL", t("web.ins.by")], rows)}
     ${paperHtml(w.paper, names)}`;
@@ -1329,6 +1359,7 @@ function bindIns() {
     tb.querySelectorAll("tbody tr").forEach((tr) => [...tr.children].forEach((td, i) => { td.dataset.l = hs[i] || ""; }));
   });
   document.querySelectorAll("[data-insfilter]").forEach((b) => { b.onclick = () => { LS.set("insFilter", b.dataset.insfilter); refreshWatch(); }; });
+  document.querySelectorAll("[data-inscoin]").forEach((b) => { b.onclick = () => { LS.set("insCoin", b.dataset.inscoin); refreshWatch(); }; });
   const nb = $("#insNotify");
   if (nb) nb.onclick = async () => { try { await Notification.requestPermission(); } catch (_) { /* unsupported */ } beep(); refreshWatch(); };
   const b = $("#insRun");

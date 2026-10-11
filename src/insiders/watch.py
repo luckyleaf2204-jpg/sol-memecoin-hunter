@@ -31,6 +31,9 @@ FUND_MIN_LAMPORTS = 500_000_000
 CHILD_TTL_S = 72 * 3600
 MAX_NEW_TX = 25                  # per wallet per poll (a busy wallet is summarised, not replayed)
 MAX_ALERTS = 600
+MIN_SOL = float(os.environ.get("INSIDER_MIN_SOL") or 4)   # alerts only for buys / receipts / fundings >= this
+COIN_KEEP_S = 48 * 3600          # a coin that never qualified is forgotten after 48 h of silence
+MAX_COINS = 120
 B_SLICES = 15                    # tier B is checked 1/15 per poll: every wallet about every 30 minutes
 BOT_NEW_COINS = 4                # a wallet touching >= 4 different new coins in 24 h is a sniper bot: muted
 
@@ -116,8 +119,22 @@ def _keys(tx):
     return [k.get("pubkey") if isinstance(k, dict) else k for k in ks]
 
 
+def _trade_sol(tx: dict, wallet: str, mint: str, dt: int) -> float | None:
+    """SOL of this wallet's trade priced on the curve / pool side (bot programs send sale proceeds to their own
+    vaults, so the wallet's balance can show nothing), shared by the wallets' token amounts; None if no pool."""
+    from insiders.pnl import _all_tok, _pool_sol
+    deltas = {o: d for o, d in _all_tok(tx, mint).items() if o != wallet and d}
+    pools = {o: _pool_sol(tx, o) for o in deltas if not on_curve(o)}
+    pools = {o: v for o, v in pools.items() if v and (v > 0) == (dt > 0)}
+    if not pools:
+        return None
+    o, pv = max(pools.items(), key=lambda x: abs(x[1]))
+    same = abs(dt) + sum(abs(d) for q, d in deltas.items() if on_curve(q) and (d > 0) == (dt > 0))
+    return abs(pv) * abs(dt) / max(1, same) / 1e9
+
+
 def analyse(tx: dict, wallet: str) -> list[dict]:
-    """Events of `wallet` in one transaction."""
+    """Events of `wallet` in one transaction: CREATE / BUY / RECEIVE (tokens in), SELL / SEND (tokens out), FUND."""
     meta = tx.get("meta") or {}
     if meta.get("err") is not None:
         return []
@@ -130,18 +147,25 @@ def analyse(tx: dict, wallet: str) -> list[dict]:
         for b in rows or []:
             if b.get("owner") == wallet:
                 d[b["mint"]] += int(b["uiTokenAmount"]["amount"])
-    sol = 0
+    native = 0
     if wallet in keys:
         i = keys.index(wallet)
-        sol = int(meta["postBalances"][i]) - int(meta["preBalances"][i])
+        native = int(meta["postBalances"][i]) - int(meta["preBalances"][i])
     created = PUMP in keys and "Instruction: Create" in logs and keys and keys[0] == wallet
     for mint in set(pre) | set(post):
-        if mint in (WSOL, *STABLES) or post[mint] <= pre[mint]:
+        dt = post[mint] - pre[mint]
+        if mint in (WSOL, *STABLES) or not dt:
             continue
-        kind = "CREATE" if created and pre[mint] == 0 else ("BUY" if sol < -10_000_000 else "RECEIVE")
-        ev.append({"ts": ts, "sig": sig, "wallet": wallet, "kind": kind, "mint": mint,
-                   "sol": round(-sol / 1e9, 3) if sol < 0 else 0, "tokens": post[mint] - pre[mint]})
-    if created and not ev:
+        pool = _trade_sol(tx, wallet, mint, dt)
+        if dt > 0:
+            sol = pool if pool is not None else (-native / 1e9 if native < -10_000_000 else 0.0)
+            kind = "CREATE" if created and pre[mint] == 0 else ("BUY" if sol > 0 else "RECEIVE")
+        else:
+            sol = pool if pool is not None else (native / 1e9 if native > 10_000_000 else 0.0)
+            kind = "SELL" if sol > 0 else "SEND"
+        ev.append({"ts": ts, "sig": sig, "wallet": wallet, "kind": kind, "mint": mint, "sol": round(sol, 3),
+                   "tokens": abs(dt)})
+    if created and not any(e["kind"] == "CREATE" for e in ev):
         mints = [b["mint"] for b in meta.get("postTokenBalances") or [] if b.get("mint") not in (WSOL, *STABLES)]
         if mints:
             ev.append({"ts": ts, "sig": sig, "wallet": wallet, "kind": "CREATE", "mint": mints[0], "sol": 0,
@@ -280,7 +304,10 @@ class Watcher:
                         continue
                     for ev in analyse(tx, w):
                         with self.lock:
-                            a = self._alert(ev, why)
+                            self._ledger(ev, why)
+                            a = None if ev["kind"] in ("SELL", "SEND") else self._alert(ev, why)
+                            if a and a.get("mint") and a["kind"] != "FUND":
+                                self._qualify(a)
                         if a:
                             found.append(a)
             except RuntimeError as e:
@@ -319,12 +346,20 @@ class Watcher:
                 return None
             self.state["children"][ev["to"]] = {"parent": ev["wallet"], "since": self.now(), "why": why[:40],
                                                 "sig": ev.get("sig")}
-            return {**ev, "level": "watch", "note": "now watched for 72 h"}
+            # watched from 0.5 SOL (a one-use wallet), shown only from MIN_SOL
+            return {**ev, "level": "watch", "note": "now watched for 72 h"} if ev["sol"] >= MIN_SOL else None
         mint = ev["mint"]
         if ev["wallet"] in self.state.setdefault("muted", {}):
             return None
         if mint in self.old:
             return None if ev["kind"] != "CREATE" else {**ev, "level": "info", "ticker": self.tickers.get(mint)}
+        if ev["kind"] == "BUY" and ev["sol"] < MIN_SOL:
+            return None                                       # small buys dilute the list (still in the coin ledger)
+        if ev["kind"] == "RECEIVE":
+            v = self._value_sol(mint, ev.get("tokens") or 0)
+            if v is None or v < MIN_SOL:
+                return None
+            ev = {**ev, "sol": round(v, 3), "valued": True}   # tokens received, valued at a Jupiter quote
         info = self._meta(mint)
         ev = {**ev, **{k: info.get(k) for k in ("name", "symbol", "mcap", "chart", "dex")}}
         age = self._mint_age(mint)
@@ -336,6 +371,76 @@ class Watcher:
             return None
         return {**ev, "age_h": None if age is None else round(age / 3600, 2),
                 "level": "high" if ev["kind"] == "CREATE" else "medium"}
+
+    def _value_sol(self, mint: str, tokens: int) -> float | None:
+        """SOL value of `tokens` at a Jupiter quote (None when no quote function / no route)."""
+        q = getattr(self, "paper", None) and self.paper.quote
+        if not q or not tokens:
+            return None
+        out = q(mint, WSOL, int(tokens))
+        return None if out is None else out / 1e9
+
+    def _ledger(self, ev: dict, why: str) -> None:
+        """Per coin and watched wallet: SOL in / out, token in / out, counts (every size, every new coin)."""
+        mint = ev.get("mint")
+        if not mint or mint in self.old or ev["kind"] == "FUND":
+            return
+        coins = self.state.setdefault("coins", {})
+        c = coins.setdefault(mint, {"first_ts": ev["ts"], "last_ts": ev["ts"], "qualified": False, "wallets": {}})
+        c["last_ts"] = max(c["last_ts"] or 0, ev["ts"] or 0)
+        w = c["wallets"].setdefault(ev["wallet"], {"why": why, "buy_sol": 0.0, "sell_sol": 0.0, "n_buy": 0,
+                                                    "n_sell": 0, "n_in": 0, "n_out": 0, "tok_in": 0, "tok_out": 0,
+                                                    "first_ts": ev["ts"], "last_ts": ev["ts"]})
+        w["last_ts"] = ev["ts"]
+        if ev["kind"] in ("BUY", "CREATE"):
+            w["buy_sol"] = round(w["buy_sol"] + ev["sol"], 4)
+            w["n_buy"] += 1
+            w["tok_in"] += ev.get("tokens") or 0
+        elif ev["kind"] == "RECEIVE":
+            w["n_in"] += 1
+            w["tok_in"] += ev.get("tokens") or 0
+        elif ev["kind"] == "SELL":
+            w["sell_sol"] = round(w["sell_sol"] + ev["sol"], 4)
+            w["n_sell"] += 1
+            w["tok_out"] += ev.get("tokens") or 0
+        elif ev["kind"] == "SEND":
+            w["n_out"] += 1
+            w["tok_out"] += ev.get("tokens") or 0
+        now = self.now()
+        for m in [m for m, x in coins.items() if not x["qualified"] and now - (x["last_ts"] or 0) > COIN_KEEP_S]:
+            del coins[m]
+
+    def _qualify(self, a: dict) -> None:
+        """A coin with a shown alert (>= MIN_SOL buy / receipt, or a creation) gets its own tab."""
+        c = self.state.setdefault("coins", {}).get(a["mint"])
+        if c is None:
+            return
+        c["qualified"] = True
+        for k in ("symbol", "name", "chart", "mcap", "age_h"):
+            if a.get(k) is not None:
+                c[k] = a[k]
+        if a.get("level") == "strong":
+            c["strong"] = True
+        q = [m for m, x in self.state["coins"].items() if x["qualified"]]
+        if len(q) > MAX_COINS:
+            for m in sorted(q, key=lambda m: self.state["coins"][m]["last_ts"] or 0)[:len(q) - MAX_COINS]:
+                del self.state["coins"][m]
+
+    def coins_view(self, limit: int = 40) -> list[dict]:
+        out = []
+        paper = (self.state.get("paper") or {}).get("positions", {})
+        for m, c in sorted(self.state.get("coins", {}).items(), key=lambda x: -(x[1]["last_ts"] or 0)):
+            if not c["qualified"]:
+                continue
+            ws = sorted(({"wallet": w, **v} for w, v in c["wallets"].items()), key=lambda x: -x["buy_sol"])
+            out.append({"mint": m, **{k: c.get(k) for k in ("symbol", "name", "chart", "mcap", "age_h", "strong",
+                                                             "first_ts", "last_ts")},
+                        "n_wallets": len(ws), "buy_sol": round(sum(x["buy_sol"] for x in ws), 3),
+                        "sell_sol": round(sum(x["sell_sol"] for x in ws), 3), "wallets": ws,
+                        "paper": paper.get(m, {}).get("status")})
+            if len(out) >= limit:
+                break
+        return out
 
     def _is_bot(self, wallet: str, mint: str) -> bool:
         """A wallet buying >= BOT_NEW_COINS different new coins within 24 h snipes everything: mute it."""
@@ -392,7 +497,7 @@ class Watcher:
                     "watched": self.state.get("watched", len(self.base)), "every_s": EVERY_S,
                     "tier_a": len(self.base), "tier_b": len(self.tier_b), "muted": len(self.state.get("muted", {})),
                     "telegram": bool(self.notify), "notify_levels": sorted(self.notify_levels),
-                    "notified": self.state.get("notified", 0),
+                    "notified": self.state.get("notified", 0), "min_sol": MIN_SOL, "coins": self.coins_view(),
                     "paper": {"summary": self.paper.summary(), "rows": self.paper.rows(60)} if self.paper else None,
                     "children": len(self.state["children"]), "last_error": self.state["last_error"],
                     "rpc_calls": self.state.get("rpc_calls"), "last_poll_s": self.state.get("last_poll_s"),

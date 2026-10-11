@@ -314,7 +314,9 @@ def test_analyse_create_buy_receive_and_fund():
     ev = WT.analyse(wtx(WALLET, "d", 1, transfer=(BOSS, sol)), WALLET)
     assert ev[0]["kind"] == "FUND" and ev[0]["to"] == BOSS
     assert WT.analyse(wtx(WALLET, "e", 1, transfer=(PDA, sol)), WALLET) == []        # program account: a trade
-    assert WT.analyse(wtx(WALLET, "f", 1, NEWMINT, (5, 0), (sol, 2 * sol)), WALLET) == []   # a sell: no alert
+    sell = WT.analyse(wtx(WALLET, "f", 1, NEWMINT, (5, 0), (sol, 2 * sol)), WALLET)
+    assert sell[0]["kind"] == "SELL" and sell[0]["sol"] == 1.0                     # recorded, never alerted
+    assert WT.analyse(wtx(WALLET, "g", 1, NEWMINT, (5, 0), (sol, sol)), WALLET)[0]["kind"] == "SEND"
 
 
 class FakeRpc:
@@ -343,8 +345,8 @@ def watcher(tmp_path, rpc, now=2_000.0, wallets=(WALLET, CEX)):
 
 def test_first_poll_only_records_then_new_coin_buys_alert_and_two_wallets_are_strong(tmp_path):
     sol = 10 ** 9
-    txs = {"b1": wtx(WALLET, "b1", 1_500, NEWMINT, (0, 5), (2 * sol, sol)),
-           "b2": wtx(CEX, "b2", 1_600, NEWMINT, (0, 9), (3 * sol, sol))}
+    txs = {"b1": wtx(WALLET, "b1", 1_500, NEWMINT, (0, 5), (12 * sol, 6 * sol)),
+           "b2": wtx(CEX, "b2", 1_600, NEWMINT, (0, 9), (13 * sol, 8 * sol))}
     rpc = FakeRpc({WALLET: [{"signature": "old"}], CEX: [{"signature": "old2"}]}, txs)
     w = watcher(tmp_path, rpc)
     assert w.poll_once() == []                                              # baseline
@@ -367,7 +369,7 @@ def test_old_or_channel_coins_do_not_alert(tmp_path):
 
 
 def test_funding_a_fresh_wallet_adds_it_to_the_watch_for_72h(tmp_path):
-    txs = {"f1": wtx(WALLET, "f1", 1_500, transfer=(BOSS, 10 ** 9))}
+    txs = {"f1": wtx(WALLET, "f1", 1_500, transfer=(BOSS, 5 * 10 ** 9))}
     rpc = FakeRpc({WALLET: [{"signature": "old"}]}, txs)
     w = watcher(tmp_path, rpc, wallets=(WALLET,))
     w.poll_once()
@@ -442,9 +444,9 @@ def test_new_wallet_funded_then_buying_right_away_makes_a_strong_alert(tmp_path)
     """Group wallet funds a fresh wallet (seen in poll 2); the fresh wallet had ALREADY bought the new coin before
     poll 3 looked at it: the buy is still read (from the funding signature) and with the group's own buy -> STRONG."""
     sol = 10 ** 9
-    txs = {"f1": wtx(WALLET, "f1", 1_500, transfer=(BOSS, 2 * sol)),
-           "kb": wtx(BOSS, "kb", 1_550, NEWMINT, (0, 7), (2 * sol, sol)),
-           "wb": wtx(WALLET, "wb", 1_560, NEWMINT, (0, 5), (3 * sol, sol))}
+    txs = {"f1": wtx(WALLET, "f1", 1_500, transfer=(BOSS, 6 * sol)),
+           "kb": wtx(BOSS, "kb", 1_550, NEWMINT, (0, 7), (6 * sol, sol)),
+           "wb": wtx(WALLET, "wb", 1_560, NEWMINT, (0, 5), (9 * sol, sol))}
     rpc = FakeRpc({WALLET: [{"signature": "old"}]}, txs)
     w = watcher(tmp_path, rpc, wallets=(WALLET,))
     w.poll_once()                                                            # baseline
@@ -494,8 +496,8 @@ def test_paper_no_route_is_recorded_not_traded():
 
 def test_watch_opens_a_paper_trade_on_a_strong_alert(tmp_path):
     sol = 10 ** 9
-    txs = {"b1": wtx(WALLET, "b1", 1_500, NEWMINT, (0, 5), (2 * sol, sol)),
-           "b2": wtx(CEX, "b2", 1_600, NEWMINT, (0, 9), (3 * sol, sol))}
+    txs = {"b1": wtx(WALLET, "b1", 1_500, NEWMINT, (0, 5), (12 * sol, 6 * sol)),
+           "b2": wtx(CEX, "b2", 1_600, NEWMINT, (0, 9), (13 * sol, 8 * sol))}
     rpc = FakeRpc({WALLET: [{"signature": "old"}], CEX: [{"signature": "old2"}]}, txs)
     r = {"tokens": [{"mint": MINT, "status": "ok", "deployer": w} for w in (WALLET, CEX)], "tickers": {}}
     w = WT.Watcher(r, tmp_path / "w.json", rpc=rpc, now=lambda: 2_000.0, paper_quote=lambda i, o, a: a)
@@ -509,7 +511,7 @@ def test_watch_opens_a_paper_trade_on_a_strong_alert(tmp_path):
 def test_alerts_carry_name_links_age_and_busy_new_coins_are_not_missed(tmp_path):
     """RPC cannot date a busy coin (>= 1000 signatures): the creation time from DexScreener / Jupiter is used."""
     sol = 10 ** 9
-    txs = {"b1": wtx(WALLET, "b1", 1_500, NEWMINT, (0, 5), (2 * sol, sol))}
+    txs = {"b1": wtx(WALLET, "b1", 1_500, NEWMINT, (0, 5), (12 * sol, 6 * sol))}
     rpc = FakeRpc({WALLET: [{"signature": "old"}]}, txs, mint_sigs=1000)
     meta = lambda m: {"name": "Frog Coin", "symbol": "FROG", "mcap": 12345.0, "created_ts": 2_000 - 1_800,   # noqa: E731
                       "chart": "https://dexscreener.com/solana/pair1"}
@@ -532,3 +534,41 @@ def test_coin_meta_falls_back_to_jupiter():
     m = WT.coin_meta(NEWMINT, get=get)
     assert m["symbol"] == "FRG" and m["src"] == "jupiter" and m["created_ts"] > 0
     assert WT.coin_meta(NEWMINT, get=lambda u: (_ for _ in ()).throw(OSError("down"))) == {}
+
+
+
+def test_only_buys_of_at_least_min_sol_alert_but_every_trade_is_in_the_coin_tab(tmp_path):
+    """A 1 SOL buy stays out of the alert list; the 6 SOL buy alerts and opens the coin tab, whose ledger then has
+    both wallets' buys and the later sell."""
+    sol = 10 ** 9
+    txs = {"s1": wtx(CEX, "s1", 1_500, NEWMINT, (0, 3), (2 * sol, sol)),              # 1 SOL: no alert
+           "b1": wtx(WALLET, "b1", 1_600, NEWMINT, (0, 5), (12 * sol, 6 * sol)),       # 6 SOL: alert
+           "x1": wtx(WALLET, "x1", 1_700, NEWMINT, (5, 1), (6 * sol, 15 * sol)),       # sells for 9 SOL
+           "f1": wtx(WALLET, "f1", 1_800, transfer=(BOSS, 2 * sol))}                   # 2 SOL fund: watched, hidden
+    rpc = FakeRpc({WALLET: [{"signature": "old"}], CEX: [{"signature": "old2"}]}, txs)
+    w = watcher(tmp_path, rpc)
+    w.poll_once()
+    rpc.sigs = {WALLET: [{"signature": s} for s in ("f1", "x1", "b1", "old")],
+                CEX: [{"signature": "s1"}, {"signature": "old2"}]}
+    al = w.poll_once()
+    assert [(a["kind"], a["wallet"]) for a in al] == [("BUY", WALLET)]
+    assert BOSS in w.wallets()                                                    # the 2 SOL wallet is still watched
+    c = w.status()["coins"][0]
+    assert c["mint"] == NEWMINT and c["n_wallets"] == 2 and c["buy_sol"] == 7.0 and c["sell_sol"] == 9.0
+    me = next(x for x in c["wallets"] if x["wallet"] == WALLET)
+    assert (me["n_buy"], me["n_sell"], me["tok_in"], me["tok_out"]) == (1, 1, 5, 4)
+
+
+def test_received_tokens_are_valued_before_they_can_alert(tmp_path):
+    sol = 10 ** 9
+    txs = {"r1": wtx(WALLET, "r1", 1_500, NEWMINT, (0, 1000), (sol, sol))}           # tokens in, no SOL out
+    rpc = FakeRpc({WALLET: [{"signature": "old"}]}, txs)
+    r = {"tokens": [{"mint": MINT, "status": "ok", "deployer": WALLET}], "tickers": {}}
+    for value, alerted in ((3 * sol, False), (5 * sol, True)):
+        w = WT.Watcher(r, tmp_path / f"w{value}.json", rpc=rpc, now=lambda: 2_000.0,
+                       paper_quote=lambda i, o, a, v=value: v if o == WT.WSOL else a)
+        rpc.sigs = {WALLET: [{"signature": "old"}]}
+        w.poll_once()
+        rpc.sigs = {WALLET: [{"signature": "r1"}, {"signature": "old"}]}
+        al = w.poll_once()
+        assert bool(al) is alerted and (not al or (al[0]["kind"] == "RECEIVE" and al[0]["sol"] == value / sol))
