@@ -109,6 +109,9 @@ def watch_tiers(result: dict) -> tuple[dict[str, str], dict[str, str]]:
     for l in ex.get("links", []):
         if l.get("kind") not in ("exchange", "fee", "deposit"):
             a.setdefault(l["address"], f"linked to {', '.join(l['new_coins'][:3])}")
+    from insiders.vip import vip_list
+    for w, why in vip_list(result).items():
+        a.setdefault(w, "special: " + why)
     bots = {w["wallet"] for w in result.get("repeat_wallets", []) if w.get("bot_like")}
     b: dict[str, str] = {}
     for t in result.get("tokens", []):
@@ -251,7 +254,7 @@ def coin_meta(mint: str, get=_get_json) -> dict:
 
 class Watcher:
     def __init__(self, result: dict, state_path: Path, rpc=None, now=time.time, old_mints: set | None = None,
-                 notify=None, notify_levels: tuple = ("hold",), paper_quote=None, meta=None):
+                 notify=None, notify_levels: tuple = ("hold", "vip"), paper_quote=None, meta=None):
         self.base, self.tier_b = watch_tiers(result)
         self.styles = wallet_styles(result)
         self.old = old_mints if old_mints is not None else (
@@ -534,7 +537,7 @@ class Watcher:
         if not self.notify:
             return
         todo = [a for a in alerts if a.get("level") in self.notify_levels]
-        order = {"hold": 0, "strong": 1, "high": 2, "medium": 3, "watch": 4, "info": 5}
+        order = {"vip": 0, "hold": 1, "strong": 2, "high": 3, "medium": 4, "watch": 5, "info": 6}
         todo.sort(key=lambda a: order.get(a.get("level"), 9))
         sent = 0
         for a in todo[:15]:
@@ -558,6 +561,7 @@ class Watcher:
                     "tier_a": len(self.base), "tier_b": len(self.tier_b), "muted": len(self.state.get("muted", {})),
                     "telegram": bool(self.notify), "notify_levels": sorted(self.notify_levels),
                     "notified": self.state.get("notified", 0), "min_sol": MIN_SOL, "coins": self.coins_view(),
+                    "vip": self.vip.status() if getattr(self, "vip", None) else None,
                     "paper": {"summary": self.paper.summary(), "rows": self.paper.rows(60)} if self.paper else None,
                     "children": len(self.state["children"]), "last_error": self.state["last_error"],
                     "rpc_calls": self.state.get("rpc_calls"), "last_poll_s": self.state.get("last_poll_s"),
@@ -575,8 +579,8 @@ class Watcher:
             stop.wait(max(0.0, every_s - (time.time() - t0)))
 
 
-LEVEL_VI = {"hold": "🚨🚨 MẠNH · ĐANG GIỮ", "strong": "🚨 MẠNH", "high": "🔴 TẠO COIN", "medium": "🟠 Coin mới", "watch": "🔵 Nạp ví mới", "info": "ℹ️"}
-KIND_VI = {"HOLD": "≥ 2 ví nhóm mua ≥ 4 SOL và vẫn giữ sau 10 phút", "CREATE": "tạo coin mới", "BUY": "mua coin mới", "RECEIVE": "nhận coin mới", "FUND": "nạp SOL cho ví mới"}
+LEVEL_VI = {"vip": "⚡ VÍ ĐẶC BIỆT", "hold": "🚨🚨 MẠNH · ĐANG GIỮ", "strong": "🚨 MẠNH", "high": "🔴 TẠO COIN", "medium": "🟠 Coin mới", "watch": "🔵 Nạp ví mới", "info": "ℹ️"}
+KIND_VI = {"SELL": "bán coin", "SEND": "chuyển token đi", "SOL_IN": "nhận SOL", "HOLD": "≥ 2 ví nhóm mua ≥ 4 SOL và vẫn giữ sau 10 phút", "CREATE": "tạo coin mới", "BUY": "mua coin mới", "RECEIVE": "nhận coin mới", "FUND": "nạp SOL cho ví mới"}
 
 
 def alert_text(a: dict, tickers: dict | None = None) -> str:
@@ -598,7 +602,9 @@ def alert_text(a: dict, tickers: dict | None = None) -> str:
                      f'<a href="https://pump.fun/coin/{m}">pump.fun</a> · '
                      f'<a href="https://solscan.io/token/{m}">Solscan</a>')
     if a.get("to"):
-        lines.append(f"Ví mới: <code>{a['to']}</code>")
+        lines.append(f"Chuyển tới: <code>{a['to']}</code>")
+    if a.get("from"):
+        lines.append(f"Từ: <code>{a['from']}</code>")
     if a.get("sol"):
         lines.append(f"SOL: {a['sol']}")
     lines.append(f"Ví: <code>{a['wallet']}</code> ({escape(a.get('why') or '')})")

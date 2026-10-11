@@ -70,6 +70,8 @@ KNOWN_LABELS = {
     "A5oEVp2kEtkXvC43Henv7wThUbbL5phZEe4deEMrxeAj": ("Binance deposit address (one account)", "deposit"),
     "EGnQqe6MPvvNYWLPHtk9mKpbtEQkv4nA7nTeENtViM4z": ("MoonPay Cold Wallet", "exchange"),
     "6ZRCB7AAqGre6c72PRz3MHLC73VMYvJ8bi9KHf1HFpNk": ("FTX", "exchange"),
+    "DzSPAYNuhb2RuL2ZtjnzuCQCMLv8AEdwRZTjJrPZSzxD": ("OKX deposit address (one account)", "deposit"),
+    "5gZ91xtPoCmeQK3BFz9oAUj1ERMurZvuRHzqVbAQM2hZ": ("OKX deposit address (one account)", "deposit"),
     "57vSaRTqN9iXaemgh4AoDsZ63mcaoshfMK8NP3Z5QNbs": ("KuCoin Hot Wallet", "exchange"),
     "JBpj7yp4Afvb71TmanVwJZXGeX4kqbGFvjCFCRo3EbTM": ("FTX.US", "exchange"),
     "97UQvPXbadGSsVaGuJCBLRm3Mkm7A5DVJ2HktRzrnDTB": ("BC.Game Hot Wallet (casino)", "exchange"),

@@ -1195,7 +1195,7 @@ function pingNew(w, names) {             // sound + vibration + system notificat
   const al = (w && w.alerts) || []; if (!al.length) return;
   const top = al[0].ts || 0, last = Number(LS.get("insLastAlert", 0)) || 0;
   if (!last) { LS.set("insLastAlert", top); return; }
-  const fresh = al.filter((a) => (a.ts || 0) > last && a.level === "hold");      // only MẠNH · ĐANG GIỮ rings
+  const fresh = al.filter((a) => (a.ts || 0) > last && ["hold", "vip"].includes(a.level));   // HOLDING + special wallets ring
   LS.set("insLastAlert", Math.max(top, last));
   if (!fresh.length) return;
   beep(); if (navigator.vibrate) navigator.vibrate([200, 100, 200]);
@@ -1221,6 +1221,13 @@ const INS_TEAM = ["deployer", "seller", "funder", "linked", "child"];
 const INS_GROUP_KEY = { deployer: "web.ins.g.deployer", seller: "web.ins.g.seller", funder: "web.ins.g.funder", linked: "web.ins.g.linked",
   child: "web.ins.g.child", profit: "web.ins.g.profit", early: "web.ins.g.early" };
 const INS_GROUP_CLS = { deployer: "bad", seller: "bad", funder: "bad", linked: "warn", child: "warn", profit: "", early: "" };
+function vipHtml(v) {
+  if (!v) return "";
+  const st = v.connected ? `<span class="pill ok">${esc(t("web.ins.vip_live"))}</span>` : `<span class="pill warn">${esc(t("web.ins.vip_down"))}</span>`;
+  const list = (v.list || []).map((x) => `<div class="small">${acct(x.wallet)} <span class="muted">${esc(x.why)}</span></div>`).join("");
+  return `<h3>${esc(t("web.ins.vip_title"))}</h3><div class="muted small">${st} ${esc(t("web.ins.vip_note", { n: v.wallets, s: v.subscribed, k: v.children, e: v.events, p: v.pushed || 0, m: v.min_sol || 4 }))}</div>
+    <details class="ev"><summary>${esc(t("web.ins.vip_list", { n: v.wallets }))}</summary>${list}</details>`;
+}
 function coinsHtml(coins, names, minSol) {
   coins = coins || [];
   if (!coins.length) return `<h3>${esc(t("web.ins.c.title", { s: minSol || 4 }))}</h3><div class="muted small">${esc(t("web.ins.c.none"))}</div>`;
@@ -1255,7 +1262,7 @@ function coinsHtml(coins, names, minSol) {
 }
 function watchHtml(w, names) {
   if (!w) return `<h2>${esc(t("web.ins.watch"))}</h2><div class="muted small">${esc(t("web.ins.watch_off"))}</div>`;
-  const lv = { hold: "bad", strong: "bad", high: "bad", medium: "warn", watch: "", info: "" };
+  const lv = { vip: "bad", hold: "bad", strong: "bad", high: "bad", medium: "warn", watch: "", info: "" };
   const kind = (a) => t("web.ins.ev." + a.kind.toLowerCase());
   const lk = (u, txt) => `<a href="${esc(u)}" target="_blank" rel="noopener">${esc(txt)}</a>`;
   const coin = (m, a) => {
@@ -1270,20 +1277,21 @@ function watchHtml(w, names) {
   const f = LS.get("insFilter", "all"), hideFlip = LS.get("insHideFlip", true);
   const isFlip = (a) => a.style === "flip";
   const pick = all.filter((a) => !(hideFlip && isFlip(a)) &&
-    (f === "team" ? INS_TEAM.includes(insGroup(a)) : f === "strong" ? ["strong", "hold"].includes(a.level) : true));
+    (f === "team" ? INS_TEAM.includes(insGroup(a)) : f === "strong" ? ["strong", "hold"].includes(a.level) : f === "vip" ? a.level === "vip" : true));
   const nTeam = all.filter((a) => INS_TEAM.includes(insGroup(a))).length, nStrong = all.filter((a) => ["strong", "hold"].includes(a.level)).length;
-  const nFlip = all.filter(isFlip).length;
+  const nFlip = all.filter(isFlip).length, nVip = all.filter((a) => a.level === "vip").length;
   const fb = (k, label, n) => `<button class="btn ${f === k ? "primary" : ""}" data-insfilter="${k}">${esc(label)} (${n})</button>`;
-  const filters = `<div class="ins-filters">${fb("all", t("web.ins.f.all"), all.length)}${fb("team", t("web.ins.f.team"), nTeam)}${fb("strong", t("web.ins.f.strong"), nStrong)}<button class="btn ${hideFlip ? "primary" : ""}" data-insflip="1">${esc(t("web.ins.f.hideflip"))} (${nFlip})</button></div>`;
+  const filters = `<div class="ins-filters">${fb("all", t("web.ins.f.all"), all.length)}${fb("team", t("web.ins.f.team"), nTeam)}${fb("vip", t("web.ins.f.vip"), nVip)}${fb("strong", t("web.ins.f.strong"), nStrong)}<button class="btn ${hideFlip ? "primary" : ""}" data-insflip="1">${esc(t("web.ins.f.hideflip"))} (${nFlip})</button></div>`;
   const rows = pick.slice(0, 80).map((a) => `<tr><td class="small">${esc(new Date(a.ts * 1000).toLocaleString("vi-VN"))}</td>
     <td><span class="pill ${lv[a.level] || ""}">${esc(t("web.ins.lv." + a.level))}${a.n_wallets ? " ×" + a.n_wallets : ""}</span> ${esc(kind(a))}</td>
-    <td>${a.mint ? coin(a.mint, a) : `${esc(t("web.ins.new_wallet"))} ${acct(a.to)}`}</td>
+    <td>${a.mint ? coin(a.mint, a) : a.to ? `${esc(t(a.level === "vip" ? "web.ins.sent_to" : "web.ins.new_wallet"))} ${acct(a.to)}` : a.from ? `${esc(t("web.ins.from"))} ${acct(a.from)}` : ""}</td>
     <td class="num">${a.sol || ""}</td><td><span class="pill ${INS_GROUP_CLS[insGroup(a)]}">${esc(t(INS_GROUP_KEY[insGroup(a)]))}</span>${isFlip(a) ? ` <span class="pill">${esc(t("web.ins.g.flip"))}</span>` : ""} ${acct(a.wallet)}<div class="muted small">${esc(a.why || "")}</div></td></tr>`);
   return `<h2>${esc(t("web.ins.watch"))}</h2><div class="muted small">${esc(t("web.ins.watch_note", { n: w.watched, k: w.children, p: w.polls }))}
     ${w.tier_a ? " · " + esc(t("web.ins.tiers", { a: w.tier_a, b: w.tier_b, m: w.muted || 0 })) : ""}
     · ${esc(t(w.telegram ? "web.ins.tg_on" : "web.ins.tg_off", { n: w.notified || 0 }))}
     ${"Notification" in window && Notification.permission !== "granted" ? `<button class="btn" id="insNotify">${esc(t("web.ins.enable_notif"))}</button>` : ""}
     ${w.last_poll ? " · " + esc(t("web.ins.watch_last")) + " " + esc(new Date(w.last_poll * 1000).toLocaleTimeString("vi-VN")) + (w.last_poll_s ? ` (${w.last_poll_s}s)` : "") : ""}</div>
+    ${vipHtml(w.vip)}
     ${coinsHtml(w.coins, names, w.min_sol)}
     <h3>${esc(t("web.ins.alert_list", { s: w.min_sol || 4 }))}</h3>
     ${filters}

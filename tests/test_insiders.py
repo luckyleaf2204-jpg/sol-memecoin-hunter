@@ -1,5 +1,8 @@
 """Insider scan of the call channel (src/insiders): parsing, wallet filtering, aggregation, service and API.
 Synthetic transactions and a fake chain only — no network."""
+import asyncio
+import json
+import threading
 import time
 
 import pytest
@@ -433,6 +436,7 @@ def test_alerts_are_pushed_by_level_and_capped(tmp_path):
 def test_no_notifier_without_telegram_env(tmp_path, monkeypatch):
     monkeypatch.delenv("TELEGRAM_BOT_TOKEN", raising=False)
     monkeypatch.delenv("TELEGRAM_CHAT_ID", raising=False)
+    monkeypatch.setenv("INSIDER_VIP", "0")                                 # no live websocket in a unit test
     svc = InsiderService(result_path=tmp_path / "r.json", key="")
     svc.result = {"tokens": [], "tickers": {}}
     monkeypatch.setattr(WT.Watcher, "run_forever", lambda self, stop, progress=print, every_s=0: None)
@@ -599,3 +603,88 @@ def test_received_tokens_are_valued_before_they_can_alert(tmp_path):
         rpc.sigs = {WALLET: [{"signature": "r1"}, {"signature": "old"}]}
         al = w.poll_once()
         assert bool(al) is alerted and (not al or (al[0]["kind"] == "RECEIVE" and al[0]["sol"] == value / sol))
+
+
+
+# ---------------------------------------------------------------- real-time special wallets (45 holders + successors)
+from insiders import vip as VP  # noqa: E402
+
+
+def vip_watcher(tmp_path, quote=None):
+    r = {"tokens": [{"mint": MINT, "status": "ok", "deployer": CEX}], "tickers": {},
+         "vip": {"holders": [{"wallet": WALLET, "profit_sol": 120.0, "coins": ["CR7"]}],
+                 "successors": [{"wallet": SINK, "kind": "deposit", "sol": 500, "from": [WALLET]},
+                                {"wallet": BOSS, "kind": "person", "sol": 300, "token_tx": 0, "from": [WALLET]}]}}
+    w = WT.Watcher(r, tmp_path / "w.json", rpc=lambda m, p: [], now=lambda: 2_000.0, paper_quote=quote)
+    return w, r
+
+
+def test_vip_list_is_holders_plus_personal_successors(tmp_path):
+    w, r = vip_watcher(tmp_path)
+    lst = VP.vip_list(r)
+    assert set(lst) == {WALLET, BOSS} and "held >= 10 min" in lst[WALLET]       # a deposit address is not followed
+    assert WALLET in w.base and w.base[WALLET].startswith("special:")             # also polled as a fallback
+
+
+def test_vip_pushes_every_trade_or_transfer_of_at_least_min_sol_and_adopts_new_wallets(tmp_path):
+    sol = 10 ** 9
+    sent = []
+    w, r = vip_watcher(tmp_path)
+    w.notify, w.notify_levels = (lambda txt: sent.append(txt) or True), {"vip"}
+    fresh = "8xvHWupToGmcv5NoWek7J11LFGGJ7Nkx9Myp6n9LcSLH"
+    txs = {"big": wtx(WALLET, "big", 1_900, NEWMINT, (0, 5), (20 * sol, 14 * sol)),           # buys for 6 SOL
+           "small": wtx(WALLET, "small", 1_910, NEWMINT, (0, 5), (3 * sol, 2 * sol)),         # 1 SOL: ignored
+           "fund": wtx(WALLET, "fund", 1_920, transfer=(fresh, 9 * sol))}                       # 9 SOL to a person
+    vs = VP.VipStream(w, r, rpc=lambda m, p: txs[p[0]], now=lambda: 2_000.0)
+    vs.retry_sleep = False
+    assert vs.handle(WALLET, "big")[0]["kind"] == "BUY"
+    assert vs.handle(WALLET, "small") == [] and vs.handle(WALLET, "big") == []                # dedup
+    al = vs.handle(WALLET, "fund")
+    assert al[0]["kind"] == "FUND" and al[0]["to"] == fresh and fresh in vs.wallets()        # followed from now on
+    assert len(sent) == 2 and "VÍ ĐẶC BIỆT" in sent[0]
+    assert {a["level"] for a in w.state["alerts"]} == {"vip"}
+
+
+def test_vip_counts_sol_received():
+    sol = 10 ** 9
+    t = wtx(WALLET, "in", 1, transfer=(WALLET, 0))
+    t["transaction"]["message"]["instructions"] = [{"parsed": {"type": "transfer", "info": {
+        "source": CEX, "destination": WALLET, "lamports": 7 * sol}}}]
+    assert VP.sol_in(t, WALLET) == (7.0, CEX)
+
+
+class StreamOnce:
+    """Confirms every subscription, pushes one notification for the first wallet, then the test stops it."""
+    def __init__(self, stop, sig):
+        self.stop, self.sig, self.out = stop, sig, []
+        self.ids = []
+
+    async def __aenter__(self):
+        return self
+
+    async def __aexit__(self, *a):
+        return False
+
+    async def send(self, m):
+        self.ids.append(json.loads(m)["id"])
+
+    async def recv(self):
+        if self.ids:
+            k = self.ids.pop(0)
+            return json.dumps({"jsonrpc": "2.0", "id": k, "result": 100 + k})
+        if self.sig:
+            s, self.sig = self.sig, None
+            return json.dumps({"params": {"subscription": 101, "result": {"value": {"signature": s, "err": None}}}})
+        self.stop.set()
+        raise ConnectionError("closed")
+
+
+def test_vip_websocket_subscribes_and_handles_a_push(tmp_path):
+    sol = 10 ** 9
+    w, r = vip_watcher(tmp_path)
+    txs = {"big": wtx(WALLET, "big", 1_900, NEWMINT, (0, 5), (20 * sol, 14 * sol))}
+    stop = threading.Event()
+    vs = VP.VipStream(w, r, rpc=lambda m, p: txs[p[0]], connect=lambda: StreamOnce(stop, "big"), now=lambda: 2_000.0)
+    asyncio.run(vs.run(stop))
+    assert vs.stat["subscribed"] == 2 and w.state["vip"]["events"] == 1
+    assert w.state["alerts"][0]["wallet"] == WALLET and w.state["alerts"][0]["level"] == "vip"

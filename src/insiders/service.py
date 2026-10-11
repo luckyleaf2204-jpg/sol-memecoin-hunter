@@ -50,7 +50,7 @@ class InsiderService:
             return False
         from insiders.watch import Watcher, coin_meta, telegram_sender
         tok, chat = os.environ.get("TELEGRAM_BOT_TOKEN"), os.environ.get("TELEGRAM_CHAT_ID")
-        levels = tuple(x for x in (os.environ.get("INSIDER_ALERT_LEVELS") or "hold").split(",") if x)
+        levels = tuple(x for x in (os.environ.get("INSIDER_ALERT_LEVELS") or "hold,vip").split(",") if x)
         from insiders.paper import jupiter_quote
         self.watcher = Watcher(self.result, state_path, notify=telegram_sender(tok, chat) if tok and chat else None,
                                notify_levels=levels,
@@ -58,6 +58,10 @@ class InsiderService:
                                meta=coin_meta)
         self.watch_stop = threading.Event()
         threading.Thread(target=self.watcher.run_forever, args=(self.watch_stop,), daemon=True).start()
+        if (os.environ.get("INSIDER_VIP") or "1") != "0":     # real-time stream of the special wallets
+            from insiders.vip import VipStream
+            self.watcher.vip = VipStream(self.watcher, self.result)
+            self.watcher.vip.start(self.watch_stop)
         return True
 
     def start(self, runner=None) -> bool:

@@ -1176,5 +1176,17 @@
  "web.ins.c.hold": "Giữ",
  "web.ins.c.flip": "lướt: bán nửa sau {s}s",
  "web.ins.c.held_for": "giữ {m} phút rồi bán nửa",
- "web.ins.c.holding": "đang giữ {m} phút"
+ "web.ins.c.holding": "đang giữ {m} phút",
+ "web.ins.lv.vip": "⚡ VÍ ĐẶC BIỆT",
+ "web.ins.ev.sell": "bán coin",
+ "web.ins.ev.send": "chuyển token đi",
+ "web.ins.ev.sol_in": "nhận SOL",
+ "web.ins.f.vip": "Ví đặc biệt",
+ "web.ins.sent_to": "chuyển tới:",
+ "web.ins.from": "từ:",
+ "web.ins.vip_title": "Ví đặc biệt (45 ví từng giữ ≥ 10 phút + ví chúng chuyển tiền sang) — theo dõi tức thời",
+ "web.ins.vip_note": "{s}/{n} ví đang nghe trực tiếp qua WebSocket (giao dịch tới trong vài giây; đã nhận {p}). Báo mọi giao dịch ≥ {m} SOL: mua, bán, chuyển / nhận SOL, chuyển / nhận token. Ví mới được chúng chuyển ≥ {m} SOL tự vào danh sách 7 ngày ({k} ví). Đã báo {e} lần.",
+ "web.ins.vip_live": "ĐANG NGHE",
+ "web.ins.vip_down": "MẤT KẾT NỐI (đang nối lại)",
+ "web.ins.vip_list": "Danh sách {n} ví"
 }

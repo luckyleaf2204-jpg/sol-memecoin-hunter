@@ -1176,5 +1176,17 @@
  "web.ins.c.hold": "Hold",
  "web.ins.c.flip": "flip: half sold after {s}s",
  "web.ins.c.held_for": "held {m} min, then sold half",
- "web.ins.c.holding": "holding for {m} min"
+ "web.ins.c.holding": "holding for {m} min",
+ "web.ins.lv.vip": "⚡ SPECIAL WALLET",
+ "web.ins.ev.sell": "sold a coin",
+ "web.ins.ev.send": "sent tokens",
+ "web.ins.ev.sol_in": "received SOL",
+ "web.ins.f.vip": "Special wallets",
+ "web.ins.sent_to": "sent to:",
+ "web.ins.from": "from:",
+ "web.ins.vip_title": "Special wallets (45 that held >= 10 min + wallets they moved funds to) — live",
+ "web.ins.vip_note": "{s}/{n} wallets streamed over WebSocket (transactions within seconds; {p} received). Every trade / transfer >= {m} SOL is alerted. A new wallet they send >= {m} SOL joins for 7 days ({k}). {e} alerts.",
+ "web.ins.vip_live": "LIVE",
+ "web.ins.vip_down": "DISCONNECTED (reconnecting)",
+ "web.ins.vip_list": "{n} wallets"
 }
