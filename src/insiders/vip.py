@@ -122,7 +122,7 @@ class VipStream:
         for k in range(4):                    # just after confirmation the node may not serve it yet / be busy
             try:
                 tx = self.rpc("getTransaction", [sig, {"encoding": "jsonParsed", "commitment": "confirmed",
-                                                       "maxSupportedTransactionVersion": 0}])
+                                                       "maxSupportedTransactionVersion": 1}])
             except RuntimeError:
                 tx = None
             if tx:

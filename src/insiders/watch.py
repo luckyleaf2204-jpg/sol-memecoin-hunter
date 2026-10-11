@@ -363,7 +363,7 @@ class Watcher:
                     if s.get("err"):
                         continue
                     tx = self.rpc("getTransaction", [s["signature"], {"encoding": "jsonParsed", "commitment": "confirmed",
-                                                                      "maxSupportedTransactionVersion": 0}])
+                                                                      "maxSupportedTransactionVersion": 1}])
                     if not tx:
                         continue
                     for ev in analyse(tx, w):

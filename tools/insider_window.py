@@ -82,7 +82,7 @@ def main() -> None:
         active += bool(sigs)
         for s in sigs:
             try:
-                tx = rpc("getTransaction", [s, {"encoding": "jsonParsed", "maxSupportedTransactionVersion": 0}])
+                tx = rpc("getTransaction", [s, {"encoding": "jsonParsed", "maxSupportedTransactionVersion": 1}])
             except RuntimeError:
                 continue
             for ev in analyse(tx or {}, w) if tx else []:
