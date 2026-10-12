@@ -35,7 +35,10 @@ def vip_list(result: dict) -> dict[str, str]:
     v = result.get("vip") or {}
     out = {}
     for h in v.get("holders", []):
-        out[h["wallet"]] = f"held >= 10 min · {h.get('profit_sol', 0):+.0f} SOL on {', '.join(h.get('coins', [])[:3])}"
+        src = " · last-20 scan" if h.get("source") == "last20" else ""
+        held = f"held {h['max_hold_min']:g} min" if h.get("max_hold_min") else "held >= 10 min"
+        out[h["wallet"]] = (f"{held} · {h.get('profit_sol', 0):+.0f} SOL on {', '.join(h.get('coins', [])[:3])}{src}"
+                            + (f" · {h['note']}" if h.get("note") else ""))
     for s in v.get("successors", []):
         if s.get("kind") == "person" and KNOWN_LABELS.get(s["wallet"], (None, None))[1] not in ("exchange", "fee", "deposit"):
             out.setdefault(s["wallet"], f"received {s.get('sol', 0):.0f} SOL / {s.get('token_tx', 0)} token tx from "
