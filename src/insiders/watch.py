@@ -527,44 +527,50 @@ class Watcher:
                             "holders": holders[:10], **{k: c.get(k) for k in ("symbol", "name", "chart", "mcap", "age_h")}})
         return out
 
-    def board_view(self, limit: int = 30) -> list[dict]:
-        """Coins the special wallets traded (newest activity first, two-wallet coins first): every trade of every
-        wallet, the coin's supply / creation for MC and age, and what each wallet still holds now."""
+    def _coin_entry(self, m: str, c: dict, min_buy_sol: float) -> dict | None:
+        """One coin for the page: every trade of every wallet that bought >= min_buy_sol of it, supply / creation for
+        MC and age, what each wallet still holds now, and how many independent wallet families are in."""
         pf = getattr(self, "portfolio", None)
         raw = (pf.raw if pf is not None else {}) or {}
         supply = self.state.get("supply", {})
-        meta = self.state.get("meta", {})
         strong = (self.state.get("vip") or {}).get("strong_done", {})
-        out = []
-        for m, c in self.state.get("coins", {}).items():
-            # only wallets that put real money in: total buys of this coin >= BOARD_MIN_SOL (dust / micro snipes out)
-            ws = [(w, x) for w, x in c["wallets"].items() if x.get("trades") and x.get("buy_sol", 0) >= BOARD_MIN_SOL]
-            if not ws:
-                continue
-            wallets = []
-            vip = getattr(self, "vip", None)
-            for w, x in ws:
-                held = None
-                if w in raw:
-                    held = next((a for mm, a in raw[w][1] if mm == m), 0.0)
-                wallets.append({"wallet": w, "why": x.get("why"), "trades": x["trades"], "buy_sol": x["buy_sol"],
-                                "sell_sol": x["sell_sol"], "tok_in": x["tok_in"], "tok_out": x["tok_out"],
-                                "held_ui": held, "family": vip.family(w) if vip else w,
-                                "tier": vip.tier(w) if vip else None})
-            wallets.sort(key=lambda r: r["trades"][0][0])
-            info = meta.get(m, {})
-            px = (pf.prices.usd.get(m) if pf is not None and getattr(pf, "prices", None) else None)
-            sup = (supply.get(m) or {}).get("ui")
-            out.append({"mint": m, "symbol": c.get("symbol") or info.get("symbol"), "name": c.get("name") or info.get("name"),
-                        "chart": c.get("chart"), "created_ts": info.get("created_ts"), "supply": supply.get(m),
-                        "strong": m in strong or c.get("strong"), "last_ts": c.get("last_ts"),
-                        "first_ts": min(r["trades"][0][0] for r in wallets), "wallets": wallets,
-                        "n_families": len({r["family"] for r in wallets}),
-                        "buy_sol": round(sum(r["buy_sol"] for r in wallets), 3),
-                        "sell_sol": round(sum(r["sell_sol"] for r in wallets), 3),
-                        "mcap_est": round(px * sup) if px and sup else None})
+        ws = [(w, x) for w, x in c["wallets"].items() if x.get("trades") and x.get("buy_sol", 0) >= min_buy_sol]
+        if not ws:
+            return None
+        wallets = []
+        vip = getattr(self, "vip", None)
+        for w, x in ws:
+            held = None
+            if w in raw:
+                held = next((a for mm, a in raw[w][1] if mm == m), 0.0)
+            wallets.append({"wallet": w, "why": x.get("why"), "trades": x["trades"], "buy_sol": x["buy_sol"],
+                            "sell_sol": x["sell_sol"], "tok_in": x["tok_in"], "tok_out": x["tok_out"],
+                            "held_ui": held, "family": vip.family(w) if vip else w,
+                            "tier": vip.tier(w) if vip else None, "role": vip.role(w) if vip else None})
+        wallets.sort(key=lambda r: r["trades"][0][0])
+        info = self.state.get("meta", {}).get(m, {})
+        px = (pf.prices.usd.get(m) if pf is not None and getattr(pf, "prices", None) else None)
+        sup = (supply.get(m) or {}).get("ui")
+        return {"mint": m, "symbol": c.get("symbol") or info.get("symbol"), "name": c.get("name") or info.get("name"),
+                "chart": c.get("chart"), "created_ts": info.get("created_ts"), "supply": supply.get(m),
+                "strong": m in strong or c.get("strong"), "last_ts": c.get("last_ts"),
+                "first_ts": min(r["trades"][0][0] for r in wallets), "wallets": wallets,
+                "n_families": len({r["family"] for r in wallets}),
+                "buy_sol": round(sum(r["buy_sol"] for r in wallets), 3),
+                "sell_sol": round(sum(r["sell_sol"] for r in wallets), 3),
+                "mcap_est": round(px * sup) if px and sup else None}
+
+    def board_view(self, limit: int = 30) -> list[dict]:
+        """Coins the special wallets traded (two-wallet coins first, newest activity first); only wallets whose buys
+        of the coin reach BOARD_MIN_SOL (dust / micro snipes out)."""
+        out = [e for m, c in list(self.state.get("coins", {}).items()) if (e := self._coin_entry(m, c, BOARD_MIN_SOL))]
         out.sort(key=lambda c: (not c["strong"], -len(c["wallets"]), -(c["last_ts"] or 0)))
         return out[:limit]
+
+    def coin_view(self, mint: str) -> dict | None:
+        """Every listed wallet that traded this coin, whatever the size (for a STRONG alert's breakdown)."""
+        c = self.state.get("coins", {}).get(mint)
+        return self._coin_entry(mint, c, 0.0) if c else None
 
     def wallet_view(self, addr: str) -> dict | None:
         """One listed wallet: role / tier / relations, its trades on every coin the watch recorded, holdings now,

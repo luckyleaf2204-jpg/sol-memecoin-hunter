@@ -96,12 +96,12 @@ class Shadow:
         if not recs:
             return
         mints = sorted({x["mint"] for x in recs})
-        px = {}
+        px, failed = {}, None
         for i in range(0, len(mints), 50):
             try:
                 d = self.prices(mints[i:i + 50]) or {}
             except Exception as e:                           # one failed batch: the next tick tries again
-                self.stat["error"] = f"price: {type(e).__name__}"
+                failed = f"price: {type(e).__name__}"
                 continue
             for m in mints[i:i + 50]:
                 p = (d.get(m) or {}).get("usdPrice")
@@ -111,7 +111,10 @@ class Shadow:
         with self.lock:
             for x in recs:
                 self._apply(x, px.get(x["mint"]), now)
-        self.stat.update(ticks=self.stat["ticks"] + 1, last=now)
+        self.stat["error"] = failed                          # a later good tick clears an old error
+        if failed is None:
+            self.stat["last"] = now
+        self.stat["ticks"] += 1
 
     def _apply(self, x: dict, p: float | None, now: float) -> None:
         if x["status"] == "wait_price":

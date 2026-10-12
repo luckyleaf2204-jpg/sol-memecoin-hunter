@@ -1110,3 +1110,41 @@ def test_board_counts_independent_families_and_wallet_view(tmp_path):
     assert set(st["sources"]) == {"stream", "balances", "prices"} and st["sources"]["stream"]["ok"] is False
     roles = {x["wallet"]: x["role"] for x in st["vip"]["list"]}
     assert roles[WALLET] == "holder" and roles[BOSS] == "successor"
+
+
+def test_coin_view_lists_every_wallet_whatever_the_size(tmp_path):
+    sol = 10 ** 9
+    w, r = vip_watcher(tmp_path)
+    txs = {"a": wtx(WALLET, "a", 1_900, NEWMINT, (0, 5), (20 * sol, 14 * sol)),          # 6 SOL
+           "b": wtx(BOSS, "b", 1_950, NEWMINT, (0, 7), (2 * sol, int(1.5 * sol))),       # 0.5 SOL: below the board
+           "c": wtx(BOSS, "c", 1_990, NEWMINT, (7, 2), (int(1.5 * sol), 3 * sol))}       # sells 5 of 7 for 1.5 SOL
+
+    def rpc(m, p):
+        if m == "getTokenSupply":
+            return {"value": {"uiAmountString": "1000000000", "decimals": 6}}
+        return txs[p[0]]
+    vs = VP.VipStream(w, r, rpc=rpc, now=lambda: 2_000.0)
+    vs.retry_sleep = False
+    w.vip = vs
+    for s_, who in (("a", WALLET), ("b", BOSS), ("c", BOSS)):
+        vs.handle(who, s_)
+    assert [x["wallet"] for x in w.board_view()[0]["wallets"]] == [WALLET]          # the board hides the small one
+    c = w.coin_view(NEWMINT)
+    by = {x["wallet"]: x for x in c["wallets"]}
+    assert set(by) == {WALLET, BOSS} and by[BOSS]["role"] == "successor"
+    assert by[BOSS]["tok_in"] == 7 and by[BOSS]["tok_out"] == 5 and by[BOSS]["sell_sol"] == 1.5
+    assert w.coin_view("Nope1111111111111111111111111111") is None
+
+
+def test_shadow_price_error_clears_after_a_good_tick():
+    sh, clk, feed = shadow(1.0)
+    sh.signal("single", NEWMINT, WALLET, 1_000, 5.0, "main")
+    good = sh.prices
+    sh.prices = lambda ids: (_ for _ in ()).throw(OSError("down"))
+    clk.t += 30
+    sh.tick()
+    assert sh.stat["error"] == "price: OSError"
+    sh.prices = good
+    clk.t += 30
+    sh.tick()
+    assert sh.stat["error"] is None and sh.stat["last"] == clk.t
