@@ -570,7 +570,17 @@ class Watcher:
     def coin_view(self, mint: str) -> dict | None:
         """Every listed wallet that traded this coin, whatever the size (for a STRONG alert's breakdown)."""
         c = self.state.get("coins", {}).get(mint)
-        return self._coin_entry(mint, c, 0.0) if c else None
+        e = self._coin_entry(mint, c, 0.0) if c else None
+        pump = getattr(self, "pump", None)                   # pump.fun facts: dev, description, profile names
+        if e and pump is not None:
+            info = pump.coin(mint)
+            e["pump"] = info
+            dev = (info or {}).get("creator")
+            vip = getattr(self, "vip", None)
+            e["dev"] = {"wallet": dev, "user": pump.user(dev), "listed": bool(vip and dev in vip.wallets())} if dev else None
+            for w in e["wallets"]:
+                w["pump_user"] = pump.user(w["wallet"])
+        return e
 
     def wallet_view(self, addr: str) -> dict | None:
         """One listed wallet: role / tier / relations, its trades on every coin the watch recorded, holdings now,

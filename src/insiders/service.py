@@ -77,6 +77,8 @@ class InsiderService:
             from insiders.watch import Rpc
             self.watcher.vip = VipStream(self.watcher, self.result)
             self.watcher.vip.start(self.watch_stop)
+            from insiders.pumpinfo import PumpInfo
+            self.watcher.pump = PumpInfo()                    # dev / description / profile names for the page
             if (os.environ.get("INSIDER_SHADOW") or "1") != "0":     # live measurement of every signal (paper)
                 from insiders.shadow import Shadow
                 w = self.watcher

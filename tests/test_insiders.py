@@ -1148,3 +1148,71 @@ def test_shadow_price_error_clears_after_a_good_tick():
     clk.t += 30
     sh.tick()
     assert sh.stat["error"] is None and sh.stat["last"] == clk.t
+
+
+# ---------------------------------------------------------------- pump.fun facts (dev, description, profile names)
+from insiders import pumpinfo as PI  # noqa: E402
+
+
+def test_pumpinfo_coin_user_metadata_and_caching():
+    calls, metas = [], []
+    clock = [1_000.0]
+
+    def get(url):
+        calls.append(url)
+        if url.endswith("/coins-v2/" + NEWMINT):
+            return {"mint": NEWMINT, "creator": BOSS, "name": "Demo", "symbol": "DEMO", "twitter": "https://x.com/demo",
+                    "website": "javascript:alert(1)", "metadata_uri": "https://ipfs.io/ipfs/abc", "usd_market_cap": 90000.0,
+                    "ath_market_cap": 250000.0, "created_timestamp": 1_000_000, "complete": False}
+        if url.endswith("/users/" + BOSS):
+            return {"username": "bossdev", "followers": 12, "x_username": "boss"}
+        return None                                                          # 404: no profile / not a coin
+
+    def get_meta(url):
+        metas.append(url)
+        return {"description": "  a demo coin  ", "telegram": "https://t.me/demo"}
+    p = PI.PumpInfo(get=get, now=lambda: clock[0], get_meta=get_meta)
+    c = p.coin(NEWMINT)
+    assert c["creator"] == BOSS and c["description"] == "a demo coin" and c["telegram"] == "https://t.me/demo"
+    assert c["website"] is None and c["twitter"] == "https://x.com/demo" and c["ath_mcap_usd"] == 250000.0
+    assert p.user(BOSS) == {"username": "bossdev", "followers": 12, "x": "boss", "bio": None}
+    assert p.user(WALLET) is None
+    n = len(calls)
+    p.coin(NEWMINT), p.user(BOSS), p.user(WALLET)
+    assert len(calls) == n                                                   # cached, misses included
+    clock[0] += PI.MISS_TTL_S + 1
+    p.user(WALLET)
+    assert len(calls) == n + 1                                               # a miss is asked again later
+
+
+def test_pumpinfo_never_fetches_private_metadata_hosts():
+    for bad in ("http://ipfs.io/x", "https://127.0.0.1/x", "https://localhost/x", "https://10.0.0.5/meta",
+                "https://metadata.internal/x", "https://[::1]/x", "https://intranet/x"):
+        assert PI._public_https(bad) is None, bad
+    assert PI._public_https("https://ipfs.io/ipfs/abc") == "https://ipfs.io/ipfs/abc"
+
+
+def test_coin_view_adds_dev_and_profile_names(tmp_path):
+    sol = 10 ** 9
+    w, r = vip_watcher(tmp_path)
+    txs = {"a": wtx(WALLET, "a", 1_900, NEWMINT, (0, 5), (20 * sol, 14 * sol))}
+
+    def rpc(m, p):
+        if m == "getTokenSupply":
+            return {"value": {"uiAmountString": "1000000000", "decimals": 6}}
+        return txs[p[0]]
+    vs = VP.VipStream(w, r, rpc=rpc, now=lambda: 2_000.0)
+    vs.retry_sleep = False
+    w.vip = vs
+    vs.handle(WALLET, "a")
+
+    class P:
+        def coin(self, m):
+            return {"creator": BOSS, "description": "hi"}
+
+        def user(self, a):
+            return {"username": "u_" + a[:3]}
+    w.pump = P()
+    c = w.coin_view(NEWMINT)
+    assert c["pump"]["description"] == "hi" and c["dev"]["wallet"] == BOSS and c["dev"]["listed"] is True
+    assert c["dev"]["user"]["username"] == "u_" + BOSS[:3] and c["wallets"][0]["pump_user"]["username"] == "u_" + WALLET[:3]
