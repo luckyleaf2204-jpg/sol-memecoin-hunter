@@ -451,7 +451,9 @@ class Watcher:
     def _ledger(self, ev: dict, why: str) -> None:
         """Per coin and watched wallet: SOL in / out, token in / out, counts (every size, every new coin)."""
         mint = ev.get("mint")
-        if not mint or mint in self.old or ev["kind"] == "FUND":
+        # the channel's old coins are skipped only by the broad watch (it hunts NEW coins); the special-wallet mode
+        # records every coin, so a coin box always lists every listed wallet that trades it
+        if not mint or ev["kind"] == "FUND" or (mint in self.old and getattr(self, "mode", "broad") == "broad"):
             return
         coins = self.state.setdefault("coins", {})
         c = coins.setdefault(mint, {"first_ts": ev["ts"], "last_ts": ev["ts"], "qualified": False, "wallets": {}})

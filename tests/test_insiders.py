@@ -1216,3 +1216,19 @@ def test_coin_view_adds_dev_and_profile_names(tmp_path):
     c = w.coin_view(NEWMINT)
     assert c["pump"]["description"] == "hi" and c["dev"]["wallet"] == BOSS and c["dev"]["listed"] is True
     assert c["dev"]["user"]["username"] == "u_" + BOSS[:3] and c["wallets"][0]["pump_user"]["username"] == "u_" + WALLET[:3]
+
+
+def test_vip_mode_records_the_channels_old_coins_too(tmp_path):
+    sol = 10 ** 9
+    w, r = vip_watcher(tmp_path)
+    txs = {"a": wtx(WALLET, "a", 1_900, MINT, (0, 5), (3 * sol, 2 * sol))}           # MINT is one of the channel's coins
+    vs = VP.VipStream(w, r, rpc=lambda m, p: txs[p[0]], now=lambda: 2_000.0)
+    vs.retry_sleep = False
+    w.vip = vs
+    w.mode = "broad"
+    vs.handle(WALLET, "a")
+    assert MINT not in w.state.get("coins", {})                                     # the broad watch skips it
+    w.mode = "vip"
+    vs.seen.clear()
+    vs.handle(WALLET, "a")
+    assert w.coin_view(MINT)["wallets"][0]["buy_sol"] == 1.0
