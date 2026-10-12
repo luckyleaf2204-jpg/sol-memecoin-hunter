@@ -30,7 +30,7 @@ SWEEP_S = 600                    # expired children are unsubscribed this often
 SUB_GAP_S = float(os.environ.get("INSIDER_SUB_GAP_S") or 0.3)   # the public RPC refuses bursts of subscriptions (1013)
 LIMITED_BACKOFF_S = 45.0
 ADOPT_MIN_SOL = float(os.environ.get("INSIDER_ADOPT_MIN_SOL") or 0.5)   # a new wallet funded with this joins
-MAX_WALLETS = 300
+MAX_WALLETS = int(os.environ.get("INSIDER_MAX_WALLETS") or 95)   # the public RPC drops a socket at ~100 subscriptions
 
 
 def vip_list(result: dict) -> dict[str, str]:
