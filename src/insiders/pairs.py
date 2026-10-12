@@ -67,6 +67,11 @@ def build_lists(pairs: dict, exclude: set | None = None) -> tuple[set, set, Coun
     return {w for w, n in wins.items() if n >= 2}, {w for w, n in wins.items() if n == 1}, wins
 
 
+def win_counts(result: dict, now: float, exclude: set | None = None) -> Counter:
+    """{wallet: number of different winning coins} over the whole PnL history."""
+    return build_lists(pairs_from(result, now), exclude)[2]
+
+
 def tiers(result: dict, now: float, exclude: set | None = None) -> dict[str, str]:
     """{wallet: 'main' | 'watch'} from the whole PnL history (for live signals: the past is all known)."""
     main, watch, _ = build_lists(pairs_from(result, now), exclude)

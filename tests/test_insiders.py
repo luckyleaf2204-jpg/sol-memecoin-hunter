@@ -1074,3 +1074,39 @@ def test_vip_buy_records_a_shadow_signal_with_the_family_tier(tmp_path):
     x = w.state["shadow"]["signals"][0]
     assert x["kind"] == "single" and x["tier"] == "main" and x["wallets"][0]["family"] == WALLET
     assert w.status()["shadow"]["rows"][0]["mint"] == NEWMINT
+
+
+# ---------------------------------------------------------------- dashboard data (display only)
+def test_board_counts_independent_families_and_wallet_view(tmp_path):
+    sol = 10 ** 9
+    w, r = vip_watcher(tmp_path)
+    r["vip"]["holders"].append({"wallet": TWIN, "profit_sol": 5.0, "coins": ["X"]})
+    r["pnl"] = {"rows": [{"wallet": WALLET, "mint": MINT, "status": "ok", "net_sol": 3.0, "spent_sol": 1.0,
+                          "received_sol": 4.0, "trades": [[1, "buy", 1.0, 10], [900, "sell", 4.0, 10]]}]}
+    txs = {"a": wtx(WALLET, "a", 1_900, NEWMINT, (0, 5), (20 * sol, 14 * sol)),
+           "b": wtx(BOSS, "b", 1_950, NEWMINT, (0, 7), (20 * sol, 12 * sol)),      # WALLET's successor: same family
+           "c": wtx(TWIN, "c", 1_960, NEWMINT, (0, 7), (20 * sol, 12 * sol))}
+
+    def rpc(m, p):
+        if m == "getTokenSupply":
+            return {"value": {"uiAmountString": "1000000000", "decimals": 6}}
+        return txs[p[0]]
+    vs = VP.VipStream(w, r, rpc=rpc, now=lambda: 2_000.0)
+    vs.retry_sleep = False
+    w.vip = vs
+    for s_, who in (("a", WALLET), ("b", BOSS), ("c", TWIN)):
+        vs.handle(who, s_)
+    c = w.board_view()[0]
+    assert len(c["wallets"]) == 3 and c["n_families"] == 2 and c["buy_sol"] == 6.0 + 8.0 + 8.0
+    assert {x["family"] for x in c["wallets"]} == {WALLET, TWIN}
+    d = w.wallet_view(WALLET)
+    assert d["role"] == "holder" and d["successors"] == [BOSS] and d["coins"][0]["mint"] == NEWMINT
+    assert d["history"][0]["net_sol"] == 3.0
+    b = w.wallet_view(BOSS)
+    assert b["role"] == "successor" and b["parent"] == WALLET and b["family"] == WALLET
+    assert w.wallet_view("8bAVCeuQd9akudbotz4Ug3nv7e2KHVL2NTPtDaZLjvee") is None   # not followed: nothing returned
+    st = w.status()
+    assert st["config"]["min_sol"] == WT.MIN_SOL and st["config"]["max_wallets"] == VP.MAX_WALLETS
+    assert set(st["sources"]) == {"stream", "balances", "prices"} and st["sources"]["stream"]["ok"] is False
+    roles = {x["wallet"]: x["role"] for x in st["vip"]["list"]}
+    assert roles[WALLET] == "holder" and roles[BOSS] == "successor"

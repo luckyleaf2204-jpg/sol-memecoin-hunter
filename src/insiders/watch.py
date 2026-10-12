@@ -293,6 +293,7 @@ class Watcher:
         self.old = old_mints if old_mints is not None else (
             {t["mint"] for t in result.get("tokens", [])} | {c["mint"] for c in (result.get("extra") or {}).get("coins", [])})
         self.tickers = result.get("tickers", {})
+        self.result = result
         self.path, self.rpc, self.now = Path(state_path), rpc or Rpc(), now
         self.notify, self.notify_levels = notify, set(notify_levels)
         self.meta = meta
@@ -541,21 +542,84 @@ class Watcher:
             if not ws:
                 continue
             wallets = []
+            vip = getattr(self, "vip", None)
             for w, x in ws:
                 held = None
                 if w in raw:
                     held = next((a for mm, a in raw[w][1] if mm == m), 0.0)
                 wallets.append({"wallet": w, "why": x.get("why"), "trades": x["trades"], "buy_sol": x["buy_sol"],
                                 "sell_sol": x["sell_sol"], "tok_in": x["tok_in"], "tok_out": x["tok_out"],
-                                "held_ui": held})
+                                "held_ui": held, "family": vip.family(w) if vip else w,
+                                "tier": vip.tier(w) if vip else None})
             wallets.sort(key=lambda r: r["trades"][0][0])
             info = meta.get(m, {})
+            px = (pf.prices.usd.get(m) if pf is not None and getattr(pf, "prices", None) else None)
+            sup = (supply.get(m) or {}).get("ui")
             out.append({"mint": m, "symbol": c.get("symbol") or info.get("symbol"), "name": c.get("name") or info.get("name"),
                         "chart": c.get("chart"), "created_ts": info.get("created_ts"), "supply": supply.get(m),
                         "strong": m in strong or c.get("strong"), "last_ts": c.get("last_ts"),
-                        "first_ts": min(r["trades"][0][0] for r in wallets), "wallets": wallets})
+                        "first_ts": min(r["trades"][0][0] for r in wallets), "wallets": wallets,
+                        "n_families": len({r["family"] for r in wallets}),
+                        "buy_sol": round(sum(r["buy_sol"] for r in wallets), 3),
+                        "sell_sol": round(sum(r["sell_sol"] for r in wallets), 3),
+                        "mcap_est": round(px * sup) if px and sup else None})
         out.sort(key=lambda c: (not c["strong"], -len(c["wallets"]), -(c["last_ts"] or 0)))
         return out[:limit]
+
+    def wallet_view(self, addr: str) -> dict | None:
+        """One listed wallet: role / tier / relations, its trades on every coin the watch recorded, holdings now,
+        and its priced history on the channel's coins (research PnL). None when the wallet is not followed."""
+        vip = getattr(self, "vip", None)
+        known = vip.wallets() if vip else {}
+        hist = [x for x in (self.result.get("pnl") or {}).get("rows", []) if x.get("wallet") == addr]
+        if addr not in known and not hist:
+            return None
+        meta = self.state.get("meta", {})
+        coins = []
+        with self.lock:
+            for m, c in self.state.get("coins", {}).items():
+                x = c["wallets"].get(addr)
+                if x:
+                    info = meta.get(m, {})
+                    coins.append({"mint": m, "symbol": c.get("symbol") or info.get("symbol"), "buy_sol": x.get("buy_sol"),
+                                  "sell_sol": x.get("sell_sol"), "tok_in": x.get("tok_in"), "tok_out": x.get("tok_out"),
+                                  "first_ts": x.get("first_ts"), "last_ts": x.get("last_ts"), "half_s": x.get("half_s"),
+                                  "trades": list(x.get("trades") or [])})
+        coins.sort(key=lambda r: -(r["last_ts"] or 0))
+        kids = {a: v for a, v in (self.state.get("vip") or {}).get("children", {}).items() if v.get("parent") == addr}
+        pf = getattr(self, "portfolio", None)
+        row = next((r for r in ((pf.view or {}).get("wallets") or []) if r["wallet"] == addr), None) if pf else None
+        names = self.tickers
+        return {"wallet": addr, "why": known.get(addr), **(vip.info(addr) if vip else {}),
+                "last_seen": ((self.state.get("vip") or {}).get("last_seen") or {}).get(addr),
+                "children": [{"wallet": a, "sol": v.get("sol"), "since": v.get("since")} for a, v in kids.items()],
+                "successors": [s["wallet"] for s in (self.result.get("vip") or {}).get("successors", [])
+                               if addr in (s.get("from") or []) and s.get("kind") == "person"],
+                "holding": row, "coins": coins[:80],
+                "history": [{"mint": x["mint"], "ticker": names.get(x["mint"]), "status": x.get("status"),
+                             "net_sol": x.get("net_sol"), "spent_sol": x.get("spent_sol"), "received_sol": x.get("received_sol"),
+                             "first_ts": x.get("first_ts"), "last_ts": x.get("last_ts"), "trades": (x.get("trades") or [])[:40]}
+                            for x in hist]}
+
+    def sources(self) -> dict:
+        """Where each piece of data comes from and whether it is fresh (for the page header)."""
+        vip, pf, sh = getattr(self, "vip", None), getattr(self, "portfolio", None), getattr(self, "shadow", None)
+        return {"stream": {"ok": bool(vip and vip.stat.get("connected")), "last": vip.stat.get("last_msg") if vip else None,
+                           "error": vip.stat.get("error") if vip else None},
+                "balances": {"ok": bool(pf and pf.updated), "last": pf.updated if pf else None,
+                             "error": pf.error if pf else None, "progress": pf.progress if pf else None},
+                "prices": {"ok": bool(sh and not sh.stat.get("error")), "last": sh.stat.get("last") if sh else None,
+                           "error": sh.stat.get("error") if sh else None}}
+
+    def config(self) -> dict:
+        """The thresholds in force (read-only on the page; changed only through the server's environment)."""
+        vip = getattr(self, "vip", None)
+        from insiders import pairs as _p
+        from insiders import vip as _v
+        return {"min_sol": MIN_SOL, "board_min_sol": BOARD_MIN_SOL, "flip_s": FLIP_S, "hold_s": HOLD_CONFIRM_S,
+                "win_hold_s": _p.HOLD_S, "win_min_sol": _p.WIN_MIN_SOL, "win_min_mult": _p.WIN_MIN_MULT,
+                **({"max_wallets": _v.MAX_WALLETS, "adopt_min_sol": _v.ADOPT_MIN_SOL, "child_days": _v.CHILD_TTL_S / 86400,
+                    "strong_window_s": _v.STRONG_WINDOW_S} if vip else {})}
 
     def board_min_sol(self) -> float:
         return BOARD_MIN_SOL
@@ -651,6 +715,7 @@ class Watcher:
                     "portfolio": self.portfolio.status() if getattr(self, "portfolio", None) else None,
                     "paper": {"summary": self.paper.summary(), "rows": self.paper.rows(60)} if self.paper else None,
                     "shadow": self.shadow.view() if getattr(self, "shadow", None) else None,
+                    "sources": self.sources(), "config": self.config(), "now": self.now(),
                     "children": len(self.state["children"]), "last_error": self.state["last_error"],
                     "rpc_calls": self.state.get("rpc_calls"), "last_poll_s": self.state.get("last_poll_s"),
                     "alerts": self.state["alerts"][:200]}

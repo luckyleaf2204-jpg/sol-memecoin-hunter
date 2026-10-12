@@ -15,7 +15,7 @@ import threading
 import time
 from collections import deque
 
-from insiders.pairs import tiers as pair_tiers
+from insiders.pairs import tiers as pair_tiers, win_counts
 from insiders.scan import KNOWN_LABELS, on_curve
 from insiders.watch import MIN_SOL, STABLES, WSOL, Rpc, analyse
 
@@ -84,8 +84,12 @@ class VipStream:
         self.result = result
         try:                                                  # main / watch tier of each wallet (signal quality)
             self.tiers = pair_tiers(result, now(), set(KNOWN_LABELS))
+            self.wins = dict(win_counts(result, now(), set(KNOWN_LABELS)))
         except Exception:
-            self.tiers = {}
+            self.tiers, self.wins = {}, {}
+        v = result.get("vip") or {}
+        self.holders = {h["wallet"] for h in v.get("holders", [])}
+        self.succ_from = {s["wallet"]: s.get("from", []) for s in v.get("successors", [])}
 
     def wallets(self) -> dict[str, str]:
         """The base list always first and always whole; live children (newest kept) fill the rest up to MAX_WALLETS."""
@@ -105,6 +109,20 @@ class VipStream:
             if s["wallet"] == wallet and s.get("from"):
                 return sorted(s["from"])[0]
         return wallet
+
+    def role(self, wallet: str) -> str:
+        if wallet in self.holders:
+            return "holder"
+        if wallet in self.succ_from:
+            return "successor"
+        return "child" if wallet in self.state.get("children", {}) else "other"
+
+    def info(self, wallet: str) -> dict:
+        """Display facts of one listed wallet: role, tier, winning coins, family root and direct parent."""
+        kid = self.state.get("children", {}).get(wallet) or {}
+        return {"role": self.role(wallet), "tier": self.tier(wallet), "wins": self.wins.get(wallet, 0),
+                "family": self.family(wallet), "parent": kid.get("parent") or (sorted(self.succ_from.get(wallet) or [None])[0]),
+                "funded_sol": kid.get("sol"), "since": kid.get("since")}
 
     def tier(self, wallet: str) -> str:
         """The wallet's own tier, else its family's (a child / successor inherits from where its money came)."""
@@ -351,7 +369,8 @@ class VipStream:
         return {**self.stat, "wallets": len(ws), "base": len(self.base), "last_seen": self.state.get("last_seen", {}),
                 "kids": {a: v["parent"] for a, v in self.state["children"].items()},
                 "children": len(self.state["children"]), "events": self.state.get("events", 0), "min_sol": MIN_SOL,
-                "list": [{"wallet": a, "why": why} for a, why in list(ws.items())[:120]]}
+                "list": [{"wallet": a, "why": why, **self.info(a)} for a, why in list(ws.items())[:120]],
+                "max_wallets": MAX_WALLETS, "adopt_min_sol": ADOPT_MIN_SOL, "strong_window_s": STRONG_WINDOW_S}
 
     def start(self, stop: threading.Event) -> threading.Thread:
         th = threading.Thread(target=lambda: asyncio.run(self.run(stop)), daemon=True)
