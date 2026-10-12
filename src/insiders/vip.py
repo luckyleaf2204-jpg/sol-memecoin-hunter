@@ -27,6 +27,8 @@ WORKERS = 3
 QUEUE_MAX = 2000
 SILENT_S = 120                   # no message at all for this long: the socket is dead, reconnect
 SWEEP_S = 600                    # expired children are unsubscribed this often
+SUB_GAP_S = float(os.environ.get("INSIDER_SUB_GAP_S") or 0.3)   # the public RPC refuses bursts of subscriptions (1013)
+LIMITED_BACKOFF_S = 45.0
 ADOPT_MIN_SOL = float(os.environ.get("INSIDER_ADOPT_MIN_SOL") or 0.5)   # a new wallet funded with this joins
 MAX_WALLETS = 300
 
@@ -272,6 +274,7 @@ class VipStream:
                     for k, addr in enumerate(self.wallets(), 1):
                         pending[k] = addr
                         await self._subscribe(ws, addr, k)
+                        await asyncio.sleep(SUB_GAP_S)                       # paced: no "too many subscriptions"
                     self.stat.update(connected=True, error=None)
                     backoff, nxt = 1.0, len(pending) + 1
                     heard, swept = time.monotonic(), time.monotonic()
@@ -287,6 +290,7 @@ class VipStream:
                             else:
                                 pending[nxt] = addr
                                 await self._subscribe(ws, addr, nxt)
+                                await asyncio.sleep(SUB_GAP_S)
                             nxt += 1
                         if time.monotonic() - swept > SWEEP_S:              # expired children leave the socket
                             swept = time.monotonic()
@@ -334,8 +338,10 @@ class VipStream:
                 self.stat.update(connected=False, error=f"{type(e).__name__}: {str(e)[:80]}")
                 self.stat["reconnects"] += 1
                 self.ws = None
+                if "1013" in str(e) or "Rate limit" in str(e):              # refused for too many attempts: cool down
+                    backoff = max(backoff, LIMITED_BACKOFF_S)
                 await asyncio.sleep(backoff)
-                backoff = min(60.0, backoff * 2)
+                backoff = min(120.0, backoff * 2)
         for t in workers:
             t.cancel()
         self.stat["connected"] = False
