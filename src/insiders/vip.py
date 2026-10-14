@@ -44,7 +44,8 @@ WORKERS = 3
 QUEUE_MAX = 2000
 SILENT_S = 120                   # no message at all for this long: the socket is dead, reconnect
 SWEEP_S = 600                    # expired children are unsubscribed this often
-SUB_GAP_S = float(os.environ.get("INSIDER_SUB_GAP_S") or 0.3)   # the public RPC refuses bursts of subscriptions (1013)
+SUB_GAP_S = float(os.environ.get("INSIDER_SUB_GAP_S") or (0.02 if _HELIUS else 0.3))   # public RPC refuses bursts (1013)
+SUB_BATCH = 25                   # subscriptions sent between two reads: replies (and pongs) are read while subscribing
 LIMITED_BACKOFF_S = 45.0
 ADOPT_MIN_SOL = float(os.environ.get("INSIDER_ADOPT_MIN_SOL") or 0.5)   # a new wallet funded with this joins
 MAX_WALLETS = int(os.environ.get("INSIDER_MAX_WALLETS") or 300)  # followed in all (base list + linked wallets)
@@ -425,7 +426,7 @@ class VipStream:
     async def run(self, stop: threading.Event) -> None:
         import websockets
         connect = self.connect or (lambda: websockets.connect(self.url, max_size=2 ** 22, ping_interval=20,
-                                                               ping_timeout=30))
+                                                               ping_timeout=30, max_queue=4096))
         backoff = 1.0
         work: asyncio.Queue = asyncio.Queue(maxsize=QUEUE_MAX)      # (wallet, signature) for the workers
         queued: set[str] = set()
@@ -447,15 +448,15 @@ class VipStream:
             try:
                 async with connect() as ws:
                     self.ws, self.queue, self.subs = ws, asyncio.Queue(), {}
-                    for k, addr in enumerate(self.ws_set(), 1):
-                        pending[k] = addr
-                        await self._subscribe(ws, addr, k)
-                        await asyncio.sleep(SUB_GAP_S)                       # paced: no "too many subscriptions"
+                    for addr in self.ws_set():                                # sent in batches by the loop below,
+                        self.queue.put_nowait(("subscribe", addr))            # reading replies in between
                     self.stat.update(connected=True, error=None)
-                    backoff, nxt = 1.0, len(pending) + 1
+                    backoff, nxt = 1.0, 1
                     heard, swept = time.monotonic(), time.monotonic()
                     while not stop.is_set():
-                        while not self.queue.empty():
+                        sent = 0
+                        while not self.queue.empty() and sent < SUB_BATCH:
+                            sent += 1
                             op, addr = self.queue.get_nowait()
                             if op == "unsubscribe":
                                 sid = next((s for s, a in self.subs.items() if a == addr), None)
@@ -473,7 +474,7 @@ class VipStream:
                             for addr in self.prune_children():
                                 self.queue.put_nowait(("unsubscribe", addr))
                         try:
-                            raw = await asyncio.wait_for(ws.recv(), 5)
+                            raw = await asyncio.wait_for(ws.recv(), 0.2 if not self.queue.empty() else 5)
                         except asyncio.TimeoutError:
                             if time.monotonic() - heard > SILENT_S:
                                 raise ConnectionError(f"silent for {SILENT_S} s") from None
