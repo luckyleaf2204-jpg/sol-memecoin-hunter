@@ -1325,3 +1325,26 @@ def test_one_external_project_is_one_family(tmp_path):
     vs.state["children"][CEX] = {"parent": TWIN, "since": 2_000.0, "sol": 1.0}
     assert vs.family(CEX) == "group:VALENTINO"                         # its linked wallets too
     assert vs.family(WALLET) == WALLET
+
+
+def test_keys_never_reach_a_status_line():
+    s = VP.redact("InvalidURI: wss://mainnet.helius-rpc.com/?api-key=SECRET-1234&x=1 isn't valid")
+    assert "SECRET" not in s and "api-key=REDACTED" in s
+
+
+def test_bots_do_not_take_the_live_slots_and_quiet_wallets_are_polled_less(tmp_path, monkeypatch):
+    w, r = vip_watcher(tmp_path)
+    vs = VP.VipStream(w, r, rpc=lambda m, p: [], now=lambda: 100_000.0)
+    vs.state["last_seen"] = {BOSS: 99_000, WALLET: 50_000}
+    monkeypatch.setattr(w, "bots", lambda: [BOSS])
+    assert vs.ws_set()[0] == WALLET                                    # the bot is most active but goes last
+    asked = []
+    vs.subs = {}
+    vs.state["poll_last"] = {WALLET: "x", BOSS: "y"}
+    vs.pstat["rounds"] = 1                                             # not a full round
+    vs.poll_once(rpc=lambda m, p: asked.append(p[0]) or [])
+    assert asked == [BOSS]                                             # WALLET silent for > 6 h: skipped this round
+    vs.pstat["rounds"] = VP.QUIET_EVERY
+    asked.clear()
+    vs.poll_once(rpc=lambda m, p: asked.append(p[0]) or [])
+    assert set(asked) == {WALLET, BOSS}

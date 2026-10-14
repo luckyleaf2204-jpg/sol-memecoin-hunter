@@ -19,7 +19,24 @@ from insiders.pairs import tiers as pair_tiers, win_counts
 from insiders.scan import KNOWN_LABELS, on_curve
 from insiders.watch import MIN_SOL, STABLES, WSOL, Rpc, analyse
 
-WS_URL = os.environ.get("INSIDER_WS") or "wss://api.mainnet-beta.solana.com"
+import re as _re
+
+_HELIUS = os.environ.get("HELIUS_API_KEY") or ""
+# with a Helius key (set on the server only, never sent to the page) the stream and the RPC go through Helius:
+# many more live subscriptions and a far higher request rate than the public endpoint
+RPC_URL = f"https://mainnet.helius-rpc.com/?api-key={_HELIUS}" if _HELIUS else None
+WS_URL = os.environ.get("INSIDER_WS") or (f"wss://mainnet.helius-rpc.com/?api-key={_HELIUS}" if _HELIUS
+                                          else "wss://api.mainnet-beta.solana.com")
+PROVIDER = "helius" if _HELIUS else "public"
+
+
+def redact(text: str) -> str:
+    """Never let a key reach a status line, the page or a log."""
+    return _re.sub(r"api-key=[^&\s'\"]+", "api-key=REDACTED", str(text))
+
+
+def _rpc(gap_s: float):
+    return Rpc(url=RPC_URL, gap_s=gap_s) if RPC_URL else Rpc(gap_s=gap_s)
 CHILD_TTL_S = 7 * 86400
 STRONG_WINDOW_S = int(os.environ.get("INSIDER_STRONG_WINDOW_S") or 86400)   # >= 2 families inside this (blockTime)
 STRONG_REPEAT_S = 86400          # a coin can be STRONG again a day later
@@ -31,8 +48,11 @@ SUB_GAP_S = float(os.environ.get("INSIDER_SUB_GAP_S") or 0.3)   # the public RPC
 LIMITED_BACKOFF_S = 45.0
 ADOPT_MIN_SOL = float(os.environ.get("INSIDER_ADOPT_MIN_SOL") or 0.5)   # a new wallet funded with this joins
 MAX_WALLETS = int(os.environ.get("INSIDER_MAX_WALLETS") or 300)  # followed in all (base list + linked wallets)
-WS_MAX = int(os.environ.get("INSIDER_WS_MAX") or 90)            # live on the socket (the public RPC drops ~100); the rest polled
-POLL_GAP_S = float(os.environ.get("INSIDER_POLL_GAP_S") or 0.35)  # between two polled wallets
+WS_MAX = int(os.environ.get("INSIDER_WS_MAX") or (1000 if _HELIUS else 90))   # live on the socket; the rest polled
+POLL_GAP_S = float(os.environ.get("INSIDER_POLL_GAP_S") or (0.05 if _HELIUS else 0.3))  # between two RPC calls
+POLL_WORKERS = 3                                                 # transactions found by the poller are read in parallel
+QUIET_S = 6 * 3600                                               # a wallet silent this long is polled every QUIET_EVERY rounds
+QUIET_EVERY = 4
 POLL_LIMIT = 20                                                  # signatures read per wallet per round
 FLOW_MIN_SOL = float(os.environ.get("INSIDER_FLOW_MIN_SOL") or 0.5)          # a SOL move worth recording
 ADOPT_IN_MIN_SOL = float(os.environ.get("INSIDER_ADOPT_IN_MIN_SOL") or 1.0)  # a wallet paying a listed one joins too
@@ -90,7 +110,7 @@ def token_counterparty(tx: dict, wallet: str, mint: str, dt: int) -> str | None:
 class VipStream:
     def __init__(self, watcher, result: dict, url: str = WS_URL, rpc=None, connect=None, now=time.time):
         self.w, self.url, self.now = watcher, url, now
-        self.rpc = rpc or Rpc(gap_s=0.2)
+        self.rpc = rpc or _rpc(0.05 if _HELIUS else 0.2)
         self.connect = connect
         self.state = watcher.state.setdefault("vip", {"children": {}, "events": 0})
         self.base = vip_list(result)
@@ -141,8 +161,12 @@ class VipStream:
         every other followed wallet is polled."""
         seen = self.state.get("last_seen", {})
         ws = self.wallets()
-        base = sorted((a for a in ws if a in self.base), key=lambda a: -(seen.get(a) or 0))
-        kids = [a for a in ws if a not in self.base]
+        try:
+            bots = set(self.w.bots())                      # snipers trade all day: they must not take every live slot
+        except Exception:
+            bots = set()
+        base = sorted((a for a in ws if a in self.base), key=lambda a: (a in bots, -(seen.get(a) or 0)))
+        kids = sorted((a for a in ws if a not in self.base), key=lambda a: a in bots)
         return [a for a in base + kids if a not in self.ws_refused][:WS_MAX]
 
     def group(self, wallet: str) -> str:
@@ -430,7 +454,7 @@ class VipStream:
                             except asyncio.QueueFull:
                                 self.stat["missed"] += 1
             except Exception as e:                                   # dropped: reconnect and resubscribe
-                self.stat.update(connected=False, error=f"{type(e).__name__}: {str(e)[:80]}")
+                self.stat.update(connected=False, error=redact(f"{type(e).__name__}: {str(e)[:80]}"))
                 self.stat["reconnects"] += 1
                 self.ws = None
                 if "1013" in str(e) or "Rate limit" in str(e):              # refused for too many attempts: cool down
@@ -447,8 +471,12 @@ class VipStream:
         rpc = rpc or self.rpc
         live = set(self.subs.values())
         last = self.state.setdefault("poll_last", {})
-        todo = [a for a in self.wallets() if a not in live]
+        seen_at = self.state.get("last_seen", {})
+        n = self.pstat["rounds"]
+        todo = [a for a in self.wallets() if a not in live
+                and (n % QUIET_EVERY == 0 or self.now() - (seen_at.get(a) or 0) < QUIET_S or a not in last)]
         t0, new = time.monotonic(), 0
+        found: list[tuple[str, str]] = []
         for a in todo:
             try:
                 sigs = rpc("getSignaturesForAddress", [a, {"limit": POLL_LIMIT}]) or []
@@ -467,26 +495,31 @@ class VipStream:
                     break
                 if x.get("err") is None:
                     fresh.append(x["signature"])
-            for sig in reversed(fresh):                            # oldest first
-                if sig not in self.seen:
-                    new += 1
-                    try:
-                        self.handle(a, sig)
-                    except Exception as e:                         # one bad transaction never stops the round
-                        self.stat["error"] = f"poll: {type(e).__name__}"
+            found += [(a, sig) for sig in reversed(fresh) if sig not in self.seen]   # oldest first
+        new = len(found)
+
+        def one(item):
+            try:
+                self.handle(*item)
+            except Exception as e:                                 # one bad transaction never stops the round
+                self.stat["error"] = redact(f"poll: {type(e).__name__}")
+        if found:
+            from concurrent.futures import ThreadPoolExecutor
+            with ThreadPoolExecutor(max_workers=POLL_WORKERS) as ex:
+                list(ex.map(one, found))
         self.pstat.update(rounds=self.pstat["rounds"] + 1, wallets=len(todo), new=self.pstat["new"] + new,
                           round_s=round(time.monotonic() - t0, 1), last=self.now())
         return new
 
     def poll_forever(self, stop: threading.Event) -> None:
-        rpc = Rpc(gap_s=POLL_GAP_S)
+        rpc = _rpc(POLL_GAP_S)
         while not stop.is_set():
             try:
                 self.poll_once(rpc)
                 self.w.save()
             except Exception as e:                                 # the loop never dies
-                self.stat["error"] = f"poll: {type(e).__name__}: {str(e)[:60]}"
-            stop.wait(5)
+                self.stat["error"] = redact(f"poll: {type(e).__name__}: {str(e)[:60]}")
+            stop.wait(2)
 
     def status(self) -> dict:
         ws = self.wallets()
@@ -494,7 +527,7 @@ class VipStream:
                 "kids": {a: v["parent"] for a, v in self.state["children"].items()},
                 "children": len(self.state["children"]), "events": self.state.get("events", 0), "min_sol": MIN_SOL,
                 "list": [{"wallet": a, "why": why, **self.info(a)} for a, why in list(ws.items())[:400]],
-                "poll": self.pstat, "ws_max": WS_MAX, "refused": len(self.ws_refused),
+                "poll": self.pstat, "ws_max": WS_MAX, "refused": len(self.ws_refused), "provider": PROVIDER,
                 "max_wallets": MAX_WALLETS, "adopt_min_sol": ADOPT_MIN_SOL, "strong_window_s": STRONG_WINDOW_S}
 
     def start(self, stop: threading.Event) -> threading.Thread:
