@@ -1360,3 +1360,45 @@ def test_wallets_funded_by_a_bot_are_not_followed(tmp_path, monkeypatch):
     assert vs.state["children"][TWIN]["parent"] == BOSS
     vs.state["children"][CEX] = {"parent": WALLET, "since": 2_000.0, "sol": 1.0}
     assert CEX in vs.prune_children() and CEX not in vs.state["children"]   # a bot's earlier child is dropped
+
+
+# ---------------------------------------------------------------- parents / children: found, followed, bots removed
+def test_a_busy_wallet_is_not_followed_and_never_asked_again(tmp_path):
+    w, r = vip_watcher(tmp_path)
+    calls = []
+
+    def rpc(m, p):
+        calls.append(p[0])
+        return [{"signature": f"s{i}", "blockTime": 1_990} for i in range(VP.BOT_TX_48H)]   # 100 tx in 10 s
+    vs = VP.VipStream(w, r, rpc=rpc, now=lambda: 2_000.0)
+    vs._adopt(TWIN, WALLET, 2.0)
+    assert TWIN not in vs.state["children"] and vs.state["removed"][TWIN]["reason"].startswith("bot")
+    vs._adopt(TWIN, WALLET, 2.0)
+    assert calls == [TWIN]                                             # remembered: not checked again
+
+
+def test_a_linked_wallet_that_turns_bot_is_dropped(tmp_path, monkeypatch):
+    w, r = vip_watcher(tmp_path)
+    vs = VP.VipStream(w, r, rpc=lambda m, p: [], now=lambda: 2_000.0)
+    vs._adopt(TWIN, WALLET, 2.0, direction="in")
+    assert vs.state["children"][TWIN]["dir"] == "in" and "ví cha" in vs.wallets()[TWIN]
+    monkeypatch.setattr(w, "bots", lambda: [TWIN])
+    assert vs.prune_children() == [TWIN] and TWIN not in vs.wallets()
+    assert vs.status()["removed"][0]["wallet"] == TWIN
+    monkeypatch.setattr(w, "bots", lambda: [])
+    vs._adopt(TWIN, WALLET, 2.0)
+    assert TWIN not in vs.state["children"]                           # a known bot never comes back
+
+
+def test_history_links_are_seeded_and_active_ones_stay(tmp_path):
+    w, r = vip_watcher(tmp_path)
+    r["vip"]["linked"] = [{"wallet": TWIN, "parent": WALLET, "dir": "in", "sol": 5.0}]
+    clock = [1_000.0]
+    vs = VP.VipStream(w, r, rpc=lambda m, p: [], now=lambda: clock[0])
+    assert TWIN in vs.wallets() and vs.info(TWIN)["dir"] == "in"
+    clock[0] += VP.CHILD_TTL_S - 10
+    vs.state["last_seen"] = {TWIN: clock[0]}                           # it moved: kept another week
+    clock[0] += 20
+    assert TWIN in vs.wallets()
+    clock[0] += VP.CHILD_TTL_S
+    assert vs.prune_children() == [TWIN] and vs.state["removed"][TWIN]["reason"].startswith("hết hạn")

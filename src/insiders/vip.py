@@ -57,6 +57,8 @@ POLL_LIMIT = 20                                                  # signatures re
 FLOW_MIN_SOL = float(os.environ.get("INSIDER_FLOW_MIN_SOL") or 0.5)          # a SOL move worth recording
 ADOPT_IN_MIN_SOL = float(os.environ.get("INSIDER_ADOPT_IN_MIN_SOL") or 1.0)  # a wallet paying a listed one joins too
 MAX_FLOWS = 2000
+BOT_TX_48H = int(os.environ.get("INSIDER_BOT_TX_48H") or 100)   # a wallet with this many transactions in 48 h is a bot
+MAX_REMOVED = 600
 
 
 def vip_list(result: dict) -> dict[str, str]:
@@ -132,14 +134,31 @@ class VipStream:
         self.ws_refused: set[str] = set()
         self.pstat = {"rounds": 0, "wallets": 0, "round_s": None, "new": 0, "errors": 0, "last": None}
         self.holders = {h["wallet"] for h in v.get("holders", [])}
+        removed = self.state.setdefault("removed", {})
+        for x in v.get("linked", []):                         # parents / children found in the history (one-off scan)
+            a = x["wallet"]
+            if a not in self.base and a not in self.state["children"] and a not in removed:
+                self.state["children"][a] = {"parent": x["parent"], "since": now(), "sol": x.get("sol"),
+                                             "dir": x.get("dir", "out"), "seed": True}
         self.succ_from = {s["wallet"]: s.get("from", []) for s in v.get("successors", [])}
 
     def wallets(self) -> dict[str, str]:
         """The base list always first and always whole; live children (newest kept) fill the rest up to MAX_WALLETS."""
-        now = self.now()
-        kids = sorted(((a, v) for a, v in self.state["children"].items() if now - v["since"] < CHILD_TTL_S),
+        kids = sorted(((a, v) for a, v in self.state["children"].items() if self._alive(a, v)),
                       key=lambda x: -x[1]["since"])[:max(0, MAX_WALLETS - len(self.base))]
-        return {**self.base, **{a: f"new wallet of {v['parent'][:6]}… ({v['sol']} SOL)" for a, v in kids}}
+        return {**self.base, **{a: self._why_kid(v) for a, v in kids}}
+
+    def _alive(self, a: str, v: dict) -> bool:
+        """A linked wallet stays followed while it is active: 7 days after it was added or last seen moving."""
+        seen = (self.state.get("last_seen") or {}).get(a) or 0
+        return self.now() - max(v.get("since") or 0, seen) < CHILD_TTL_S
+
+    @staticmethod
+    def _why_kid(v: dict) -> str:
+        p = (v.get("parent") or "")[:6]
+        if v.get("dir") == "in":
+            return f"ví cha của {p}… (gửi {v.get('sol')} SOL cho ví đó)"
+        return f"ví con của {p}… (nhận {v.get('sol')} SOL từ ví đó)"
 
     def family(self, wallet: str) -> str:
         """One vote per person: a child counts as its root parent, a successor as the holder that funded it, and every
@@ -199,17 +218,41 @@ class VipStream:
         """The wallet's own tier, else its family's (a child / successor inherits from where its money came)."""
         return self.tiers.get(wallet) or self.tiers.get(self.family(wallet)) or "none"
 
+    def _remove(self, a: str, reason: str, parent: str | None = None) -> None:
+        rm = self.state.setdefault("removed", {})
+        rm[a] = {"reason": reason, "ts": self.now(), "parent": parent}
+        if len(rm) > MAX_REMOVED:
+            for k in sorted(rm, key=lambda k: rm[k]["ts"])[:len(rm) - MAX_REMOVED]:
+                del rm[k]
+
     def prune_children(self) -> list[str]:
-        """Drop children older than CHILD_TTL_S from the state; returns them (to unsubscribe)."""
-        now = self.now()
+        """Drop linked wallets that went quiet for 7 days, that turned out to be bots, or whose source is a bot;
+        returns them (to unsubscribe). Bots are remembered and never added again."""
         try:
-            bots = set(self.w.bots())                          # a sniper's fresh wallets go too
+            bots = set(self.w.bots())
         except Exception:
             bots = set()
-        old = [a for a, v in self.state["children"].items() if now - v["since"] >= CHILD_TTL_S or v.get("parent") in bots]
-        for a in old:
+        gone = []
+        for a, v in list(self.state["children"].items()):
+            if a in bots:
+                self._remove(a, "bot (giao dịch rất nhiều coin mỗi ngày)", v.get("parent"))
+            elif v.get("parent") in bots:
+                self._remove(a, "ví nguồn là bot", v.get("parent"))
+            elif not self._alive(a, v):
+                self._remove(a, "hết hạn (7 ngày không hoạt động)", v.get("parent"))
+            else:
+                continue
             del self.state["children"][a]
-        return old
+            gone.append(a)
+        return gone
+
+    def looks_like_bot(self, a: str) -> bool:
+        """Quick check before following a wallet: BOT_TX_48H transactions inside 48 h is a bot / a service."""
+        try:
+            sigs = self.rpc("getSignaturesForAddress", [a, {"limit": BOT_TX_48H}]) or []
+        except Exception:
+            return False                                       # cannot tell: follow it, the prune catches a bot later
+        return len(sigs) >= BOT_TX_48H and (sigs[-1].get("blockTime") or 0) > self.now() - 48 * 3600
 
     # ---------------------------------------------------------------- analysis of one pushed transaction
     def handle(self, wallet: str, sig: str) -> list[dict]:
@@ -357,6 +400,11 @@ class VipStream:
                 return
         except Exception:
             pass
+        if (self.state.get("removed") or {}).get(to, {}).get("reason", "").startswith("bot"):
+            return                                            # found to be a bot before: never again
+        if to not in self.state["children"] and self.looks_like_bot(to):
+            self._remove(to, "bot (≥ %d giao dịch trong 48 giờ)" % BOT_TX_48H, parent)
+            return
         if to not in self.state["children"]:
             self.prune_children()
             kids = self.state["children"]
@@ -539,6 +587,8 @@ class VipStream:
                 "kids": {a: v["parent"] for a, v in self.state["children"].items()},
                 "children": len(self.state["children"]), "events": self.state.get("events", 0), "min_sol": MIN_SOL,
                 "list": [{"wallet": a, "why": why, **self.info(a)} for a, why in list(ws.items())[:400]],
+                "removed": sorted(({"wallet": a, **v} for a, v in (self.state.get("removed") or {}).items()),
+                                  key=lambda x: -x["ts"])[:150],
                 "poll": self.pstat, "ws_max": WS_MAX, "refused": len(self.ws_refused), "provider": PROVIDER,
                 "max_wallets": MAX_WALLETS, "adopt_min_sol": ADOPT_MIN_SOL, "strong_window_s": STRONG_WINDOW_S}
 
