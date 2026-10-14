@@ -659,4 +659,6 @@ def _headers(resp):
     return resp
 
 
-app = create_app()   # uvicorn entry: `uvicorn web.app:app`  (scanner starts in the lifespan)
+# 2026-10-14 (user: turn the SOL hunter off, keep resources for other work): the scanner, paper bot, wallet shadow,
+# snapshots, keep-alive and insider watch only start with HUNTER_BACKGROUND=1; by default the site only serves pages.
+app = create_app(start_scanner=os.environ.get("HUNTER_BACKGROUND", "0") == "1")   # uvicorn entry: web.app:app
