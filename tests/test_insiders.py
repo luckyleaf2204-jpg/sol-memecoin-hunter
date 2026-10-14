@@ -1314,3 +1314,14 @@ def test_a_wallet_trading_many_coins_a_day_is_a_bot(tmp_path, monkeypatch):
     w.state["coins"] = {f"M{i}": {"wallets": {BOSS: {"last_ts": 1_990}, **({WALLET: {"last_ts": 1_990}} if i == 0 else {})}}
                         for i in range(3)}
     assert w.bots() == [BOSS]
+
+
+def test_one_external_project_is_one_family(tmp_path):
+    w, r = vip_watcher(tmp_path)
+    r["vip"]["external"] = [{"wallet": OUTSIDER, "group": "VALENTINO", "role": "bundle"},
+                            {"wallet": TWIN, "group": "VALENTINO", "role": "bundle"}]
+    vs = VP.VipStream(w, r, rpc=lambda m, p: None, now=lambda: 2_000.0)
+    assert vs.family(OUTSIDER) == vs.family(TWIN) == "group:VALENTINO"
+    vs.state["children"][CEX] = {"parent": TWIN, "since": 2_000.0, "sol": 1.0}
+    assert vs.family(CEX) == "group:VALENTINO"                         # its linked wallets too
+    assert vs.family(WALLET) == WALLET

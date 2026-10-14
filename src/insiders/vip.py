@@ -122,12 +122,15 @@ class VipStream:
         return {**self.base, **{a: f"new wallet of {v['parent'][:6]}… ({v['sol']} SOL)" for a, v in kids}}
 
     def family(self, wallet: str) -> str:
-        """One vote per person: a child counts as its root parent, a successor as the holder that funded it."""
+        """One vote per person: a child counts as its root parent, a successor as the holder that funded it, and every
+        wallet of one external project (DEPTH, VALENTINO ...) as that project."""
         seen = set()
         kids = self.state.get("children", {})
         while wallet in kids and wallet not in seen:
             seen.add(wallet)
             wallet = kids[wallet]["parent"]
+        if wallet in self.external:
+            return "group:" + (self.external[wallet].get("group") or "?")
         for s in (self.result.get("vip") or {}).get("successors", []):
             if s["wallet"] == wallet and s.get("from"):
                 return sorted(s["from"])[0]
