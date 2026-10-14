@@ -1436,3 +1436,14 @@ def test_the_dev_buy_inside_a_create_counts():
     tx = pool_tx(WALLET, "k", NEWMINT, (0, 900), (10 * sol, 10 * sol - 4_053_000_000), (0, 1_000_000), create=True)
     ev = [e for e in WT.analyse(tx, WALLET) if e["mint"] == NEWMINT][0]
     assert ev["kind"] == "CREATE" and ev["sol"] == round(4.053 - WT.CREATE_COST_SOL, 3)
+
+
+def test_sol_price_for_dollars_is_kept_fresh_and_survives_failures(tmp_path):
+    w, r = vip_watcher(tmp_path)
+    clock = [1_000.0]
+    vs = VP.VipStream(w, r, rpc=lambda m, p: None, now=lambda: clock[0])
+    assert vs.refresh_sol_usd(get=lambda: {WT.WSOL: {"usdPrice": 151.25}}) == 151.25
+    assert vs.refresh_sol_usd(get=lambda: {WT.WSOL: {"usdPrice": 999}}) == 151.25        # cached for a minute
+    clock[0] += VP.SOL_USD_EVERY_S + 1
+    assert vs.refresh_sol_usd(get=lambda: (_ for _ in ()).throw(OSError("down"))) == 151.25   # kept on failure
+    assert vs.status()["sol_usd"] == 151.25

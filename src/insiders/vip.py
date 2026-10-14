@@ -58,6 +58,7 @@ POLL_LIMIT = 20                                                  # signatures re
 FLOW_MIN_SOL = float(os.environ.get("INSIDER_FLOW_MIN_SOL") or 0.5)          # a SOL move worth recording
 ADOPT_IN_MIN_SOL = float(os.environ.get("INSIDER_ADOPT_IN_MIN_SOL") or 1.0)  # a wallet paying a listed one joins too
 MAX_FLOWS = 2000
+SOL_USD_EVERY_S = 60
 BOT_TX_48H = int(os.environ.get("INSIDER_BOT_TX_48H") or 100)   # a wallet with this many transactions in 48 h is a bot
 MAX_REMOVED = 600
 
@@ -133,6 +134,7 @@ class VipStream:
         v = result.get("vip") or {}
         self.external = {x["wallet"]: x for x in v.get("external", [])}
         self.ws_refused: set[str] = set()
+        self.sol_usd, self.sol_usd_ts = None, 0.0
         self.pstat = {"rounds": 0, "wallets": 0, "round_s": None, "new": 0, "errors": 0, "last": None}
         self.holders = {h["wallet"] for h in v.get("holders", [])}
         removed = self.state.setdefault("removed", {})
@@ -569,13 +571,35 @@ class VipStream:
                           round_s=round(time.monotonic() - t0, 1), last=self.now())
         return new
 
+    def refresh_sol_usd(self, get=None) -> float | None:
+        """SOL price in USD (Jupiter), for every amount and market cap the page shows in dollars; kept on failure."""
+        now = self.now()
+        if self.sol_usd and now - self.sol_usd_ts < SOL_USD_EVERY_S:
+            return self.sol_usd
+        try:
+            if get is None:
+                import urllib.request
+                req = urllib.request.Request("https://lite-api.jup.ag/price/v3?ids=" + WSOL,
+                                             headers={"Accept": "application/json", "User-Agent": "Mozilla/5.0"})
+                d = json.loads(urllib.request.urlopen(req, timeout=10).read())
+            else:
+                d = get()
+            p = float(((d or {}).get(WSOL) or {}).get("usdPrice") or 0)
+            if p > 0:
+                self.sol_usd, self.sol_usd_ts = round(p, 4), now
+        except Exception:                                      # keep the last price
+            pass
+        return self.sol_usd
+
     def poll_forever(self, stop: threading.Event) -> None:
         rpc = _rpc(POLL_GAP_S)
+        self.refresh_sol_usd()
         t0 = time.monotonic()                                  # first round once the socket holds its wallets
         while not stop.is_set() and not self.subs and time.monotonic() - t0 < 120:
             stop.wait(2)
         while not stop.is_set():
             try:
+                self.refresh_sol_usd()
                 self.poll_once(rpc)
                 self.w.save()
             except Exception as e:                                 # the loop never dies
@@ -590,7 +614,7 @@ class VipStream:
                 "list": [{"wallet": a, "why": why, **self.info(a)} for a, why in list(ws.items())[:400]],
                 "removed": sorted(({"wallet": a, **v} for a, v in (self.state.get("removed") or {}).items()),
                                   key=lambda x: -x["ts"])[:150],
-                "poll": self.pstat, "ws_max": WS_MAX, "refused": len(self.ws_refused), "provider": PROVIDER,
+                "sol_usd": self.sol_usd, "poll": self.pstat, "ws_max": WS_MAX, "refused": len(self.ws_refused), "provider": PROVIDER,
                 "max_wallets": MAX_WALLETS, "adopt_min_sol": ADOPT_MIN_SOL, "strong_window_s": STRONG_WINDOW_S}
 
     def start(self, stop: threading.Event) -> threading.Thread:
