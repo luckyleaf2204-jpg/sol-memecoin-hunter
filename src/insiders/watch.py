@@ -29,6 +29,7 @@ STABLES = {"EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v", "Es9vMFrzaCERmJfrF4H2
 EVERY_S = int(os.environ.get("INSIDER_WATCH_EVERY_S") or 120)   # a poll starts every 2 minutes
 NEW_COIN_S = 24 * 3600
 FUND_MIN_LAMPORTS = 500_000_000
+CREATE_COST_SOL = 0.03           # rent of the new mint / curve accounts + fees inside a pump.fun create
 CHILD_TTL_S = 72 * 3600
 MAX_NEW_TX = 25                  # per wallet per poll (a busy wallet is summarised, not replayed)
 MAX_ALERTS = 600
@@ -192,7 +193,7 @@ def _trade_sol(tx: dict, wallet: str, mint: str, dt: int) -> float | None:
     pools = {o: v for o, v in pools.items() if v and (v > 0) == (dt > 0)}
     if not pools:
         return None
-    o, pv = max(pools.items(), key=lambda x: abs(x[1]))
+    pv = sum(pools.values())                         # a router may split one swap over several pools: all of them
     same = abs(dt) + sum(abs(d) for q, d in deltas.items() if on_curve(q) and (d > 0) == (dt > 0))
     return abs(pv) * abs(dt) / max(1, same) / 1e9
 
@@ -216,6 +217,7 @@ def analyse(tx: dict, wallet: str) -> list[dict]:
         i = keys.index(wallet)
         native = int(meta["postBalances"][i]) - int(meta["preBalances"][i])
     created = PUMP in keys and "Instruction: Create" in logs and keys and keys[0] == wallet
+    moved = [m for m in set(pre) | set(post) if m not in (WSOL, *STABLES) and post[m] != pre[m]]
     for mint in set(pre) | set(post):
         dt = post[mint] - pre[mint]
         if mint in (WSOL, *STABLES) or not dt:
@@ -223,9 +225,17 @@ def analyse(tx: dict, wallet: str) -> list[dict]:
         pool = _trade_sol(tx, wallet, mint, dt)
         if dt > 0:
             sol = pool if pool is not None else (-native / 1e9 if native < -10_000_000 else 0.0)
+            spent = -native / 1e9
+            if created and pre[mint] == 0 and spent > 0.05:
+                sol = max(sol, spent - CREATE_COST_SOL)      # the dev buy in the create: the curve had no balance before
+            elif pool is not None and len(moved) == 1 and pool <= spent <= pool * 1.1 + 0.02:
+                sol = spent                                  # one coin swapped: what the wallet really paid, fees included
             kind = "CREATE" if created and pre[mint] == 0 else ("BUY" if sol > 0 else "RECEIVE")
         else:
             sol = pool if pool is not None else (native / 1e9 if native > 10_000_000 else 0.0)
+            got = native / 1e9
+            if pool is not None and len(moved) == 1 and pool * 0.9 - 0.02 <= got <= pool:
+                sol = got                                    # what the wallet really received, fees taken
             kind = "SELL" if sol > 0 else "SEND"
         ev.append({"ts": ts, "sig": sig, "wallet": wallet, "kind": kind, "mint": mint, "sol": round(sol, 3),
                    "tokens": abs(dt)})

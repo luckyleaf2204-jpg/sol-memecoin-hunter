@@ -1402,3 +1402,37 @@ def test_history_links_are_seeded_and_active_ones_stay(tmp_path):
     assert TWIN in vs.wallets()
     clock[0] += VP.CHILD_TTL_S
     assert vs.prune_children() == [TWIN] and vs.state["removed"][TWIN]["reason"].startswith("hết hạn")
+
+
+# ---------------------------------------------------------------- coin buys priced at what the wallet paid
+def pool_tx(wallet, sig, mint, tok, sol_wallet, curve_sol, extra_mint=None, create=False):
+    """A swap against a curve account (off-curve PDA) holding the coin and the SOL side."""
+    tx = wtx(wallet, sig, 1_900, mint, tok, sol_wallet, create=create)
+    keys = tx["transaction"]["message"]["accountKeys"]
+    keys.append({"pubkey": PDA})
+    tx["meta"]["preBalances"].append(curve_sol[0])
+    tx["meta"]["postBalances"].append(curve_sol[1])
+    tx["meta"]["preTokenBalances"].append({"owner": PDA, "mint": mint, "uiTokenAmount": {"amount": str(10 ** 12)}})
+    tx["meta"]["postTokenBalances"].append({"owner": PDA, "mint": mint, "uiTokenAmount": {"amount": str(10 ** 12 - (tok[1] - tok[0]))}})
+    if extra_mint:
+        tx["meta"]["preTokenBalances"].append({"owner": wallet, "mint": extra_mint, "uiTokenAmount": {"amount": "0"}})
+        tx["meta"]["postTokenBalances"].append({"owner": wallet, "mint": extra_mint, "uiTokenAmount": {"amount": "7"}})
+    return tx
+
+
+def test_a_one_coin_buy_is_priced_at_what_the_wallet_paid():
+    sol = 10 ** 9
+    # the curve got 0.985 SOL, the wallet paid 1.002 (fees): 1.002 is the buy, not 0.985 (which fell below 1 SOL)
+    tx = pool_tx(WALLET, "b", NEWMINT, (0, 500), (5 * sol, 5 * sol - 1_002_000_000), (10 * sol, 10 * sol + 985_000_000))
+    ev = [e for e in WT.analyse(tx, WALLET) if e["mint"] == NEWMINT][0]
+    assert ev["kind"] == "BUY" and ev["sol"] == 1.002
+    # the wallet also paid someone 5 SOL in the same transaction: the pool side stays
+    tx2 = pool_tx(WALLET, "c", NEWMINT, (0, 500), (10 * sol, 10 * sol - 6_002_000_000), (10 * sol, 10 * sol + 985_000_000))
+    assert [e for e in WT.analyse(tx2, WALLET) if e["mint"] == NEWMINT][0]["sol"] == 0.985
+
+
+def test_the_dev_buy_inside_a_create_counts():
+    sol = 10 ** 9
+    tx = pool_tx(WALLET, "k", NEWMINT, (0, 900), (10 * sol, 10 * sol - 4_053_000_000), (0, 1_000_000), create=True)
+    ev = [e for e in WT.analyse(tx, WALLET) if e["mint"] == NEWMINT][0]
+    assert ev["kind"] == "CREATE" and ev["sol"] == round(4.053 - WT.CREATE_COST_SOL, 3)
