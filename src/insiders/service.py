@@ -63,7 +63,7 @@ class InsiderService:
         from insiders.paper import jupiter_quote
         self.watcher = Watcher(self.result, state_path, notify=telegram_sender(tok, chat) if tok and chat else None,
                                notify_levels=levels,
-                               paper_quote=jupiter_quote if (os.environ.get("INSIDER_PAPER") or "1") != "0" else None,
+                               paper_quote=jupiter_quote if (os.environ.get("INSIDER_PAPER") or "0") == "1" else None,   # off: trace only
                                meta=coin_meta)
         self.watch_stop = threading.Event()
         # INSIDER_MODE=vip (default): only the special wallets (45 holders + successors + the wallets they fund),
@@ -79,7 +79,8 @@ class InsiderService:
             self.watcher.vip.start(self.watch_stop)
             from insiders.pumpinfo import PumpInfo
             self.watcher.pump = PumpInfo()                    # dev / description / profile names for the page
-            if (os.environ.get("INSIDER_SHADOW") or "1") != "0":     # live measurement of every signal (paper)
+            # tracing only by default (2026-10-14): balances, shadow paper and the paper book are off unless asked for
+            if (os.environ.get("INSIDER_SHADOW") or "0") == "1":     # live measurement of every signal (paper)
                 from insiders.shadow import Shadow
                 w = self.watcher
 
@@ -88,8 +89,9 @@ class InsiderService:
                     return bool(x.get("tok_in")) and x.get("tok_out", 0) >= x["tok_in"] / 2
                 w.shadow = Shadow(w.state, sold_half=sold_half, meta=w._meta, lock=w.lock)
                 threading.Thread(target=w.shadow.run_forever, args=(self.watch_stop, w.save), daemon=True).start()
-            self.watcher.portfolio = Portfolio(self.watcher.vip.wallets, Rpc(gap_s=0.25))
-            threading.Thread(target=self.watcher.portfolio.run_forever, args=(self.watch_stop,), daemon=True).start()
+            if (os.environ.get("INSIDER_PORTFOLIO") or "0") == "1":  # balances: many RPC calls, off by default
+                self.watcher.portfolio = Portfolio(self.watcher.vip.wallets, Rpc(gap_s=0.25))
+                threading.Thread(target=self.watcher.portfolio.run_forever, args=(self.watch_stop,), daemon=True).start()
         return True
 
     def start(self, runner=None) -> bool:

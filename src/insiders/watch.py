@@ -33,14 +33,15 @@ CHILD_TTL_S = 72 * 3600
 MAX_NEW_TX = 25                  # per wallet per poll (a busy wallet is summarised, not replayed)
 MAX_ALERTS = 600
 MIN_SOL = float(os.environ.get("INSIDER_MIN_SOL") or 4)   # alerts only for buys / receipts / fundings >= this
-BOARD_MIN_SOL = float(os.environ.get("INSIDER_BOARD_MIN_SOL") or 4)   # a wallet shows on the board from this buy total
+BOARD_MIN_SOL = float(os.environ.get("INSIDER_BOARD_MIN_SOL") or 1)   # a wallet shows on the board from this buy total
 FLIP_S = int(os.environ.get("INSIDER_FLIP_S") or 300)          # half sold within this after the buy = a flip
 HOLD_CONFIRM_S = int(os.environ.get("INSIDER_HOLD_S") or 600)  # STRONG confirmed when still held this long
 FLIPS_TO_MUTE = 2
 COIN_KEEP_S = 48 * 3600          # a coin that never qualified is forgotten after 48 h of silence
 MAX_COINS = 120
 B_SLICES = 15                    # tier B is checked 1/15 per poll: every wallet about every 30 minutes
-BOT_NEW_COINS = 4                # a wallet touching >= 4 different new coins in 24 h is a sniper bot: muted
+BOT_NEW_COINS = 4
+BOT_COINS_24H = int(os.environ.get("INSIDER_BOT_COINS_24H") or 8)   # a listed wallet trading this many coins a day: a bot                # a wallet touching >= 4 different new coins in 24 h is a sniper bot: muted
 
 
 class Rpc:
@@ -562,11 +563,14 @@ class Watcher:
                 "sell_sol": round(sum(r["sell_sol"] for r in wallets), 3),
                 "mcap_est": round(px * sup) if px and sup else None}
 
-    def board_view(self, limit: int = 30) -> list[dict]:
+    def board_view(self, limit: int = 80) -> list[dict]:
         """Coins the special wallets traded (two-wallet coins first, newest activity first); only wallets whose buys
         of the coin reach BOARD_MIN_SOL (dust / micro snipes out)."""
         out = [e for m, c in list(self.state.get("coins", {}).items()) if (e := self._coin_entry(m, c, BOARD_MIN_SOL))]
-        out.sort(key=lambda c: (not c["strong"], -len(c["wallets"]), -(c["last_ts"] or 0)))
+        bots = set(self.bots())
+        for e in out:                                        # coins only snipers touched go to the end, folded
+            e["bot_only"] = all(w["wallet"] in bots for w in e["wallets"])
+        out.sort(key=lambda c: (c["bot_only"], not c["strong"], -c["n_families"], -(c["last_ts"] or 0)))
         return out[:limit]
 
     def coin_view(self, mint: str) -> dict | None:
@@ -622,12 +626,17 @@ class Watcher:
     def sources(self) -> dict:
         """Where each piece of data comes from and whether it is fresh (for the page header)."""
         vip, pf, sh = getattr(self, "vip", None), getattr(self, "portfolio", None), getattr(self, "shadow", None)
-        return {"stream": {"ok": bool(vip and vip.stat.get("connected")), "last": vip.stat.get("last_msg") if vip else None,
-                           "error": vip.stat.get("error") if vip else None},
-                "balances": {"ok": bool(pf and pf.updated), "last": pf.updated if pf else None,
-                             "error": pf.error if pf else None, "progress": pf.progress if pf else None},
-                "prices": {"ok": bool(sh and not sh.stat.get("error")), "last": sh.stat.get("last") if sh else None,
-                           "error": sh.stat.get("error") if sh else None}}
+        out = {"stream": {"ok": bool(vip and vip.stat.get("connected")), "last": vip.stat.get("last_msg") if vip else None,
+                          "error": vip.stat.get("error") if vip else None}}
+        if vip is not None:                                  # the poller covers every wallet not on the socket
+            ps = vip.pstat
+            out["poll"] = {"ok": bool(ps.get("last")), "last": ps.get("last"), "error": None, "round_s": ps.get("round_s"),
+                           "wallets": ps.get("wallets")}
+        if pf is not None:
+            out["balances"] = {"ok": bool(pf.updated), "last": pf.updated, "error": pf.error, "progress": pf.progress}
+        if sh is not None:
+            out["prices"] = {"ok": not sh.stat.get("error"), "last": sh.stat.get("last"), "error": sh.stat.get("error")}
+        return out
 
     def config(self) -> dict:
         """The thresholds in force (read-only on the page; changed only through the server's environment)."""
@@ -636,8 +645,18 @@ class Watcher:
         from insiders import vip as _v
         return {"min_sol": MIN_SOL, "board_min_sol": BOARD_MIN_SOL, "flip_s": FLIP_S, "hold_s": HOLD_CONFIRM_S,
                 "win_hold_s": _p.HOLD_S, "win_min_sol": _p.WIN_MIN_SOL, "win_min_mult": _p.WIN_MIN_MULT,
-                **({"max_wallets": _v.MAX_WALLETS, "adopt_min_sol": _v.ADOPT_MIN_SOL, "child_days": _v.CHILD_TTL_S / 86400,
+                **({"max_wallets": _v.MAX_WALLETS, "ws_max": _v.WS_MAX, "adopt_in_min_sol": _v.ADOPT_IN_MIN_SOL,
+                    "flow_min_sol": _v.FLOW_MIN_SOL, "adopt_min_sol": _v.ADOPT_MIN_SOL, "child_days": _v.CHILD_TTL_S / 86400,
                     "strong_window_s": _v.STRONG_WINDOW_S} if vip else {})}
+
+    def bots(self) -> list[str]:
+        """Listed wallets that traded >= BOT_COINS_24H different coins in the last 24 h (snipers: noise, shown folded)."""
+        cut, n = self.now() - 86400, defaultdict(int)
+        for c in self.state.get("coins", {}).values():
+            for w, x in c["wallets"].items():
+                if (x.get("last_ts") or 0) >= cut:
+                    n[w] += 1
+        return sorted(w for w, k in n.items() if k >= BOT_COINS_24H)
 
     def board_min_sol(self) -> float:
         return BOARD_MIN_SOL
@@ -734,6 +753,7 @@ class Watcher:
                     "paper": {"summary": self.paper.summary(), "rows": self.paper.rows(60)} if self.paper else None,
                     "shadow": self.shadow.view() if getattr(self, "shadow", None) else None,
                     "sources": self.sources(), "config": self.config(), "now": self.now(),
+                    "flows": self.state.get("flows", [])[:400], "bots": self.bots(),
                     "children": len(self.state["children"]), "last_error": self.state["last_error"],
                     "rpc_calls": self.state.get("rpc_calls"), "last_poll_s": self.state.get("last_poll_s"),
                     "alerts": self.state["alerts"][:200]}

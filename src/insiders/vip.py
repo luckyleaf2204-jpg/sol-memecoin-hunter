@@ -30,7 +30,13 @@ SWEEP_S = 600                    # expired children are unsubscribed this often
 SUB_GAP_S = float(os.environ.get("INSIDER_SUB_GAP_S") or 0.3)   # the public RPC refuses bursts of subscriptions (1013)
 LIMITED_BACKOFF_S = 45.0
 ADOPT_MIN_SOL = float(os.environ.get("INSIDER_ADOPT_MIN_SOL") or 0.5)   # a new wallet funded with this joins
-MAX_WALLETS = int(os.environ.get("INSIDER_MAX_WALLETS") or 95)   # the public RPC drops a socket at ~100 subscriptions
+MAX_WALLETS = int(os.environ.get("INSIDER_MAX_WALLETS") or 300)  # followed in all (base list + linked wallets)
+WS_MAX = int(os.environ.get("INSIDER_WS_MAX") or 90)            # live on the socket (the public RPC drops ~100); the rest polled
+POLL_GAP_S = float(os.environ.get("INSIDER_POLL_GAP_S") or 0.35)  # between two polled wallets
+POLL_LIMIT = 20                                                  # signatures read per wallet per round
+FLOW_MIN_SOL = float(os.environ.get("INSIDER_FLOW_MIN_SOL") or 0.5)          # a SOL move worth recording
+ADOPT_IN_MIN_SOL = float(os.environ.get("INSIDER_ADOPT_IN_MIN_SOL") or 1.0)  # a wallet paying a listed one joins too
+MAX_FLOWS = 2000
 
 
 def vip_list(result: dict) -> dict[str, str]:
@@ -41,6 +47,8 @@ def vip_list(result: dict) -> dict[str, str]:
         held = f"held {h['max_hold_min']:g} min" if h.get("max_hold_min") else "held >= 10 min"
         out[h["wallet"]] = (f"{held} · {h.get('profit_sol', 0):+.0f} SOL on {', '.join(h.get('coins', [])[:3])}{src}"
                             + (f" · {h['note']}" if h.get("note") else ""))
+    for x in v.get("external", []):                       # other projects' wallets, given by hand
+        out.setdefault(x["wallet"], f"{x.get('group')} · {x.get('role')}" + (f" · {x['note']}" if x.get("note") else ""))
     for s in v.get("successors", []):
         if s.get("kind") == "person" and KNOWN_LABELS.get(s["wallet"], (None, None))[1] not in ("exchange", "fee", "deposit"):
             out.setdefault(s["wallet"], f"received {s.get('sol', 0):.0f} SOL / {s.get('token_tx', 0)} token tx from "
@@ -67,6 +75,18 @@ def sol_in(tx: dict, wallet: str) -> tuple[float, str | None]:
     return got / 1e9, best[1]
 
 
+def token_counterparty(tx: dict, wallet: str, mint: str, dt: int) -> str | None:
+    """The other owner whose balance of `mint` moved the opposite way in this transaction (a token transfer)."""
+    meta = tx.get("meta") or {}
+    bal: dict[str, int] = {}
+    for rows, sign in ((meta.get("preTokenBalances"), -1), (meta.get("postTokenBalances"), 1)):
+        for b in rows or []:
+            if b.get("mint") == mint and b.get("owner") and b["owner"] != wallet:
+                bal[b["owner"]] = bal.get(b["owner"], 0) + sign * int((b.get("uiTokenAmount") or {}).get("amount") or 0)
+    best = max(((o, -d if dt > 0 else d) for o, d in bal.items()), key=lambda x: x[1], default=(None, 0))
+    return best[0] if best[1] > 0 and on_curve(best[0]) else None
+
+
 class VipStream:
     def __init__(self, watcher, result: dict, url: str = WS_URL, rpc=None, connect=None, now=time.time):
         self.w, self.url, self.now = watcher, url, now
@@ -88,6 +108,9 @@ class VipStream:
         except Exception:
             self.tiers, self.wins = {}, {}
         v = result.get("vip") or {}
+        self.external = {x["wallet"]: x for x in v.get("external", [])}
+        self.ws_refused: set[str] = set()
+        self.pstat = {"rounds": 0, "wallets": 0, "round_s": None, "new": 0, "errors": 0, "last": None}
         self.holders = {h["wallet"] for h in v.get("holders", [])}
         self.succ_from = {s["wallet"]: s.get("from", []) for s in v.get("successors", [])}
 
@@ -110,7 +133,26 @@ class VipStream:
                 return sorted(s["from"])[0]
         return wallet
 
+    def ws_set(self) -> list[str]:
+        """Wallets on the socket: the most recently active first (base list, then linked wallets), at most WS_MAX;
+        every other followed wallet is polled."""
+        seen = self.state.get("last_seen", {})
+        ws = self.wallets()
+        base = sorted((a for a in ws if a in self.base), key=lambda a: -(seen.get(a) or 0))
+        kids = [a for a in ws if a not in self.base]
+        return [a for a in base + kids if a not in self.ws_refused][:WS_MAX]
+
+    def group(self, wallet: str) -> str:
+        if wallet in self.external:
+            return self.external[wallet].get("group") or "KHÁC"
+        if wallet in self.base:
+            return "INSIDERS"
+        kid = self.state.get("children", {}).get(wallet)
+        return f"LIÊN KẾT {self.group(kid['parent'])}" if kid and kid.get("parent") != wallet else "KHÁC"
+
     def role(self, wallet: str) -> str:
+        if wallet in self.external:
+            return "external"
         if wallet in self.holders:
             return "holder"
         if wallet in self.succ_from:
@@ -120,7 +162,9 @@ class VipStream:
     def info(self, wallet: str) -> dict:
         """Display facts of one listed wallet: role, tier, winning coins, family root and direct parent."""
         kid = self.state.get("children", {}).get(wallet) or {}
-        return {"role": self.role(wallet), "tier": self.tier(wallet), "wins": self.wins.get(wallet, 0),
+        ext = self.external.get(wallet) or {}
+        return {"role": self.role(wallet), "group": self.group(wallet), "role_note": ext.get("role"), "dir": kid.get("dir"),
+                "tier": self.tier(wallet), "wins": self.wins.get(wallet, 0),
                 "family": self.family(wallet), "parent": kid.get("parent") or (sorted(self.succ_from.get(wallet) or [None])[0]),
                 "funded_sol": kid.get("sol"), "since": kid.get("since")}
 
@@ -192,9 +236,12 @@ class VipStream:
                     out.append(strong)
         got, frm = sol_in(tx, wallet)
         moved = any(e["kind"] in ("SELL", "SEND", "FUND") for e in evs)   # the SOL is a sale's proceeds: said already
+        self._flows(tx, wallet, evs, got, frm, moved)
         if got >= MIN_SOL and not moved and frm not in self.wallets():
             out.append({"ts": tx.get("blockTime"), "sig": sig, "wallet": wallet, "kind": "SOL_IN", "from": frm,
                         "sol": round(got, 3), "why": why, "level": "vip"})
+        if got >= ADOPT_IN_MIN_SOL and not moved and frm and frm not in self.wallets():
+            self._adopt(frm, wallet, round(got, 3), direction="in")         # whoever pays a listed wallet is followed too
         if out:
             with self.w.lock:
                 self.w.state["alerts"] = (out[::-1] + self.w.state["alerts"])[:600]
@@ -202,6 +249,33 @@ class VipStream:
             self.w.save()
             self.w._send(out)
         return out
+
+    def _flows(self, tx: dict, wallet: str, evs: list, got: float, frm: str | None, moved: bool) -> None:
+        """Money and tokens between a listed wallet and other wallets (who paid it, whom it paid), for the trace."""
+        ts, sig = tx.get("blockTime"), ((tx.get("transaction") or {}).get("signatures") or [None])[0]
+        rows = []
+        for ev in evs:
+            if ev["kind"] == "FUND" and (ev.get("sol") or 0) >= FLOW_MIN_SOL:
+                rows.append({"dir": "out", "other": ev.get("to"), "sol": ev.get("sol"), "mint": None, "tokens": None})
+            elif ev["kind"] in ("SEND", "RECEIVE") and ev.get("mint"):
+                dt = ev.get("tokens") or 0
+                other = token_counterparty(tx, wallet, ev["mint"], dt if ev["kind"] == "RECEIVE" else -dt)
+                if other:                                     # tokens via a pool / route are trades, not transfers
+                    rows.append({"dir": "in" if ev["kind"] == "RECEIVE" else "out", "other": other, "sol": None,
+                                 "mint": ev["mint"], "tokens": dt})
+        if got >= FLOW_MIN_SOL and not moved and frm and on_curve(frm):
+            rows.append({"dir": "in", "other": frm, "sol": round(got, 3), "mint": None, "tokens": None})
+        if not rows:
+            return
+        listed = self.wallets()
+        for r in rows:
+            r.update(ts=ts, sig=sig, wallet=wallet, listed_other=bool(r["other"] and r["other"] in listed),
+                     label=KNOWN_LABELS.get(r["other"] or "", (None, None))[0])
+        with self.w.lock:
+            fl = self.w.state.setdefault("flows", [])
+            known = {(f["sig"], f["wallet"], f["dir"], f.get("mint")) for f in fl[:200]}
+            new = [r for r in rows if (r["sig"], r["wallet"], r["dir"], r.get("mint")) not in known]
+            self.w.state["flows"] = (new[::-1] + fl)[:MAX_FLOWS]
 
     def _together(self, mint: str, wallet: str, a: dict, ts: float | None = None) -> dict | None:
         """>= 2 different special-wallet FAMILIES bought / received the same coin (>= MIN_SOL each) within
@@ -243,7 +317,7 @@ class VipStream:
         if mint not in self.w.state.get("meta", {}):
             self.w._meta(mint)
 
-    def _adopt(self, to: str, parent: str, sol: float) -> None:
+    def _adopt(self, to: str, parent: str, sol: float, direction: str = "out") -> None:
         kind = KNOWN_LABELS.get(to, (None, None))[1]
         if kind in ("exchange", "fee", "deposit") or not on_curve(to) or to in self.base:
             return
@@ -255,9 +329,9 @@ class VipStream:
                 del kids[oldest]
                 if self.ws is not None and self.queue is not None:
                     self.queue.put_nowait(("unsubscribe", oldest))
-            self.state["children"][to] = {"parent": parent, "since": self.now(), "sol": sol}
-            if self.ws is not None and self.queue is not None:
-                self.queue.put_nowait(("subscribe", to))
+            self.state["children"][to] = {"parent": parent, "since": self.now(), "sol": sol, "dir": direction}
+            if self.ws is not None and self.queue is not None and len(self.subs) < WS_MAX:
+                self.queue.put_nowait(("subscribe", to))                  # else the poller picks it up
 
     # ---------------------------------------------------------------- websocket loop
     async def _subscribe(self, ws, addr: str, req_id: int) -> None:
@@ -289,7 +363,7 @@ class VipStream:
             try:
                 async with connect() as ws:
                     self.ws, self.queue, self.subs = ws, asyncio.Queue(), {}
-                    for k, addr in enumerate(self.wallets(), 1):
+                    for k, addr in enumerate(self.ws_set(), 1):
                         pending[k] = addr
                         await self._subscribe(ws, addr, k)
                         await asyncio.sleep(SUB_GAP_S)                       # paced: no "too many subscriptions"
@@ -329,11 +403,11 @@ class VipStream:
                             continue
                         if not isinstance(msg, dict):
                             continue
-                        if "error" in msg:                                   # a refused (un)subscribe: try later
+                        if "error" in msg:                                   # a refused subscribe: poll that wallet
                             addr = pending.pop(msg.get("id"), None)
                             self.stat["sub_errors"] = self.stat.get("sub_errors", 0) + 1
                             if addr:
-                                self.queue.put_nowait(("subscribe", addr))
+                                self.ws_refused.add(addr)
                             continue
                         if msg.get("id") in pending:                         # subscription confirmed
                             addr = pending.pop(msg["id"])
@@ -364,15 +438,64 @@ class VipStream:
             t.cancel()
         self.stat["connected"] = False
 
+    def poll_once(self, rpc=None) -> int:
+        """One round over the followed wallets that are not live on the socket: new signatures since the last round
+        are analysed like pushed ones (a wallet's first round only records where it is). Returns new transactions."""
+        rpc = rpc or self.rpc
+        live = set(self.subs.values())
+        last = self.state.setdefault("poll_last", {})
+        todo = [a for a in self.wallets() if a not in live]
+        t0, new = time.monotonic(), 0
+        for a in todo:
+            try:
+                sigs = rpc("getSignaturesForAddress", [a, {"limit": POLL_LIMIT}]) or []
+            except RuntimeError:
+                self.pstat["errors"] += 1
+                continue
+            if not sigs:
+                continue
+            prev = last.get(a)
+            last[a] = sigs[0]["signature"]
+            if prev is None:
+                continue                                           # first look: remember the position only
+            fresh = []
+            for x in sigs:
+                if x["signature"] == prev:
+                    break
+                if x.get("err") is None:
+                    fresh.append(x["signature"])
+            for sig in reversed(fresh):                            # oldest first
+                if sig not in self.seen:
+                    new += 1
+                    try:
+                        self.handle(a, sig)
+                    except Exception as e:                         # one bad transaction never stops the round
+                        self.stat["error"] = f"poll: {type(e).__name__}"
+        self.pstat.update(rounds=self.pstat["rounds"] + 1, wallets=len(todo), new=self.pstat["new"] + new,
+                          round_s=round(time.monotonic() - t0, 1), last=self.now())
+        return new
+
+    def poll_forever(self, stop: threading.Event) -> None:
+        rpc = Rpc(gap_s=POLL_GAP_S)
+        while not stop.is_set():
+            try:
+                self.poll_once(rpc)
+                self.w.save()
+            except Exception as e:                                 # the loop never dies
+                self.stat["error"] = f"poll: {type(e).__name__}: {str(e)[:60]}"
+            stop.wait(5)
+
     def status(self) -> dict:
         ws = self.wallets()
         return {**self.stat, "wallets": len(ws), "base": len(self.base), "last_seen": self.state.get("last_seen", {}),
                 "kids": {a: v["parent"] for a, v in self.state["children"].items()},
                 "children": len(self.state["children"]), "events": self.state.get("events", 0), "min_sol": MIN_SOL,
-                "list": [{"wallet": a, "why": why, **self.info(a)} for a, why in list(ws.items())[:120]],
+                "list": [{"wallet": a, "why": why, **self.info(a)} for a, why in list(ws.items())[:400]],
+                "poll": self.pstat, "ws_max": WS_MAX, "refused": len(self.ws_refused),
                 "max_wallets": MAX_WALLETS, "adopt_min_sol": ADOPT_MIN_SOL, "strong_window_s": STRONG_WINDOW_S}
 
     def start(self, stop: threading.Event) -> threading.Thread:
         th = threading.Thread(target=lambda: asyncio.run(self.run(stop)), daemon=True)
         th.start()
+        threading.Thread(target=self.poll_forever, args=(stop,), daemon=True).start()
         return th

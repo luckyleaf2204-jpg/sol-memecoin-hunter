@@ -913,7 +913,8 @@ def test_websocket_survives_bad_messages_and_slow_transactions(tmp_path):
     assert done == ["fast", "slow"]                        # the slow fetch did not hold the fast one back
     assert vs.stat["bad_json"] == 1 and vs.stat["sub_errors"] == 1 and vs.stat["reconnects"] == 0
     subs = [m["params"][0]["mentions"][0] for m in sent if m["method"] == "logsSubscribe"]
-    assert subs.count(BOSS) == 2                           # the refused subscription was asked again
+    assert subs.count(BOSS) == 1 and BOSS in vs.ws_refused      # refused: polled from then on, never re-asked in a loop
+    assert BOSS not in vs.ws_set()
 
 
 def test_rpc_waits_retry_after_and_does_not_retry_final_errors():
@@ -1107,7 +1108,7 @@ def test_board_counts_independent_families_and_wallet_view(tmp_path):
     assert w.wallet_view("8bAVCeuQd9akudbotz4Ug3nv7e2KHVL2NTPtDaZLjvee") is None   # not followed: nothing returned
     st = w.status()
     assert st["config"]["min_sol"] == WT.MIN_SOL and st["config"]["max_wallets"] == VP.MAX_WALLETS
-    assert set(st["sources"]) == {"stream", "balances", "prices"} and st["sources"]["stream"]["ok"] is False
+    assert set(st["sources"]) == {"stream", "poll"} and st["sources"]["stream"]["ok"] is False   # no balances / prices: off
     roles = {x["wallet"]: x["role"] for x in st["vip"]["list"]}
     assert roles[WALLET] == "holder" and roles[BOSS] == "successor"
 
@@ -1232,3 +1233,84 @@ def test_vip_mode_records_the_channels_old_coins_too(tmp_path):
     vs.seen.clear()
     vs.handle(WALLET, "a")
     assert w.coin_view(MINT)["wallets"][0]["buy_sol"] == 1.0
+
+
+# ---------------------------------------------------------------- tracing: poller, flows, payers, external groups
+OUTSIDER = "7GSMwnWB5YWmCwQax4bzfeDMvSZEogp6TAehxrJddDyr"
+
+
+def test_external_groups_join_the_list_with_their_role(tmp_path):
+    w, r = vip_watcher(tmp_path)
+    r["vip"]["external"] = [{"wallet": OUTSIDER, "group": "VALENTINO", "role": "ví gom (root)", "note": None}]
+    vs = VP.VipStream(w, r, rpc=lambda m, p: None, now=lambda: 2_000.0)
+    assert vs.base[OUTSIDER].startswith("VALENTINO · ví gom")
+    i = vs.info(OUTSIDER)
+    assert i["role"] == "external" and i["group"] == "VALENTINO" and i["role_note"] == "ví gom (root)"
+    assert vs.info(WALLET)["group"] == "INSIDERS"
+
+
+def test_ws_set_takes_the_most_recently_active_and_skips_refused(tmp_path, monkeypatch):
+    w, r = vip_watcher(tmp_path)
+    vs = VP.VipStream(w, r, rpc=lambda m, p: None, now=lambda: 2_000.0)
+    vs.state["last_seen"] = {BOSS: 1_900, WALLET: 1_000}
+    assert vs.ws_set()[:2] == [BOSS, WALLET]
+    monkeypatch.setattr(VP, "WS_MAX", 1)
+    assert vs.ws_set() == [BOSS]
+    vs.ws_refused.add(BOSS)
+    assert vs.ws_set() == [WALLET]
+
+
+def test_poller_baselines_then_handles_new_signatures_oldest_first(tmp_path):
+    w, r = vip_watcher(tmp_path)
+    handled = []
+    pages = {WALLET: [[{"signature": "s1", "err": None}]],
+             BOSS: [[{"signature": "b1", "err": None}]]}
+
+    def rpc(m, p):
+        return pages[p[0]][-1]
+    vs = VP.VipStream(w, r, rpc=rpc, now=lambda: 2_000.0)
+    vs.handle = lambda a, s: handled.append((a, s))
+    vs.subs = {7: BOSS}                                               # BOSS is live on the socket: not polled
+    assert vs.poll_once() == 0 and handled == []                      # first round: positions only
+    pages[WALLET].append([{"signature": "s4", "err": None}, {"signature": "s3", "err": {"x": 1}},
+                          {"signature": "s2", "err": None}, {"signature": "s1", "err": None}])
+    assert vs.poll_once() == 2 and handled == [(WALLET, "s2"), (WALLET, "s4")]   # failed tx skipped, oldest first
+    assert vs.pstat["rounds"] == 2 and vs.pstat["wallets"] == 1
+
+
+def test_flows_record_who_paid_whom_and_payers_are_followed(tmp_path):
+    sol = 10 ** 9
+    w, r = vip_watcher(tmp_path)
+
+    def recv(sig, src, lam):
+        tx = wtx(WALLET, sig, 1_900, None, (0, 0), (sol, sol + lam))
+        tx["transaction"]["message"]["instructions"].append(
+            {"parsed": {"type": "transfer", "info": {"source": src, "destination": WALLET, "lamports": lam}}})
+        return tx
+    send_tok = wtx(WALLET, "t", 1_950, NEWMINT, (9, 4), (sol, sol))
+    send_tok["meta"]["preTokenBalances"].append({"owner": TWIN, "mint": NEWMINT, "uiTokenAmount": {"amount": "0"}})
+    send_tok["meta"]["postTokenBalances"].append({"owner": TWIN, "mint": NEWMINT, "uiTokenAmount": {"amount": "5"}})
+    txs = {"in": recv("in", OUTSIDER, 2 * sol), "dust": recv("dust", CEX, sol // 10),
+           "fund": wtx(WALLET, "fund", 1_920, transfer=(TWIN, sol)), "t": send_tok}
+    vs = VP.VipStream(w, r, rpc=lambda m, p: txs[p[0]], now=lambda: 2_000.0)
+    vs.retry_sleep = False
+    for s_ in ("in", "dust", "fund", "t"):
+        vs.handle(WALLET, s_)
+    fl = {(f["sig"], f["dir"]): f for f in w.state["flows"]}
+    assert fl[("in", "in")]["other"] == OUTSIDER and fl[("in", "in")]["sol"] == 2.0
+    assert ("dust", "in") not in fl                                   # 0.1 SOL: below FLOW_MIN_SOL
+    assert fl[("fund", "out")]["other"] == TWIN and fl[("fund", "out")]["sol"] == 1.0
+    assert fl[("t", "out")]["other"] == TWIN and fl[("t", "out")]["mint"] == NEWMINT and fl[("t", "out")]["tokens"] == 5
+    kids = vs.state["children"]
+    assert kids[OUTSIDER]["dir"] == "in" and kids[OUTSIDER]["parent"] == WALLET     # the payer is followed now
+    assert kids[TWIN]["dir"] == "out"
+    st = w.status()
+    assert st["flows"][0]["sig"] in {"t", "fund", "in"} and isinstance(st["bots"], list)
+
+
+def test_a_wallet_trading_many_coins_a_day_is_a_bot(tmp_path, monkeypatch):
+    w, r = vip_watcher(tmp_path)
+    monkeypatch.setattr(WT, "BOT_COINS_24H", 3)
+    w.state["coins"] = {f"M{i}": {"wallets": {BOSS: {"last_ts": 1_990}, **({WALLET: {"last_ts": 1_990}} if i == 0 else {})}}
+                        for i in range(3)}
+    assert w.bots() == [BOSS]
