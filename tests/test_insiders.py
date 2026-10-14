@@ -1348,3 +1348,15 @@ def test_bots_do_not_take_the_live_slots_and_quiet_wallets_are_polled_less(tmp_p
     asked.clear()
     vs.poll_once(rpc=lambda m, p: asked.append(p[0]) or [])
     assert set(asked) == {WALLET, BOSS}
+
+
+def test_wallets_funded_by_a_bot_are_not_followed(tmp_path, monkeypatch):
+    w, r = vip_watcher(tmp_path)
+    vs = VP.VipStream(w, r, rpc=lambda m, p: None, now=lambda: 2_000.0)
+    monkeypatch.setattr(w, "bots", lambda: [WALLET])
+    vs._adopt(TWIN, WALLET, 2.0)
+    assert TWIN not in vs.state["children"]
+    vs._adopt(TWIN, BOSS, 2.0)
+    assert vs.state["children"][TWIN]["parent"] == BOSS
+    vs.state["children"][CEX] = {"parent": WALLET, "since": 2_000.0, "sol": 1.0}
+    assert CEX in vs.prune_children() and CEX not in vs.state["children"]   # a bot's earlier child is dropped

@@ -202,7 +202,11 @@ class VipStream:
     def prune_children(self) -> list[str]:
         """Drop children older than CHILD_TTL_S from the state; returns them (to unsubscribe)."""
         now = self.now()
-        old = [a for a, v in self.state["children"].items() if now - v["since"] >= CHILD_TTL_S]
+        try:
+            bots = set(self.w.bots())                          # a sniper's fresh wallets go too
+        except Exception:
+            bots = set()
+        old = [a for a, v in self.state["children"].items() if now - v["since"] >= CHILD_TTL_S or v.get("parent") in bots]
         for a in old:
             del self.state["children"][a]
         return old
@@ -348,6 +352,11 @@ class VipStream:
         kind = KNOWN_LABELS.get(to, (None, None))[1]
         if kind in ("exchange", "fee", "deposit") or not on_curve(to) or to in self.base:
             return
+        try:
+            if parent in self.w.bots():                       # a sniper's fresh wallets are not insiders: not followed
+                return
+        except Exception:
+            pass
         if to not in self.state["children"]:
             self.prune_children()
             kids = self.state["children"]
@@ -513,6 +522,9 @@ class VipStream:
 
     def poll_forever(self, stop: threading.Event) -> None:
         rpc = _rpc(POLL_GAP_S)
+        t0 = time.monotonic()                                  # first round once the socket holds its wallets
+        while not stop.is_set() and not self.subs and time.monotonic() - t0 < 120:
+            stop.wait(2)
         while not stop.is_set():
             try:
                 self.poll_once(rpc)
