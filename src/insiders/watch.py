@@ -594,6 +594,9 @@ class Watcher:
             dev = (info or {}).get("creator")
             vip = getattr(self, "vip", None)
             e["dev"] = {"wallet": dev, "user": pump.user(dev), "listed": bool(vip and dev in vip.wallets())} if dev else None
+            ds = getattr(self, "devstats", None)
+            if e["dev"] and ds is not None:
+                e["dev"]["stats"] = ds.stats(dev)              # balance, coins made, rugs, first hour (background)
             for w in e["wallets"]:
                 w["pump_user"] = pump.user(w["wallet"])
         return e

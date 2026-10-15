@@ -1447,3 +1447,53 @@ def test_sol_price_for_dollars_is_kept_fresh_and_survives_failures(tmp_path):
     clock[0] += VP.SOL_USD_EVERY_S + 1
     assert vs.refresh_sol_usd(get=lambda: (_ for _ in ()).throw(OSError("down"))) == 151.25   # kept on failure
     assert vs.status()["sol_usd"] == 151.25
+
+
+# ---------------------------------------------------------------- dev track record (balance, coins, rugs, first hour)
+from insiders import devstats as DV  # noqa: E402
+
+
+def test_created_coins_reads_pump_creates_paid_by_the_dev():
+    page = [{"type": "CREATE", "feePayer": BOSS, "timestamp": 300,
+             "instructions": [{"programId": DV.PUMP_PROGRAM, "accounts": [NEWMINT, "x"]}]},
+            {"type": "CREATE", "feePayer": BOSS, "timestamp": 200, "instructions": [],
+             "tokenTransfers": [{"mint": MINT}]},
+            {"type": "CREATE", "feePayer": WALLET, "timestamp": 100,                          # someone else paid
+             "instructions": [{"programId": DV.PUMP_PROGRAM, "accounts": ["Other1111"]}]},
+            {"type": "SWAP", "feePayer": BOSS, "timestamp": 50}]
+    assert DV.created_coins(page, BOSS) == [(NEWMINT, 300.0), (MINT, 200.0)]
+
+
+def test_first_hour_compares_the_launch_with_one_hour_later():
+    c = [[1_000, 4e-6, 5e-6, 4e-6, 4.5e-6, 1], [2_000, 4.5e-6, 2e-5, 4e-6, 1.2e-5, 1], [5_000, 9e-6, 9e-6, 9e-6, 9e-6, 1]]
+    fh = DV.first_hour(c, 990)
+    assert fh["start"] == 4e-6 and fh["h1"] == 1.2e-5 and fh["mult_1h"] == 3.0 and fh["peak_mult_1h"] == 5.0
+    assert DV.first_hour(c[2:], 990) is None                                          # no candle near the launch
+
+
+def test_dev_stats_count_rugs_and_first_hour_winners():
+    page = [{"type": "CREATE", "feePayer": BOSS, "timestamp": 1_000 + i,
+             "instructions": [{"programId": DV.PUMP_PROGRAM, "accounts": [f"Mint{i}pump"]}]} for i in range(3)]
+    mc = {"Mint0pump": (3_000, 9_000), "Mint1pump": (60_000, 80_000), "Mint2pump": (20_000, 400_000)}
+
+    class P:
+        def coin(self, m):
+            return {"mcap_usd": mc[m][0], "ath_mcap_usd": mc[m][1], "complete": m == "Mint1pump", "symbol": m[:5]}
+
+    def get(url):
+        if "helius" in url:
+            return page
+        if "/pools?" in url:
+            return {"data": [{"attributes": {"address": "P" + url.split("/tokens/")[1][:5]},
+                              "relationships": {"dex": {"data": {"id": "pump-fun"}}}}]}
+        k = url.split("/pools/P")[1][:5]
+        mult = {"Mint0": 0.5, "Mint1": 3.0, "Mint2": 2.0}[k]
+        t = 1_000
+        return {"data": {"attributes": {"ohlcv_list": [[t, 1e-6, 1e-6, 1e-6, 1e-6, 1], [t + 3000, 1e-6, 1e-6, 1e-6, mult * 1e-6, 1]]}}}
+    ds = DV.DevStats("k", lambda m, p: {"value": 3 * 10 ** 9}, P(), get=get, now=lambda: 100_000.0, sleep=lambda s: None)
+    assert ds.stats(BOSS) == {"pending": True} and ds.todo == [BOSS]
+    s = ds.compute(BOSS)
+    assert s["balance_sol"] == 3.0 and s["created"] == 3 and s["judged"] == 3
+    assert s["dead"] == 2                                     # under $5K, and 5 % of its peak
+    assert s["graduated"] == 1 and s["hour_n"] == 3 and s["up2x_1h"] == 2 and s["median_1h"] == 2.0
+    assert set(ds.coins) == {"Mint0pump", "Mint1pump", "Mint2pump"}                  # first hours over: kept
