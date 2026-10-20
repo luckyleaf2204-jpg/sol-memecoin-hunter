@@ -1514,3 +1514,65 @@ def test_focus_follows_only_the_chosen_groups(tmp_path):
     vs.state["children"][SINK] = {"parent": CEX, "since": 2_000.0, "sol": 1.0}       # a DEPTH grandchild
     assert vs.prune_children() == [TWIN] and SINK in vs.wallets()
     assert vs.state["removed"][TWIN]["reason"] == "ngoài nhóm đang tập trung"
+
+
+# ---------------------------------------------------------------- from kol-radar #1 (parent loop -> 502)
+def _parent_cycle(kids, start):
+    seen = set()
+    w = start
+    while w in kids and w not in seen:
+        seen.add(w)
+        nxt = (kids.get(w) or {}).get("parent")
+        if nxt in seen:
+            return True
+        w = nxt
+    return False
+
+
+def test_readopt_under_own_child_does_not_loop(tmp_path):
+    """7 days after A is funded, A is pruned but A's child still names A. A later payment from that child used to
+    point A back at the child: group() then recursed forever and both insiders endpoints dropped the socket."""
+    w, r = vip_watcher(tmp_path)
+    now = VP.CHILD_TTL_S + 10_000.0
+    vs = VP.VipStream(w, r, rpc=lambda m, p: [], now=lambda: now)
+    w.vip = vs
+    vs._adopt(OUTSIDER, WALLET, 1.0)
+    vs._adopt(TWIN, OUTSIDER, 1.0)
+    assert vs.group(OUTSIDER) == "LIÊN KẾT INSIDERS" and vs.group(TWIN) == "LIÊN KẾT LIÊN KẾT INSIDERS"
+    vs.state["children"][OUTSIDER]["since"] = now - VP.CHILD_TTL_S - 5          # quiet for 7 days; its child is not
+    assert OUTSIDER in vs.prune_children() and vs.state["children"][TWIN]["parent"] == OUTSIDER
+    vs._adopt(OUTSIDER, TWIN, 2.0)                                 # the payment that used to close the loop
+    assert OUTSIDER not in vs.state["children"]
+    assert not _parent_cycle(vs.state["children"], TWIN)
+    body = json.dumps(w.status())
+    assert json.loads(body)["vip"]["wallets"] >= 2 and vs.group(TWIN) == "LIÊN KẾT KHÁC"
+
+
+def test_loaded_parent_cycle_is_broken_and_status_serialises(tmp_path):
+    w, r = vip_watcher(tmp_path)
+    w.state["vip"] = {"children": {OUTSIDER: {"parent": TWIN, "since": 2_000.0, "sol": 1.0, "dir": "out"},
+                                   TWIN: {"parent": OUTSIDER, "since": 1_999.0, "sol": 1.0, "dir": "out"}},
+                      "events": 0, "removed": {}}
+    vs = VP.VipStream(w, r, rpc=lambda m, p: [], now=lambda: 2_000.0)
+    w.vip = vs
+    assert not _parent_cycle(vs.state["children"], OUTSIDER) and not _parent_cycle(vs.state["children"], TWIN)
+    # a loop that appears while the process is up (saved state already loaded) must still not blow the stack
+    vs.state["children"][OUTSIDER]["parent"] = TWIN
+    vs.state["children"][TWIN]["parent"] = OUTSIDER
+    assert vs.group(OUTSIDER) == "KHÁC"
+    json.loads(json.dumps(w.status()))
+
+
+def test_board_orders_a_null_block_time_without_crashing(tmp_path):
+    w, r = vip_watcher(tmp_path)
+    vs = VP.VipStream(w, r, rpc=lambda m, p: [], now=lambda: 2_000.0)
+    w.vip = vs
+    w.state["coins"] = {NEWMINT: {"first_ts": None, "last_ts": 100, "qualified": True, "symbol": "X", "wallets": {
+        WALLET: {"why": "a", "buy_sol": 2.0, "sell_sol": 0.0, "tok_in": 1, "tok_out": 0,
+                 "trades": [[None, "BUY", 2.0, 5, "s1"]]},
+        BOSS: {"why": "b", "buy_sol": 3.0, "sell_sol": 0.0, "tok_in": 1, "tok_out": 0,
+               "trades": [[100, "BUY", 3.0, 5, "s2"]]}}}}
+    board = w.board_view()
+    assert [x["wallet"] for x in board[0]["wallets"]] == [BOSS, WALLET]   # a real blockTime before a null one
+    assert board[0]["first_ts"] == 100
+    json.loads(json.dumps(w.status()))

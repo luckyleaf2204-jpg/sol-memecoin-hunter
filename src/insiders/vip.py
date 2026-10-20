@@ -158,6 +158,7 @@ class VipStream:
         if self.focus:
             self.prune_children()                             # linked wallets of groups out of the focus leave now
         self.succ_from = {s["wallet"]: s.get("from", []) for s in v.get("successors", [])}
+        self._break_parent_cycles()
 
     def wallets(self) -> dict[str, str]:
         """The base list always first and always whole; live children (newest kept) fill the rest up to MAX_WALLETS."""
@@ -184,7 +185,7 @@ class VipStream:
         kids = self.state.get("children", {})
         while wallet in kids and wallet not in seen:
             seen.add(wallet)
-            wallet = kids[wallet]["parent"]
+            wallet = (kids.get(wallet) or {}).get("parent")
         if wallet in self.external:
             return "group:" + (self.external[wallet].get("group") or "?")
         for s in (self.result.get("vip") or {}).get("successors", []):
@@ -206,12 +207,21 @@ class VipStream:
         return [a for a in base + kids if a not in self.ws_refused][:WS_MAX]
 
     def group(self, wallet: str) -> str:
-        if wallet in self.external:
-            return self.external[wallet].get("group") or "KHÁC"
-        if wallet in self.base:
-            return "INSIDERS"
-        kid = self.state.get("children", {}).get(wallet)
-        return f"LIÊN KẾT {self.group(kid['parent'])}" if kid and kid.get("parent") != wallet else "KHÁC"
+        """Display group. Parent links are walked, not recursed: a pruned wallet that is later funded by its own
+        child points back at it, and the recursive form blew the stack on every /api/insiders status (Render 502)."""
+        seen, prefix = set(), ""
+        while wallet not in seen:
+            seen.add(wallet)
+            if wallet in self.external:
+                return prefix + (self.external[wallet].get("group") or "KHÁC")
+            if wallet in self.base:
+                return prefix + "INSIDERS"
+            parent = (self.state.get("children", {}).get(wallet) or {}).get("parent")
+            if not parent or parent == wallet:
+                return prefix + "KHÁC"
+            prefix += "LIÊN KẾT "
+            wallet = parent
+        return "KHÁC"
 
     def role(self, wallet: str) -> str:
         if wallet in self.external:
@@ -241,6 +251,32 @@ class VipStream:
         if len(rm) > MAX_REMOVED:
             for k in sorted(rm, key=lambda k: rm[k]["ts"])[:len(rm) - MAX_REMOVED]:
                 del rm[k]
+
+    def _break_parent_cycles(self) -> None:
+        """Drop the parent edge that closes a loop (a wallet re-adopted under its own descendant)."""
+        kids = self.state.get("children") or {}
+        for start in list(kids):
+            seen = []
+            w = start
+            while w in kids and w not in seen:
+                seen.append(w)
+                nxt = (kids.get(w) or {}).get("parent")
+                if nxt in seen:
+                    kids[w]["parent"] = None
+                    break
+                w = nxt
+
+    def _link_would_cycle(self, parent: str, child: str) -> bool:
+        """True when `child` already sits on `parent`'s ancestor chain (the new link would loop)."""
+        seen = set()
+        w = parent
+        kids = self.state.get("children") or {}
+        while w and w not in seen:
+            if w == child:
+                return True
+            seen.add(w)
+            w = (kids.get(w) or {}).get("parent") if w in kids else None
+        return False
 
     def prune_children(self) -> list[str]:
         """Drop linked wallets that went quiet for 7 days, that turned out to be bots, or whose source is a bot;
@@ -433,6 +469,8 @@ class VipStream:
             self._remove(to, "bot (≥ %d giao dịch trong 48 giờ)" % BOT_TX_48H, parent)
             return
         if to not in self.state["children"]:
+            if self._link_would_cycle(parent, to):
+                return                                            # its own child still points up at it: don't close the loop
             self.prune_children()
             kids = self.state["children"]
             if len(self.base) + len(kids) >= MAX_WALLETS and kids:     # full: the oldest child makes room
@@ -633,11 +671,11 @@ class VipStream:
     def status(self) -> dict:
         ws = self.wallets()
         return {**self.stat, "wallets": len(ws), "base": len(self.base), "last_seen": self.state.get("last_seen", {}),
-                "kids": {a: v["parent"] for a, v in self.state["children"].items()},
+                "kids": {a: v.get("parent") for a, v in self.state["children"].items()},
                 "children": len(self.state["children"]), "events": self.state.get("events", 0), "min_sol": MIN_SOL,
                 "list": [{"wallet": a, "why": why, **self.info(a)} for a, why in list(ws.items())[:400]],
                 "removed": sorted(({"wallet": a, **v} for a, v in (self.state.get("removed") or {}).items()),
-                                  key=lambda x: -x["ts"])[:150],
+                                  key=lambda x: -(x.get("ts") or 0))[:150],
                 "sol_usd": self.sol_usd, "focus": self.focus or ["ALL"], "poll": self.pstat, "ws_max": WS_MAX, "refused": len(self.ws_refused), "provider": PROVIDER,
                 "max_wallets": MAX_WALLETS, "adopt_min_sol": ADOPT_MIN_SOL, "strong_window_s": STRONG_WINDOW_S}
 

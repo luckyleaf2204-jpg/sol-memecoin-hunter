@@ -560,14 +560,15 @@ class Watcher:
                             "sell_sol": x["sell_sol"], "tok_in": x["tok_in"], "tok_out": x["tok_out"],
                             "held_ui": held, "family": vip.family(w) if vip else w,
                             "tier": vip.tier(w) if vip else None, "role": vip.role(w) if vip else None})
-        wallets.sort(key=lambda r: r["trades"][0][0])
+        ts_of = lambda r: r["trades"][0][0] if isinstance(r["trades"][0][0], (int, float)) else None
+        wallets.sort(key=lambda r: (ts_of(r) is None, ts_of(r) or 0))   # a null blockTime must not crash the sort
         info = self.state.get("meta", {}).get(m, {})
         px = (pf.prices.usd.get(m) if pf is not None and getattr(pf, "prices", None) else None)
         sup = (supply.get(m) or {}).get("ui")
         return {"mint": m, "symbol": c.get("symbol") or info.get("symbol"), "name": c.get("name") or info.get("name"),
                 "chart": c.get("chart"), "created_ts": info.get("created_ts"), "supply": supply.get(m),
                 "strong": m in strong or c.get("strong"), "last_ts": c.get("last_ts"),
-                "first_ts": min(r["trades"][0][0] for r in wallets), "wallets": wallets,
+                "first_ts": min((t for t in (ts_of(r) for r in wallets) if t is not None), default=None), "wallets": wallets,
                 "n_families": len({r["family"] for r in wallets}),
                 "buy_sol": round(sum(r["buy_sol"] for r in wallets), 3),
                 "sell_sol": round(sum(r["sell_sol"] for r in wallets), 3),
