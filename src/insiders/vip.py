@@ -63,9 +63,18 @@ BOT_TX_48H = int(os.environ.get("INSIDER_BOT_TX_48H") or 100)   # a wallet with 
 MAX_REMOVED = 600
 
 
-def vip_list(result: dict) -> dict[str, str]:
+def vip_list(result: dict, focus: list[str] | None = None) -> dict[str, str]:
+    """The followed wallets. focus: only these groups (e.g. ["DEPTH"]); "INSIDERS" = the channel's holders and their
+    successors; None or "ALL" = everything."""
     v = result.get("vip") or {}
     out = {}
+    if focus and "ALL" not in focus:
+        for x in v.get("external", []):
+            if (x.get("group") or "").upper() in focus:
+                out.setdefault(x["wallet"], f"{x.get('group')} · {x.get('role')}" + (f" · {x['note']}" if x.get("note") else ""))
+        if "INSIDERS" not in focus:
+            return out
+        v = {**v, "external": []}
     for h in v.get("holders", []):
         src = " · last-20 scan" if h.get("source") == "last20" else ""
         held = f"held {h['max_hold_min']:g} min" if h.get("max_hold_min") else "held >= 10 min"
@@ -112,12 +121,13 @@ def token_counterparty(tx: dict, wallet: str, mint: str, dt: int) -> str | None:
 
 
 class VipStream:
-    def __init__(self, watcher, result: dict, url: str = WS_URL, rpc=None, connect=None, now=time.time):
+    def __init__(self, watcher, result: dict, url: str = WS_URL, rpc=None, connect=None, now=time.time, focus=None):
         self.w, self.url, self.now = watcher, url, now
         self.rpc = rpc or _rpc(0.05 if _HELIUS else 0.2)
         self.connect = connect
         self.state = watcher.state.setdefault("vip", {"children": {}, "events": 0})
-        self.base = vip_list(result)
+        self.focus = [g.strip().upper() for g in (focus or "").split(",") if g.strip()] if isinstance(focus, str) else focus
+        self.base = vip_list(result, self.focus)
         self.seen = deque(maxlen=5000)
         self.stat = {"connected": False, "subscribed": 0, "last_msg": None, "reconnects": 0, "error": None,
                      "pushed": 0, "handled": 0, "missed": 0}
@@ -140,9 +150,13 @@ class VipStream:
         removed = self.state.setdefault("removed", {})
         for x in v.get("linked", []):                         # parents / children found in the history (one-off scan)
             a = x["wallet"]
+            if x.get("parent") not in self.base:
+                continue                                      # linked to a wallet outside the focus
             if a not in self.base and a not in self.state["children"] and a not in removed:
                 self.state["children"][a] = {"parent": x["parent"], "since": now(), "sol": x.get("sol"),
                                              "dir": x.get("dir", "out"), "seed": True}
+        if self.focus:
+            self.prune_children()                             # linked wallets of groups out of the focus leave now
         self.succ_from = {s["wallet"]: s.get("from", []) for s in v.get("successors", [])}
 
     def wallets(self) -> dict[str, str]:
@@ -236,8 +250,18 @@ class VipStream:
         except Exception:
             bots = set()
         gone = []
+        kids = self.state["children"]
+
+        def root(a):                                          # follow the parents up to a base wallet (or not)
+            seen = set()
+            while a in kids and a not in seen:
+                seen.add(a)
+                a = kids[a].get("parent")
+            return a
         for a, v in list(self.state["children"].items()):
-            if a in bots:
+            if self.focus and "ALL" not in self.focus and root(a) not in self.base:
+                self._remove(a, "ngoài nhóm đang tập trung", v.get("parent"))
+            elif a in bots:
                 self._remove(a, "bot (giao dịch rất nhiều coin mỗi ngày)", v.get("parent"))
             elif v.get("parent") in bots:
                 self._remove(a, "ví nguồn là bot", v.get("parent"))
@@ -614,7 +638,7 @@ class VipStream:
                 "list": [{"wallet": a, "why": why, **self.info(a)} for a, why in list(ws.items())[:400]],
                 "removed": sorted(({"wallet": a, **v} for a, v in (self.state.get("removed") or {}).items()),
                                   key=lambda x: -x["ts"])[:150],
-                "sol_usd": self.sol_usd, "poll": self.pstat, "ws_max": WS_MAX, "refused": len(self.ws_refused), "provider": PROVIDER,
+                "sol_usd": self.sol_usd, "focus": self.focus or ["ALL"], "poll": self.pstat, "ws_max": WS_MAX, "refused": len(self.ws_refused), "provider": PROVIDER,
                 "max_wallets": MAX_WALLETS, "adopt_min_sol": ADOPT_MIN_SOL, "strong_window_s": STRONG_WINDOW_S}
 
     def start(self, stop: threading.Event) -> threading.Thread:

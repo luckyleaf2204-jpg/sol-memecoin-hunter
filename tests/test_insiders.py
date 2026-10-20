@@ -1497,3 +1497,20 @@ def test_dev_stats_count_rugs_and_first_hour_winners():
     assert s["dead"] == 2                                     # under $5K, and 5 % of its peak
     assert s["graduated"] == 1 and s["hour_n"] == 3 and s["up2x_1h"] == 2 and s["median_1h"] == 2.0
     assert set(ds.coins) == {"Mint0pump", "Mint1pump", "Mint2pump"}                  # first hours over: kept
+
+
+def test_focus_follows_only_the_chosen_groups(tmp_path):
+    w, r = vip_watcher(tmp_path)
+    r["vip"]["external"] = [{"wallet": OUTSIDER, "group": "DEPTH", "role": "root"},
+                            {"wallet": TWIN, "group": "VALENTINO", "role": "bundle"}]
+    r["vip"]["linked"] = [{"wallet": CEX, "parent": OUTSIDER, "dir": "in", "sol": 2.0},
+                          {"wallet": SINK, "parent": WALLET, "dir": "out", "sol": 2.0}]
+    vs = VP.VipStream(w, r, rpc=lambda m, p: None, now=lambda: 2_000.0, focus="DEPTH")
+    assert set(vs.base) == {OUTSIDER} and set(vs.wallets()) == {OUTSIDER, CEX}       # SINK's parent is outside
+    assert set(VP.vip_list(r, ["DEPTH", "INSIDERS"])) == {OUTSIDER, WALLET, BOSS}
+    assert set(VP.vip_list(r, ["ALL"])) == set(VP.vip_list(r)) == {WALLET, BOSS, OUTSIDER, TWIN}
+    assert vs.status()["focus"] == ["DEPTH"]
+    vs.state["children"][TWIN] = {"parent": WALLET, "since": 2_000.0, "sol": 1.0}     # an INSIDERS wallet's child
+    vs.state["children"][SINK] = {"parent": CEX, "since": 2_000.0, "sol": 1.0}       # a DEPTH grandchild
+    assert vs.prune_children() == [TWIN] and SINK in vs.wallets()
+    assert vs.state["removed"][TWIN]["reason"] == "ngoài nhóm đang tập trung"
