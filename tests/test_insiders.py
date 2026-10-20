@@ -1278,6 +1278,29 @@ def test_poller_baselines_then_handles_new_signatures_oldest_first(tmp_path):
     assert vs.pstat["rounds"] == 2 and vs.pstat["wallets"] == 1
 
 
+def test_continuous_scan_polls_every_wallet_and_switches_itself_off(tmp_path):
+    w, r = vip_watcher(tmp_path)
+    t = [2_000.0]
+    asked = []
+
+    def rpc(m, p):
+        asked.append(p[0])
+        return [{"signature": "x" + p[0][:4], "err": None}]
+    vs = VP.VipStream(w, r, rpc=rpc, now=lambda: t[0])
+    vs.subs = {7: BOSS}
+    assert not vs.turbo() and vs.set_turbo(True) == 2_000.0 + VP.TURBO_MAX_S and vs.turbo()
+    vs.poll_once()
+    assert BOSS in asked and set(asked) == set(vs.wallets())         # live wallets too
+    assert vs.status()["turbo"] is True
+    t[0] += VP.TURBO_MAX_S + 1
+    assert not vs.turbo()                                             # off by itself
+    vs.set_turbo(True)
+    vs.set_turbo(False)
+    asked.clear()
+    vs.poll_once()
+    assert BOSS not in asked
+
+
 def test_flows_record_who_paid_whom_and_payers_are_followed(tmp_path):
     sol = 10 ** 9
     w, r = vip_watcher(tmp_path)

@@ -54,6 +54,10 @@ POLL_GAP_S = float(os.environ.get("INSIDER_POLL_GAP_S") or (0.05 if _HELIUS else
 POLL_WORKERS = 3                                                 # transactions found by the poller are read in parallel
 QUIET_S = 6 * 3600                                               # a wallet silent this long is polled every QUIET_EVERY rounds
 QUIET_EVERY = 4
+# "Quét liên tục" (switched from the page): every followed wallet, live on the socket or not, is polled back to back as
+# well (a second net for pushes the socket misses), faster, and quiet wallets too. Turns itself off after TURBO_MAX_S.
+TURBO_MAX_S = float(os.environ.get("INSIDER_TURBO_MAX_S") or 3 * 3600)
+TURBO_GAP_S = 0.025 if _HELIUS else 0.3
 POLL_LIMIT = 20                                                  # signatures read per wallet per round
 FLOW_MIN_SOL = float(os.environ.get("INSIDER_FLOW_MIN_SOL") or 0.5)          # a SOL move worth recording
 ADOPT_IN_MIN_SOL = float(os.environ.get("INSIDER_ADOPT_IN_MIN_SOL") or 1.0)  # a wallet paying a listed one joins too
@@ -595,8 +599,11 @@ class VipStream:
         last = self.state.setdefault("poll_last", {})
         seen_at = self.state.get("last_seen", {})
         n = self.pstat["rounds"]
-        todo = [a for a in self.wallets() if a not in live
-                and (n % QUIET_EVERY == 0 or self.now() - (seen_at.get(a) or 0) < QUIET_S or a not in last)]
+        if self.turbo():
+            todo = list(self.wallets())
+        else:
+            todo = [a for a in self.wallets() if a not in live
+                    and (n % QUIET_EVERY == 0 or self.now() - (seen_at.get(a) or 0) < QUIET_S or a not in last)]
         t0, new = time.monotonic(), 0
         found: list[tuple[str, str]] = []
         for a in todo:
@@ -653,8 +660,16 @@ class VipStream:
             pass
         return self.sol_usd
 
+    def turbo(self) -> bool:
+        return self.now() < (self.state.get("turbo_until") or 0)
+
+    def set_turbo(self, on: bool) -> float:
+        """Switch continuous scanning on (for TURBO_MAX_S at most) or off; kept in the saved state across restarts."""
+        self.state["turbo_until"] = self.now() + TURBO_MAX_S if on else 0
+        return self.state["turbo_until"]
+
     def poll_forever(self, stop: threading.Event) -> None:
-        rpc = _rpc(POLL_GAP_S)
+        rpc, fast = _rpc(POLL_GAP_S), _rpc(TURBO_GAP_S)
         self.refresh_sol_usd()
         t0 = time.monotonic()                                  # first round once the socket holds its wallets
         while not stop.is_set() and not self.subs and time.monotonic() - t0 < 120:
@@ -662,11 +677,11 @@ class VipStream:
         while not stop.is_set():
             try:
                 self.refresh_sol_usd()
-                self.poll_once(rpc)
+                self.poll_once(fast if self.turbo() else rpc)
                 self.w.save()
             except Exception as e:                                 # the loop never dies
                 self.stat["error"] = redact(f"poll: {type(e).__name__}: {str(e)[:60]}")
-            stop.wait(2)
+            stop.wait(0.2 if self.turbo() else 2)
 
     def status(self) -> dict:
         ws = self.wallets()
@@ -676,7 +691,8 @@ class VipStream:
                 "list": [{"wallet": a, "why": why, **self.info(a)} for a, why in list(ws.items())[:400]],
                 "removed": sorted(({"wallet": a, **v} for a, v in (self.state.get("removed") or {}).items()),
                                   key=lambda x: -(x.get("ts") or 0))[:150],
-                "sol_usd": self.sol_usd, "focus": self.focus or ["ALL"], "poll": self.pstat, "ws_max": WS_MAX, "refused": len(self.ws_refused), "provider": PROVIDER,
+                "sol_usd": self.sol_usd, "focus": self.focus or ["ALL"], "poll": self.pstat, "turbo_until": self.state.get("turbo_until") or 0,
+                "turbo": self.turbo(), "turbo_max_s": TURBO_MAX_S, "ws_max": WS_MAX, "refused": len(self.ws_refused), "provider": PROVIDER,
                 "max_wallets": MAX_WALLETS, "adopt_min_sol": ADOPT_MIN_SOL, "strong_window_s": STRONG_WINDOW_S}
 
     def start(self, stop: threading.Event) -> threading.Thread:
