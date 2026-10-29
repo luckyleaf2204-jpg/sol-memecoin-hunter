@@ -37,7 +37,9 @@ def redact(text: str) -> str:
 
 def _rpc(gap_s: float):
     return Rpc(url=RPC_URL, gap_s=gap_s) if RPC_URL else Rpc(gap_s=gap_s)
-CHILD_TTL_S = 7 * 86400
+# A group's wallets lie still for weeks between two launches, and waking up is the signal: links confirmed in the
+# history never expire (only a bot leaves), wallets adopted live stay CHILD_TTL_S after they last moved.
+CHILD_TTL_S = int(float(os.environ.get("INSIDER_CHILD_TTL_DAYS") or 30) * 86400)
 STRONG_WINDOW_S = int(os.environ.get("INSIDER_STRONG_WINDOW_S") or 86400)   # >= 2 families inside this (blockTime)
 STRONG_REPEAT_S = 86400          # a coin can be STRONG again a day later
 WORKERS = 3
@@ -152,10 +154,17 @@ class VipStream:
         self.pstat = {"rounds": 0, "wallets": 0, "round_s": None, "new": 0, "errors": 0, "last": None}
         self.holders = {h["wallet"] for h in v.get("holders", [])}
         removed = self.state.setdefault("removed", {})
+        for a, r in list(removed.items()):                    # dropped only for going quiet (the old 7-day rule): back
+            if str(r.get("reason") or "").startswith("hết hạn") and a not in self.base and a not in self.state["children"]:
+                del removed[a]
+                if r.get("parent"):
+                    self.state["children"][a] = {"parent": r["parent"], "since": now(), "sol": None, "dir": "out"}
         for x in v.get("linked", []):                         # parents / children found in the history (one-off scan)
             a = x["wallet"]
             if x.get("parent") not in self.base:
                 continue                                      # linked to a wallet outside the focus
+            if a in self.state["children"] and not self.state["children"][a].get("seed"):
+                self.state["children"][a].update(parent=x["parent"], sol=x.get("sol"), dir=x.get("dir", "out"), seed=True)
             if a not in self.base and a not in self.state["children"] and a not in removed:
                 self.state["children"][a] = {"parent": x["parent"], "since": now(), "sol": x.get("sol"),
                                              "dir": x.get("dir", "out"), "seed": True}
@@ -171,7 +180,9 @@ class VipStream:
         return {**self.base, **{a: self._why_kid(v) for a, v in kids}}
 
     def _alive(self, a: str, v: dict) -> bool:
-        """A linked wallet stays followed while it is active: 7 days after it was added or last seen moving."""
+        """A history link stays for good; a wallet adopted live stays CHILD_TTL_S after it was added or last moved."""
+        if v.get("seed"):
+            return True
         seen = (self.state.get("last_seen") or {}).get(a) or 0
         return self.now() - max(v.get("since") or 0, seen) < CHILD_TTL_S
 
@@ -306,7 +317,7 @@ class VipStream:
             elif v.get("parent") in bots:
                 self._remove(a, "ví nguồn là bot", v.get("parent"))
             elif not self._alive(a, v):
-                self._remove(a, "hết hạn (7 ngày không hoạt động)", v.get("parent"))
+                self._remove(a, f"hết hạn ({CHILD_TTL_S // 86400} ngày không hoạt động)", v.get("parent"))
             else:
                 continue
             del self.state["children"][a]

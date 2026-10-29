@@ -1419,12 +1419,27 @@ def test_history_links_are_seeded_and_active_ones_stay(tmp_path):
     clock = [1_000.0]
     vs = VP.VipStream(w, r, rpc=lambda m, p: [], now=lambda: clock[0])
     assert TWIN in vs.wallets() and vs.info(TWIN)["dir"] == "in"
+    clock[0] += 10 * VP.CHILD_TTL_S                                   # a history link never expires
+    assert vs.prune_children() == [] and TWIN in vs.wallets()
+    vs._adopt(CEX, WALLET, 2.0)                                       # a live adoption stays while it moves
     clock[0] += VP.CHILD_TTL_S - 10
-    vs.state["last_seen"] = {TWIN: clock[0]}                           # it moved: kept another week
+    vs.state["last_seen"] = {CEX: clock[0]}
     clock[0] += 20
-    assert TWIN in vs.wallets()
+    assert CEX in vs.wallets()
     clock[0] += VP.CHILD_TTL_S
-    assert vs.prune_children() == [TWIN] and vs.state["removed"][TWIN]["reason"].startswith("hết hạn")
+    assert vs.prune_children() == [CEX] and vs.state["removed"][CEX]["reason"].startswith("hết hạn")
+
+
+def test_wallets_dropped_for_going_quiet_come_back(tmp_path):
+    w, r = vip_watcher(tmp_path)
+    r["vip"]["linked"] = [{"wallet": TWIN, "parent": WALLET, "dir": "in", "sol": 5.0}]
+    w.state["vip"] = {"children": {}, "events": 0, "removed": {
+        TWIN: {"reason": "hết hạn (7 ngày không hoạt động)", "ts": 1.0, "parent": WALLET},
+        CEX: {"reason": "hết hạn (7 ngày không hoạt động)", "ts": 1.0, "parent": WALLET},
+        SINK: {"reason": "bot (giao dịch rất nhiều coin mỗi ngày)", "ts": 1.0, "parent": WALLET}}}
+    vs = VP.VipStream(w, r, rpc=lambda m, p: [], now=lambda: 2_000.0)
+    assert TWIN in vs.wallets() and vs.state["children"][TWIN]["seed"] and vs.info(TWIN)["dir"] == "in"
+    assert CEX in vs.wallets() and SINK not in vs.wallets() and set(vs.state["removed"]) == {SINK}
 
 
 # ---------------------------------------------------------------- coin buys priced at what the wallet paid
