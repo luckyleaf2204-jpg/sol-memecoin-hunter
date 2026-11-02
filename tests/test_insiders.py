@@ -930,6 +930,11 @@ def test_rpc_waits_retry_after_and_does_not_retry_final_errors():
         return a
     rpc._open = op
     assert rpc("getSlot", []) == 7 and max(slept) >= 3
+    assert rpc.gap_s == 0.1                                           # rate limited: slower from now on
+    rpc._open = lambda req: b'{"result": 1}'
+    for _ in range(WT.Rpc.RECOVER_EVERY * 12):
+        rpc("getSlot", [])
+    assert rpc.gap_s < 0.01                                          # quiet again: back toward the plan's pace
     calls = []
     rpc._open = lambda req: calls.append(1) or b'{"error": {"code": -32602, "message": "bad params"}}'
     with pytest.raises(RuntimeError):

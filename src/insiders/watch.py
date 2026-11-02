@@ -49,11 +49,14 @@ class Rpc:
     def __init__(self, url: str = PUBLIC_RPC, gap_s: float = 0.25, sleep=time.sleep):
         self.url, self.gap_s, self.sleep, self.calls, self.errors = url, gap_s, sleep, 0, 0
         self.throttled = 0                                   # 429 / 5xx answers (shown on /healthz)
+        self.base_gap, self._ok = gap_s, 0                   # a 429 widens gap_s (a smaller plan), success narrows it back
         self._last = 0.0
         self._lock = threading.Lock()
 
     RETRY_CODES = (-32005, -32429, 429)                      # node busy / rate limited: worth another try
     max_wait_s = 30.0
+    MAX_GAP_S = 1.0
+    RECOVER_EVERY = 200                                      # successful calls before the gap narrows a step
 
     def _pace(self) -> None:
         with self._lock:                                     # every try starts >= gap_s after the previous one
@@ -77,6 +80,8 @@ class Rpc:
                 why = f"HTTP {e.code}"
                 if e.code in (429, 502, 503, 504):
                     self.throttled += 1
+                    if e.code == 429:
+                        self.gap_s, self._ok = min(max(self.gap_s * 2, 0.1), self.MAX_GAP_S), 0
                     try:
                         wait = float((e.headers or {}).get("Retry-After") or 0)
                     except (TypeError, ValueError):
@@ -90,6 +95,9 @@ class Rpc:
                 self.sleep(2 * 2 ** k + random.random())
                 continue
             self.calls += 1
+            self._ok += 1
+            if self.gap_s > self.base_gap and self._ok >= self.RECOVER_EVERY:
+                self.gap_s, self._ok = max(self.base_gap, self.gap_s * 0.8), 0
             err = res.get("error")
             if err:
                 code = err.get("code") if isinstance(err, dict) else None
