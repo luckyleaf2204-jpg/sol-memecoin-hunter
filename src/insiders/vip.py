@@ -50,7 +50,7 @@ SUB_GAP_S = float(os.environ.get("INSIDER_SUB_GAP_S") or (0.02 if _HELIUS else 0
 SUB_BATCH = 25                   # subscriptions sent between two reads: replies (and pongs) are read while subscribing
 LIMITED_BACKOFF_S = 45.0
 ADOPT_MIN_SOL = float(os.environ.get("INSIDER_ADOPT_MIN_SOL") or 0.5)   # a new wallet funded with this joins
-MAX_WALLETS = int(os.environ.get("INSIDER_MAX_WALLETS") or (600 if _HELIUS else 300))  # base list + linked wallets
+MAX_WALLETS = int(os.environ.get("INSIDER_MAX_WALLETS") or (1000 if _HELIUS else 300))
 WS_MAX = int(os.environ.get("INSIDER_WS_MAX") or (1000 if _HELIUS else 90))   # live on the socket; the rest polled
 POLL_GAP_S = float(os.environ.get("INSIDER_POLL_GAP_S") or (0.05 if _HELIUS else 0.3))  # between two RPC calls
 POLL_WORKERS = 3                                                 # transactions found by the poller are read in parallel
@@ -159,8 +159,8 @@ class VipStream:
                 del removed[a]
                 if r.get("parent"):
                     self.state["children"][a] = {"parent": r["parent"], "since": now(), "sol": None, "dir": "out"}
-        if not self.state.get("cascade_restored2"):           # one-off: wallets lost to the cascade fixed in prune_children
-            self.state["cascade_restored2"] = True
+        if not self.state.get("cascade_restored3"):           # one-off: wallets lost to the cascade fixed in prune_children
+            self.state["cascade_restored3"] = True
             to_seed = sum(1 for x in v.get("linked", []) if x.get("parent") in self.base and x["wallet"] not in self.state["children"])
             room = MAX_WALLETS - len(self.base) - len(self.state["children"]) - to_seed
             lost = sorted((a for a, r in removed.items() if r.get("parent") and a not in self.base
@@ -726,7 +726,7 @@ class VipStream:
         return {**self.stat, "wallets": len(ws), "base": len(self.base), "last_seen": self.state.get("last_seen", {}),
                 "kids": {a: v.get("parent") for a, v in self.state["children"].items()},
                 "children": len(self.state["children"]), "events": self.state.get("events", 0), "min_sol": MIN_SOL,
-                "list": [{"wallet": a, "why": why, **self.info(a)} for a, why in list(ws.items())[:400]],
+                "list": [{"wallet": a, "why": why, **self.info(a)} for a, why in list(ws.items())[:MAX_WALLETS]],
                 "removed": sorted(({"wallet": a, **v} for a, v in (self.state.get("removed") or {}).items()),
                                   key=lambda x: -(x.get("ts") or 0))[:150],
                 "sol_usd": self.sol_usd, "focus": self.focus or ["ALL"], "poll": self.pstat, "turbo_until": self.state.get("turbo_until") or 0,
