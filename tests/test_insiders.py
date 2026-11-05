@@ -1387,7 +1387,10 @@ def test_wallets_funded_by_a_bot_are_not_followed(tmp_path, monkeypatch):
     vs._adopt(TWIN, BOSS, 2.0)
     assert vs.state["children"][TWIN]["parent"] == BOSS
     vs.state["children"][CEX] = {"parent": WALLET, "since": 2_000.0, "sol": 1.0}
-    assert CEX in vs.prune_children() and CEX not in vs.state["children"]   # a bot's earlier child is dropped
+    assert vs.prune_children() == []                                  # a listed wallet flagged for a day keeps its links
+    vs.state["children"][SINK] = {"parent": TWIN, "since": 2_000.0, "sol": 1.0}
+    monkeypatch.setattr(w, "bots", lambda: [TWIN])
+    assert set(vs.prune_children()) == {TWIN, SINK}                   # an adopted bot and its fresh wallets leave
 
 
 # ---------------------------------------------------------------- parents / children: found, followed, bots removed
@@ -1445,6 +1448,53 @@ def test_wallets_dropped_for_going_quiet_come_back(tmp_path):
     vs = VP.VipStream(w, r, rpc=lambda m, p: [], now=lambda: 2_000.0)
     assert TWIN in vs.wallets() and vs.state["children"][TWIN]["seed"] and vs.info(TWIN)["dir"] == "in"
     assert CEX in vs.wallets() and SINK not in vs.wallets() and set(vs.state["removed"]) == {SINK}
+
+
+def test_a_wallet_leaving_never_takes_its_descendants_along(tmp_path, monkeypatch):
+    w, r = vip_watcher(tmp_path)
+    r["vip"]["external"] = [{"wallet": OUTSIDER, "group": "DEPTH", "role": "root"}]
+    vs = VP.VipStream(w, r, rpc=lambda m, p: [], now=lambda: 2_000.0, focus="DEPTH")
+    kids = vs.state["children"]
+    kids[TWIN] = {"parent": OUTSIDER, "since": 2_000.0, "sol": 1.0}
+    kids[CEX] = {"parent": TWIN, "since": 2_000.0, "sol": 1.0}
+    kids[SINK] = {"parent": CEX, "since": 2_000.0, "sol": 1.0}
+    monkeypatch.setattr(w, "bots", lambda: [TWIN])
+    assert set(vs.prune_children()) == {TWIN, CEX}                    # the bot and its direct child
+    assert kids[SINK]["parent"] == OUTSIDER and vs.group(SINK).endswith("DEPTH")
+    monkeypatch.setattr(w, "bots", lambda: [])
+    kids[TWIN] = {"parent": "gone-wallet", "since": 2_000.0, "sol": 1.0}
+    assert vs.prune_children() == [] and TWIN in vs.wallets()         # a lost chain is not "another group"
+
+
+def test_the_cap_keeps_history_links_and_drops_the_longest_quiet_adoption(tmp_path, monkeypatch):
+    w, r = vip_watcher(tmp_path)
+    r["vip"]["linked"] = [{"wallet": TWIN, "parent": WALLET, "dir": "in", "sol": 5.0}]
+    clock = [1_000.0]
+    vs = VP.VipStream(w, r, rpc=lambda m, p: [], now=lambda: clock[0])
+    monkeypatch.setattr(VP, "MAX_WALLETS", len(vs.base) + 3)
+    vs._adopt(CEX, WALLET, 2.0)
+    clock[0] += 10
+    quiet = "GuBsW6Gfj4GsJt1fXngR81B4fnDD8WQ3gw37o8qJrjUj"
+    vs._adopt(quiet, WALLET, 2.0)
+    vs.state["last_seen"] = {CEX: clock[0] + 5}                        # the older one moved since
+    clock[0] += 10
+    vs._adopt(OUTSIDER, WALLET, 2.0)
+    assert set(vs.state["children"]) == {TWIN, CEX, OUTSIDER} and vs.state["removed"][quiet]["reason"] == "hết chỗ"
+
+
+def test_wallets_lost_to_the_cascade_come_back_once(tmp_path):
+    w, r = vip_watcher(tmp_path)
+    w.state["vip"] = {"children": {}, "events": 0, "removed": {
+        TWIN: {"reason": "ngoài nhóm đang tập trung", "ts": 1.0, "parent": WALLET},
+        CEX: {"reason": "ví nguồn là bot", "ts": 2.0, "parent": WALLET},
+        SINK: {"reason": "bot (giao dịch rất nhiều coin mỗi ngày)", "ts": 3.0, "parent": WALLET}}}
+    vs = VP.VipStream(w, r, rpc=lambda m, p: [], now=lambda: 2_000.0)
+    assert {TWIN, CEX} <= set(vs.wallets()) and SINK not in vs.wallets()
+    assert "None" not in vs.wallets()[TWIN]
+    vs._remove(TWIN, "ngoài nhóm đang tập trung", WALLET)
+    del vs.state["children"][TWIN]
+    vs2 = VP.VipStream(w, r, rpc=lambda m, p: [], now=lambda: 2_000.0)
+    assert TWIN not in vs2.wallets()                                  # one-off
 
 
 # ---------------------------------------------------------------- coin buys priced at what the wallet paid
@@ -1583,12 +1633,11 @@ def test_readopt_under_own_child_does_not_loop(tmp_path):
     vs._adopt(TWIN, OUTSIDER, 1.0)
     assert vs.group(OUTSIDER) == "LIÊN KẾT INSIDERS" and vs.group(TWIN) == "LIÊN KẾT LIÊN KẾT INSIDERS"
     vs.state["children"][OUTSIDER]["since"] = now - VP.CHILD_TTL_S - 5          # quiet for 7 days; its child is not
-    assert OUTSIDER in vs.prune_children() and vs.state["children"][TWIN]["parent"] == OUTSIDER
+    assert OUTSIDER in vs.prune_children() and vs.state["children"][TWIN]["parent"] == WALLET   # re-hung on the grandparent
     vs._adopt(OUTSIDER, TWIN, 2.0)                                 # the payment that used to close the loop
-    assert OUTSIDER not in vs.state["children"]
-    assert not _parent_cycle(vs.state["children"], TWIN)
+    assert vs.state["children"][OUTSIDER]["parent"] == TWIN and not _parent_cycle(vs.state["children"], TWIN)
     body = json.dumps(w.status())
-    assert json.loads(body)["vip"]["wallets"] >= 2 and vs.group(TWIN) == "LIÊN KẾT KHÁC"
+    assert json.loads(body)["vip"]["wallets"] >= 2 and vs.group(TWIN) == "LIÊN KẾT INSIDERS"
 
 
 def test_loaded_parent_cycle_is_broken_and_status_serialises(tmp_path):

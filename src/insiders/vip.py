@@ -159,6 +159,16 @@ class VipStream:
                 del removed[a]
                 if r.get("parent"):
                     self.state["children"][a] = {"parent": r["parent"], "since": now(), "sol": None, "dir": "out"}
+        if not self.state.get("cascade_restored"):            # one-off: wallets lost to the cascade fixed in prune_children
+            self.state["cascade_restored"] = True
+            room = MAX_WALLETS - len(self.base) - len(self.state["children"]) - len(v.get("linked", []))
+            lost = sorted((a for a, r in removed.items() if r.get("parent") and a not in self.base
+                           and a not in self.state["children"]
+                           and r.get("reason") in ("ngoài nhóm đang tập trung", "ví nguồn là bot")),
+                          key=lambda a: -(removed[a].get("ts") or 0))
+            for a in lost[:max(0, room)]:
+                r = removed.pop(a)
+                self.state["children"][a] = {"parent": r["parent"], "since": now(), "sol": None, "dir": "out"}
         for x in v.get("linked", []):                         # parents / children found in the history (one-off scan)
             a = x["wallet"]
             if x.get("parent") not in self.base:
@@ -176,7 +186,7 @@ class VipStream:
     def wallets(self) -> dict[str, str]:
         """The base list always first and always whole; live children (newest kept) fill the rest up to MAX_WALLETS."""
         kids = sorted(((a, v) for a, v in self.state["children"].items() if self._alive(a, v)),
-                      key=lambda x: -x[1]["since"])[:max(0, MAX_WALLETS - len(self.base))]
+                      key=lambda x: (not x[1].get("seed"), -x[1]["since"]))[:max(0, MAX_WALLETS - len(self.base))]
         return {**self.base, **{a: self._why_kid(v) for a, v in kids}}
 
     def _alive(self, a: str, v: dict) -> bool:
@@ -190,8 +200,8 @@ class VipStream:
     def _why_kid(v: dict) -> str:
         p = (v.get("parent") or "")[:6]
         if v.get("dir") == "in":
-            return f"ví cha của {p}… (gửi {v.get('sol')} SOL cho ví đó)"
-        return f"ví con của {p}… (nhận {v.get('sol')} SOL từ ví đó)"
+            return f"ví cha của {p}…" + (f" (gửi {v.get('sol')} SOL cho ví đó)" if v.get("sol") else "")
+        return f"ví con của {p}…" + (f" (nhận {v.get('sol')} SOL từ ví đó)" if v.get("sol") else "")
 
     def family(self, wallet: str) -> str:
         """One vote per person: a child counts as its root parent, a successor as the holder that funded it, and every
@@ -302,6 +312,7 @@ class VipStream:
             bots = set()
         gone = []
         kids = self.state["children"]
+        others = set(vip_list(self.result)) - set(self.base)  # the wallets of the groups out of focus
 
         def root(a):                                          # follow the parents up to a base wallet (or not)
             seen = set()
@@ -310,11 +321,11 @@ class VipStream:
                 a = kids[a].get("parent")
             return a
         for a, v in list(self.state["children"].items()):
-            if self.focus and "ALL" not in self.focus and root(a) not in self.base:
+            if self.focus and "ALL" not in self.focus and root(a) in others:
                 self._remove(a, "ngoài nhóm đang tập trung", v.get("parent"))
             elif a in bots:
                 self._remove(a, "bot (giao dịch rất nhiều coin mỗi ngày)", v.get("parent"))
-            elif v.get("parent") in bots:
+            elif v.get("parent") in bots and v.get("parent") not in self.base:
                 self._remove(a, "ví nguồn là bot", v.get("parent"))
             elif not self._alive(a, v):
                 self._remove(a, f"hết hạn ({CHILD_TTL_S // 86400} ngày không hoạt động)", v.get("parent"))
@@ -322,7 +333,16 @@ class VipStream:
                 continue
             del self.state["children"][a]
             gone.append(a)
+        self._reparent({a: (self.state["removed"][a] or {}).get("parent") for a in gone})
         return gone
+
+    def _reparent(self, left: dict) -> None:
+        """Children of wallets that left hang on the nearest parent still there: the chain to the group stays whole."""
+        for v in self.state["children"].values():
+            seen = set()
+            while v.get("parent") in left and v["parent"] not in seen:
+                seen.add(v["parent"])
+                v["parent"] = left[v["parent"]]
 
     def looks_like_bot(self, a: str) -> bool:
         """Quick check before following a wallet: BOT_TX_48H transactions inside 48 h is a bot / a service."""
@@ -488,8 +508,14 @@ class VipStream:
                 return                                            # its own child still points up at it: don't close the loop
             self.prune_children()
             kids = self.state["children"]
-            if len(self.base) + len(kids) >= MAX_WALLETS and kids:     # full: the oldest child makes room
-                oldest = min(kids, key=lambda a: kids[a]["since"])
+            if len(self.base) + len(kids) >= MAX_WALLETS:              # full: the longest-quiet live adoption makes room
+                seen_at = self.state.get("last_seen") or {}
+                live = [a for a in kids if not kids[a].get("seed")]
+                if not live:
+                    return                                             # only history links left: they all stay
+                oldest = min(live, key=lambda a: max(kids[a]["since"], seen_at.get(a) or 0))
+                self._remove(oldest, "hết chỗ", kids[oldest].get("parent"))
+                self._reparent({oldest: kids[oldest].get("parent")})
                 del kids[oldest]
                 if self.ws is not None and self.queue is not None:
                     self.queue.put_nowait(("unsubscribe", oldest))
