@@ -159,9 +159,10 @@ class VipStream:
                 del removed[a]
                 if r.get("parent"):
                     self.state["children"][a] = {"parent": r["parent"], "since": now(), "sol": None, "dir": "out"}
-        if not self.state.get("cascade_restored"):            # one-off: wallets lost to the cascade fixed in prune_children
-            self.state["cascade_restored"] = True
-            room = MAX_WALLETS - len(self.base) - len(self.state["children"]) - len(v.get("linked", []))
+        if not self.state.get("cascade_restored2"):           # one-off: wallets lost to the cascade fixed in prune_children
+            self.state["cascade_restored2"] = True
+            to_seed = sum(1 for x in v.get("linked", []) if x.get("parent") in self.base and x["wallet"] not in self.state["children"])
+            room = MAX_WALLETS - len(self.base) - len(self.state["children"]) - to_seed
             lost = sorted((a for a, r in removed.items() if r.get("parent") and a not in self.base
                            and a not in self.state["children"]
                            and r.get("reason") in ("ngoài nhóm đang tập trung", "ví nguồn là bot")),
