@@ -76,7 +76,7 @@ class InsiderService:
             from insiders.vip import VipStream
             from insiders.watch import Rpc
             # INSIDER_FOCUS: groups followed (default DEPTH: DEPTH + SNACKS, one team); ALL = every list
-            self.watcher.vip = VipStream(self.watcher, self.result, focus=os.environ.get("INSIDER_FOCUS") or "DEPTH")
+            self.watcher.vip = VipStream(self.watcher, self.result, focus=os.environ.get("INSIDER_FOCUS") or "DEPTH,STANK")
             self.watcher.vip.start(self.watch_stop)
             from insiders.pumpinfo import PumpInfo
             self.watcher.pump = PumpInfo()                    # dev / description / profile names for the page

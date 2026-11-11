@@ -73,6 +73,8 @@ KNOWN_LABELS = {
     "41zCUJsKk6cMB94DDtm99qWmyMZfp4GkAhhuz4xTwePu": ("Circle Treasury (USDC issuer)", "exchange"),
     "DzSPAYNuhb2RuL2ZtjnzuCQCMLv8AEdwRZTjJrPZSzxD": ("OKX deposit address (one account)", "deposit"),
     "2ZjXddMWUgSh9MMz4p7F8zZcy38t6wCHuf5CMQ5xSoPT": ("exchange / storage (expert, 2026-10-14)", "exchange"),
+    "GpMZbSM2GgvTKHJirzeGfMFoaZ8UR2X7F4v8vHTvxFbL": ("protocol authority (STANK list, excluded)", "fee"),
+    "HLnpSz9h2S4hiLQ43rnSD9XkcUThA7B8hQMKmDaiTLcC": ("protocol authority (STANK list, excluded)", "fee"),
     "FcmmrXhydNm6i1j3ZeGsqNHnxtw7xD4ANJFMVP78EfWV": ("exchange / storage (expert, 2026-10-14)", "exchange"),
     "AYQKLBGNnLxFX8H8j6cMybCvLhxyEaVAKJ3LyJ51CQ8m": ("exchange / storage (expert, 2026-10-14)", "exchange"),
     "5gZ91xtPoCmeQK3BFz9oAUj1ERMurZvuRHzqVbAQM2hZ": ("OKX deposit address (one account)", "deposit"),
