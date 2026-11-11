@@ -613,6 +613,7 @@ class VipStream:
                                     await ws.send(json.dumps({"jsonrpc": "2.0", "id": nxt, "method": "logsUnsubscribe",
                                                               "params": [sid]}))
                                     self.subs.pop(sid, None)
+                                    self.stat["subscribed"] = len(self.subs)
                             else:
                                 pending[nxt] = addr
                                 await self._subscribe(ws, addr, nxt)
