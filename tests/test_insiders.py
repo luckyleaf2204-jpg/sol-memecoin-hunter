@@ -864,7 +864,7 @@ def test_children_are_capped_newest_first_and_expire(tmp_path, monkeypatch):
     w, r = vip_watcher(tmp_path)
     clock = [1_000.0]
     vs = VP.VipStream(w, r, rpc=lambda m, p: None, now=lambda: clock[0])
-    monkeypatch.setattr(VP, "MAX_WALLETS", len(vs.base) + 1)
+    monkeypatch.setattr(VP, "MAX_CHILDREN", 1)
     vs._adopt(TWIN, WALLET, 2.0)
     clock[0] += 10
     vs._adopt(CEX, WALLET, 2.0)                           # full: the older child makes room
@@ -1471,7 +1471,7 @@ def test_the_cap_keeps_history_links_and_drops_the_longest_quiet_adoption(tmp_pa
     r["vip"]["linked"] = [{"wallet": TWIN, "parent": WALLET, "dir": "in", "sol": 5.0}]
     clock = [1_000.0]
     vs = VP.VipStream(w, r, rpc=lambda m, p: [], now=lambda: clock[0])
-    monkeypatch.setattr(VP, "MAX_WALLETS", len(vs.base) + 3)
+    monkeypatch.setattr(VP, "MAX_CHILDREN", 3)
     vs._adopt(CEX, WALLET, 2.0)
     clock[0] += 10
     quiet = "GuBsW6Gfj4GsJt1fXngR81B4fnDD8WQ3gw37o8qJrjUj"
@@ -1495,6 +1495,32 @@ def test_wallets_lost_to_the_cascade_come_back_once(tmp_path):
     del vs.state["children"][TWIN]
     vs2 = VP.VipStream(w, r, rpc=lambda m, p: [], now=lambda: 2_000.0)
     assert TWIN not in vs2.wallets()                                  # one-off
+
+
+def test_only_parents_and_children_holding_5_sol_are_followed(tmp_path):
+    w, r = vip_watcher(tmp_path)
+    r["vip"]["linked"] = [{"wallet": TWIN, "parent": WALLET, "dir": "in", "sol": 5.0}]
+    clock = [2_000.0]
+    bal = {TWIN: 2.0, CEX: 40.0}
+    calls = []
+
+    def rpc(m, p):
+        if m == "getMultipleAccounts":
+            calls.append(len(p[0]))
+            return {"value": [{"lamports": int(bal.get(a, 0) * 1e9)} if a in bal else None for a in p[0]]}
+        return []
+    vs = VP.VipStream(w, r, rpc=rpc, now=lambda: clock[0])
+    vs._adopt(CEX, WALLET, 1.0)
+    assert {TWIN, CEX} <= set(vs.wallets())                          # not read yet: followed
+    assert vs.refresh_balances(force=True) == 1 and vs.ws_dirty
+    assert TWIN not in vs.wallets() and CEX in vs.wallets() and set(vs.base) <= set(vs.wallets())
+    assert TWIN in vs.state["children"] and vs.status()["parked"] == 1  # kept, just not followed
+    add, drop = vs.ws_diff({TWIN, WALLET}, set())
+    assert TWIN in drop and CEX in add and WALLET not in add
+    bal[TWIN] = 9.0
+    assert vs.refresh_balances() == 0                                  # not due yet
+    clock[0] += VP.BAL_EVERY_S
+    assert vs.refresh_balances() == 1 and TWIN in vs.wallets()        # funded again: back
 
 
 # ---------------------------------------------------------------- coin buys priced at what the wallet paid

@@ -51,6 +51,11 @@ SUB_BATCH = 25                   # subscriptions sent between two reads: replies
 LIMITED_BACKOFF_S = 45.0
 ADOPT_MIN_SOL = float(os.environ.get("INSIDER_ADOPT_MIN_SOL") or 0.5)   # a new wallet funded with this joins
 MAX_WALLETS = int(os.environ.get("INSIDER_MAX_WALLETS") or (1000 if _HELIUS else 300))
+# Parents / children are only followed while they hold CHILD_MIN_SOL (balances re-read every BAL_EVERY_S): the others
+# stay known (up to MAX_CHILDREN) and come back on their own once funded again. The base list is always followed.
+CHILD_MIN_SOL = float(os.environ.get("INSIDER_CHILD_MIN_SOL") or 5)
+BAL_EVERY_S = int(os.environ.get("INSIDER_BAL_EVERY_S") or 300)
+MAX_CHILDREN = int(os.environ.get("INSIDER_MAX_CHILDREN") or 5000)
 WS_MAX = int(os.environ.get("INSIDER_WS_MAX") or (1000 if _HELIUS else 90))   # live on the socket; the rest polled
 POLL_GAP_S = float(os.environ.get("INSIDER_POLL_GAP_S") or (0.05 if _HELIUS else 0.3))  # between two RPC calls
 POLL_WORKERS = 3                                                 # transactions found by the poller are read in parallel
@@ -150,6 +155,7 @@ class VipStream:
         v = result.get("vip") or {}
         self.external = {x["wallet"]: x for x in v.get("external", [])}
         self.ws_refused: set[str] = set()
+        self.bal_ts, self.ws_dirty = 0.0, False
         self.sol_usd, self.sol_usd_ts = None, 0.0
         self.pstat = {"rounds": 0, "wallets": 0, "round_s": None, "new": 0, "errors": 0, "last": None}
         self.holders = {h["wallet"] for h in v.get("holders", [])}
@@ -185,10 +191,47 @@ class VipStream:
         self._break_parent_cycles()
 
     def wallets(self) -> dict[str, str]:
-        """The base list always first and always whole; live children (newest kept) fill the rest up to MAX_WALLETS."""
-        kids = sorted(((a, v) for a, v in self.state["children"].items() if self._alive(a, v)),
-                      key=lambda x: (not x[1].get("seed"), -x[1]["since"]))[:max(0, MAX_WALLETS - len(self.base))]
+        """The base list always first and always whole; live children holding CHILD_MIN_SOL (or not read yet) fill the
+        rest up to MAX_WALLETS, history links first, then the richest."""
+        kids = sorted(((a, v) for a, v in self.state["children"].items() if self._alive(a, v) and self._rich(v)),
+                      key=lambda x: (not x[1].get("seed"), -(x[1].get("bal") or 0), -x[1]["since"]))
+        kids = kids[:max(0, MAX_WALLETS - len(self.base))]
         return {**self.base, **{a: self._why_kid(v) for a, v in kids}}
+
+    @staticmethod
+    def _rich(v: dict) -> bool:
+        return v.get("bal") is None or v["bal"] >= CHILD_MIN_SOL
+
+    def refresh_balances(self, rpc=None, force: bool = False) -> int:
+        """Re-read the SOL balance of every known parent / child (100 per call); returns how many changed side."""
+        if not force and self.now() - self.bal_ts < BAL_EVERY_S:
+            return 0
+        rpc = rpc or self.rpc
+        kids = self.state["children"]
+        addrs = list(kids)
+        moved = 0
+        for i in range(0, len(addrs), 100):
+            part = addrs[i:i + 100]
+            try:
+                res = rpc("getMultipleAccounts", [part, {"encoding": "base64", "dataSlice": {"offset": 0, "length": 0}}]) or {}
+            except RuntimeError:
+                continue
+            for a, acc in zip(part, res.get("value") or []):
+                v = kids.get(a)
+                if v is None:
+                    continue
+                was = self._rich(v)
+                v["bal"] = round(((acc or {}).get("lamports") or 0) / 1e9, 3)
+                moved += was != self._rich(v)
+        self.bal_ts = self.now()
+        if moved:
+            self.ws_dirty = True
+        return moved
+
+    def ws_diff(self, live: set, pending: set) -> tuple[list, list]:
+        """(to subscribe, to unsubscribe) to bring the socket in line with ws_set()."""
+        want = set(self.ws_set())
+        return [a for a in self.ws_set() if a not in live and a not in pending], [a for a in live if a not in want]
 
     def _alive(self, a: str, v: dict) -> bool:
         """A history link stays for good; a wallet adopted live stays CHILD_TTL_S after it was added or last moved."""
@@ -509,7 +552,7 @@ class VipStream:
                 return                                            # its own child still points up at it: don't close the loop
             self.prune_children()
             kids = self.state["children"]
-            if len(self.base) + len(kids) >= MAX_WALLETS:              # full: the longest-quiet live adoption makes room
+            if len(kids) >= MAX_CHILDREN:                              # full: the longest-quiet live adoption makes room
                 seen_at = self.state.get("last_seen") or {}
                 live = [a for a in kids if not kids[a].get("seed")]
                 if not live:
@@ -575,10 +618,15 @@ class VipStream:
                                 await self._subscribe(ws, addr, nxt)
                                 await asyncio.sleep(SUB_GAP_S)
                             nxt += 1
-                        if time.monotonic() - swept > SWEEP_S:              # expired children leave the socket
-                            swept = time.monotonic()
+                        if self.ws_dirty or time.monotonic() - swept > SWEEP_S:   # expired / emptied wallets leave the
+                            swept, self.ws_dirty = time.monotonic(), False        # socket, funded ones join it
                             for addr in self.prune_children():
                                 self.queue.put_nowait(("unsubscribe", addr))
+                            add, drop = self.ws_diff(set(self.subs.values()), set(pending.values()))
+                            for addr in drop:
+                                self.queue.put_nowait(("unsubscribe", addr))
+                            for addr in add[:max(0, WS_MAX - len(self.subs))]:
+                                self.queue.put_nowait(("subscribe", addr))
                         try:
                             raw = await asyncio.wait_for(ws.recv(), 0.2 if not self.queue.empty() else 5)
                         except asyncio.TimeoutError:
@@ -709,12 +757,17 @@ class VipStream:
     def poll_forever(self, stop: threading.Event) -> None:
         rpc, fast = _rpc(POLL_GAP_S), _rpc(TURBO_GAP_S)
         self.refresh_sol_usd()
+        try:
+            self.refresh_balances(rpc, force=True)
+        except Exception as e:
+            self.stat["error"] = redact(f"balances: {type(e).__name__}")
         t0 = time.monotonic()                                  # first round once the socket holds its wallets
         while not stop.is_set() and not self.subs and time.monotonic() - t0 < 120:
             stop.wait(2)
         while not stop.is_set():
             try:
                 self.refresh_sol_usd()
+                self.refresh_balances(rpc)
                 self.poll_once(fast if self.turbo() else rpc)
                 self.w.save()
             except Exception as e:                                 # the loop never dies
@@ -730,7 +783,8 @@ class VipStream:
                 "removed": sorted(({"wallet": a, **v} for a, v in (self.state.get("removed") or {}).items()),
                                   key=lambda x: -(x.get("ts") or 0))[:150],
                 "sol_usd": self.sol_usd, "focus": self.focus or ["ALL"], "poll": self.pstat, "turbo_until": self.state.get("turbo_until") or 0,
-                "turbo": self.turbo(), "turbo_max_s": TURBO_MAX_S, "ws_max": WS_MAX, "refused": len(self.ws_refused), "provider": PROVIDER,
+                "turbo": self.turbo(), "turbo_max_s": TURBO_MAX_S, "child_min_sol": CHILD_MIN_SOL,
+                "parked": sum(1 for a, v in self.state["children"].items() if self._alive(a, v) and not self._rich(v)), "ws_max": WS_MAX, "refused": len(self.ws_refused), "provider": PROVIDER,
                 "max_wallets": MAX_WALLETS, "adopt_min_sol": ADOPT_MIN_SOL, "strong_window_s": STRONG_WINDOW_S}
 
     def start(self, stop: threading.Event) -> threading.Thread:
