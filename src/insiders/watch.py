@@ -224,7 +224,15 @@ def analyse(tx: dict, wallet: str) -> list[dict]:
     if wallet in keys:
         i = keys.index(wallet)
         native = int(meta["postBalances"][i]) - int(meta["preBalances"][i])
-    created = PUMP in keys and "Instruction: Create" in logs and keys and keys[0] == wallet
+    msg = (tx.get("transaction") or {}).get("message") or {}
+    ins = list(msg.get("instructions") or [])
+    for inner in meta.get("innerInstructions") or []:
+        ins += inner.get("instructions") or []
+    minted = {((i.get("parsed") or {}).get("info") or {}).get("mint") for i in ins          # any launchpad: the mint
+              if isinstance(i.get("parsed"), dict) and i["parsed"].get("type") in ("initializeMint", "initializeMint2")}
+    minted.discard(None)
+    pump_create = PUMP in keys and "Instruction: Create" in logs
+    created = bool(keys) and keys[0] == wallet and (pump_create or bool(minted))
     moved = [m for m in set(pre) | set(post) if m not in (WSOL, *STABLES) and post[m] != pre[m]]
     for mint in set(pre) | set(post):
         dt = post[mint] - pre[mint]
@@ -238,7 +246,8 @@ def analyse(tx: dict, wallet: str) -> list[dict]:
                 sol = max(sol, spent - CREATE_COST_SOL)      # the dev buy in the create: the curve had no balance before
             elif pool is not None and len(moved) == 1 and pool <= spent <= pool * 1.1 + 0.02:
                 sol = spent                                  # one coin swapped: what the wallet really paid, fees included
-            kind = "CREATE" if created and pre[mint] == 0 else ("BUY" if sol > 0 else "RECEIVE")
+            made = created and pre[mint] == 0 and (pump_create or mint in minted)
+            kind = "CREATE" if made else ("BUY" if sol > 0 else "RECEIVE")
         else:
             sol = pool if pool is not None else (native / 1e9 if native > 10_000_000 else 0.0)
             got = native / 1e9
@@ -248,14 +257,10 @@ def analyse(tx: dict, wallet: str) -> list[dict]:
         ev.append({"ts": ts, "sig": sig, "wallet": wallet, "kind": kind, "mint": mint, "sol": round(sol, 3),
                    "tokens": abs(dt)})
     if created and not any(e["kind"] == "CREATE" for e in ev):
-        mints = [b["mint"] for b in meta.get("postTokenBalances") or [] if b.get("mint") not in (WSOL, *STABLES)]
+        mints = sorted(minted) or [b["mint"] for b in meta.get("postTokenBalances") or [] if b.get("mint") not in (WSOL, *STABLES)]
         if mints:
             ev.append({"ts": ts, "sig": sig, "wallet": wallet, "kind": "CREATE", "mint": mints[0], "sol": 0,
                        "tokens": 0})
-    msg = (tx.get("transaction") or {}).get("message") or {}
-    ins = list(msg.get("instructions") or [])
-    for inner in meta.get("innerInstructions") or []:
-        ins += inner.get("instructions") or []
     for i in ins:
         p = i.get("parsed")
         if isinstance(p, dict) and p.get("type") in ("transfer", "createAccount"):
@@ -793,7 +798,8 @@ class Watcher:
 
 
 LEVEL_VI = {"vipstrong": "🚨⚡ ≥ 2 VÍ ĐẶC BIỆT CÙNG VÀO", "vip": "⚡ VÍ ĐẶC BIỆT", "hold": "🚨🚨 MẠNH · ĐANG GIỮ", "strong": "🚨 MẠNH", "high": "🔴 TẠO COIN", "medium": "🟠 Coin mới", "watch": "🔵 Nạp ví mới", "info": "ℹ️"}
-KIND_VI = {"VIPSTRONG": "≥ 2 ví đặc biệt cùng mua / nhận coin này (≥ 4 SOL mỗi ví)", "SELL": "bán coin", "SEND": "chuyển token đi", "SOL_IN": "nhận SOL", "HOLD": "≥ 2 ví nhóm mua ≥ 4 SOL và vẫn giữ sau 10 phút", "CREATE": "tạo coin mới", "BUY": "mua coin mới", "RECEIVE": "nhận coin mới", "FUND": "nạp SOL cho ví mới"}
+KIND_VI = {"GROUPBUY": "cả nhóm cùng mua một coin (≥ 3 ví cùng nhóm trong 10 phút)", "BUYSEND": "mua coin rồi chuyển token sang ví khác",
+           "VIPSTRONG": "≥ 2 ví đặc biệt cùng mua / nhận coin này (≥ 4 SOL mỗi ví)", "SELL": "bán coin", "SEND": "chuyển token đi", "SOL_IN": "nhận SOL", "HOLD": "≥ 2 ví nhóm mua ≥ 4 SOL và vẫn giữ sau 10 phút", "CREATE": "tạo coin mới", "BUY": "mua coin mới", "RECEIVE": "nhận coin mới", "FUND": "nạp SOL cho ví mới"}
 
 
 def alert_text(a: dict, tickers: dict | None = None) -> str:

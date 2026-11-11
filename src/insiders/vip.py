@@ -58,6 +58,12 @@ CHILD_MIN_SOL = float(os.environ.get("INSIDER_CHILD_MIN_SOL") or 1)
 # price): spam airdrops and dust have no market or almost no value.
 TOKEN_FLOW_MIN_USD = float(os.environ.get("INSIDER_TOKEN_FLOW_MIN_USD") or 50)
 PRICE_TTL_S = 120
+# Groups watched for the "whole group buys" and "buy then move away" patterns (a project that lasts, not a quick rug)
+COHORT_GROUPS = [g.strip().upper() for g in (os.environ.get("INSIDER_COHORT_GROUPS") or "STANK").split(",") if g.strip()]
+COHORT_MIN = int(os.environ.get("INSIDER_COHORT_MIN") or 3)          # wallets of one group on one coin
+COHORT_WINDOW_S = int(os.environ.get("INSIDER_COHORT_WINDOW_S") or 600)
+BUYSEND_WINDOW_S = 1800                                              # tokens moved this soon after the buy
+BUYSEND_MIN_USD = float(os.environ.get("INSIDER_BUYSEND_MIN_USD") or 200)
 BAL_EVERY_S = int(os.environ.get("INSIDER_BAL_EVERY_S") or 300)
 MAX_CHILDREN = int(os.environ.get("INSIDER_MAX_CHILDREN") or 5000)
 WS_MAX = int(os.environ.get("INSIDER_WS_MAX") or (1000 if _HELIUS else 90))   # live on the socket; the rest polled
@@ -205,7 +211,7 @@ class VipStream:
 
     @staticmethod
     def _rich(v: dict) -> bool:
-        return v.get("bal") is None or v["bal"] >= CHILD_MIN_SOL
+        return bool(v.get("store")) or v.get("bal") is None or v["bal"] >= CHILD_MIN_SOL   # a token store holds tokens
 
     def refresh_balances(self, rpc=None, force: bool = False) -> int:
         """Re-read the SOL balance of every known parent / child (100 per call); returns how many changed side."""
@@ -248,6 +254,8 @@ class VipStream:
     @staticmethod
     def _why_kid(v: dict) -> str:
         p = (v.get("parent") or "")[:6]
+        if v.get("store"):
+            return f"ví cất token (nhận từ {p}… ngay sau khi mua)"
         if v.get("dir") == "in":
             return f"ví cha của {p}…" + (f" (gửi {v.get('sol')} SOL cho ví đó)" if v.get("sol") else "")
         return f"ví con của {p}…" + (f" (nhận {v.get('sol')} SOL từ ví đó)" if v.get("sol") else "")
@@ -428,13 +436,21 @@ class VipStream:
                 self.w._ledger(ev, why)
             if ev.get("mint") and ev["kind"] != "FUND":
                 self._coin_facts(ev["mint"])
+            if ev["kind"] in ("BUY", "CREATE") and ev.get("mint"):
+                g = self._group_buy(ev, why)
+                if g:
+                    out.append(g)
+            elif ev["kind"] == "SEND" and ev.get("mint"):
+                g = self._buy_send(tx, ev, why)
+                if g:
+                    out.append(g)
             if ev["kind"] == "FUND" and (ev.get("sol") or 0) >= ADOPT_MIN_SOL:
                 self._adopt(ev["to"], wallet, ev["sol"])          # followed from 0.5 SOL, alerted from MIN_SOL
             sol = ev.get("sol") or 0
             if ev["kind"] in ("RECEIVE", "SEND") and ev.get("mint") and not sol:
                 v = self.w._value_sol(ev["mint"], ev.get("tokens") or 0)
                 sol = round(v, 3) if v else 0
-            if sol < MIN_SOL:
+            if sol < MIN_SOL and ev["kind"] != "CREATE":           # a listed wallet creating a coin: always
                 continue
             a = {**ev, "sol": sol, "why": why, "level": "vip"}
             if ev.get("mint"):
@@ -470,6 +486,66 @@ class VipStream:
             self.w.save()
             self.w._send(out)
         return out
+
+    def _cohort(self, wallet: str) -> str | None:
+        fam = self.family(wallet)
+        return fam[6:] if fam.startswith("group:") and fam[6:].upper() in COHORT_GROUPS else None
+
+    def _group_buy(self, ev: dict, why: str) -> dict | None:
+        """>= COHORT_MIN wallets of one watched group bought / created the same coin within COHORT_WINDOW_S: once a day."""
+        grp = self._cohort(ev["wallet"])
+        if not grp:
+            return None
+        ts, mint = ev.get("ts") or self.now(), ev["mint"]
+        with self.w.lock:
+            c = (self.w.state.get("coins") or {}).get(mint) or {}
+            members, spent = [], 0.0
+            for w, x in (c.get("wallets") or {}).items():
+                hits = [t for t in x.get("trades") or [] if t[1] in ("BUY", "CREATE") and abs((t[0] or 0) - ts) <= COHORT_WINDOW_S]
+                if hits and self._cohort(w) == grp:
+                    members.append(w)
+                    spent += sum(t[2] or 0 for t in hits)
+            done = self.state.setdefault("cohort_done", {})
+            for k in [k for k, t in done.items() if ts - t >= STRONG_REPEAT_S]:
+                del done[k]
+            key = f"{mint}|{grp}"
+            if len(members) < COHORT_MIN or key in done:
+                return None
+            done[key] = ts
+            c["strong"] = True                                 # the coin box is marked on the board
+        info = self._coin_px(mint)
+        a = {**ev, "kind": "GROUPBUY", "level": "vipstrong", "group": grp, "n_wallets": len(members),
+             "holders": sorted(members)[:10], "sol": round(spent, 3), "why": why,
+             **{k: info.get(k) for k in ("name", "symbol", "mcap", "chart")}}
+        with self.w.lock:
+            self.w._qualify(a)
+        return a
+
+    def _buy_send(self, tx: dict, ev: dict, why: str) -> dict | None:
+        """A group wallet moved away the tokens of a coin it bought within BUYSEND_WINDOW_S, worth >= BUYSEND_MIN_USD:
+        alert, and the recipient is followed as the group's token store (whatever its SOL balance)."""
+        wallet, mint, ts = ev["wallet"], ev["mint"], ev.get("ts") or self.now()
+        if not self._cohort(wallet):
+            return None
+        with self.w.lock:
+            x = (((self.w.state.get("coins") or {}).get(mint) or {}).get("wallets") or {}).get(wallet) or {}
+            bought = any(t[1] in ("BUY", "CREATE") and 0 <= ts - (t[0] or 0) <= BUYSEND_WINDOW_S for t in x.get("trades") or [])
+        if not bought:
+            return None
+        to = token_counterparty(tx, wallet, mint, -(ev.get("tokens") or 0))
+        r = {"mint": mint, "tokens": ev.get("tokens") or 0}
+        self._token_value(r)
+        if not to or (r.get("usd") or 0) < BUYSEND_MIN_USD:
+            return None
+        if to not in self.wallets() and to not in self.state["children"]:
+            self._adopt(to, wallet, None)
+        kid = self.state["children"].get(to)
+        if kid is not None:
+            kid["store"] = mint
+            self.ws_dirty = True
+        return {**ev, "kind": "BUYSEND", "level": "vip", "to": to, "usd": r["usd"], "ui": r.get("ui"),
+                "symbol": r.get("symbol"), "name": r.get("name"), "why": why,
+                "sol": round(r["usd"] / self.sol_usd, 3) if self.sol_usd else 0}
 
     def _coin_px(self, mint: str) -> dict:
         hit = self.px.get(mint)

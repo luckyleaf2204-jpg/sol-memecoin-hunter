@@ -1530,6 +1530,66 @@ def test_only_parents_and_children_holding_enough_sol_are_followed(tmp_path):
     assert vs.refresh_balances() == 1 and TWIN in vs.wallets()        # funded again: back
 
 
+def test_a_coin_created_on_any_launchpad_is_a_create():
+    sol = 10 ** 9
+    tx = wtx(WALLET, "mk", 1, NEWMINT, (0, 5), (2 * sol, sol))
+    tx["meta"]["innerInstructions"] = [{"instructions": [{"parsed": {"type": "initializeMint2", "info": {"mint": NEWMINT}}}]}]
+    assert WT.analyse(tx, WALLET)[0]["kind"] == "CREATE"
+    bare = wtx(WALLET, "mk2", 1, transfer=None)                       # created, no dev buy
+    bare["meta"]["innerInstructions"] = [{"instructions": [{"parsed": {"type": "initializeMint", "info": {"mint": NEWMINT}}}]}]
+    bare["meta"]["postTokenBalances"] = [{"owner": "someone", "mint": NEWMINT, "uiTokenAmount": {"amount": "9"}}]
+    assert [(e["kind"], e["mint"]) for e in WT.analyse(bare, WALLET)] == [("CREATE", NEWMINT)]
+    other = wtx(BOSS, "mk3", 1, NEWMINT, (0, 5), (2 * sol, sol))      # BOSS signs; WALLET only receives
+    other["meta"]["innerInstructions"] = tx["meta"]["innerInstructions"]
+    other["meta"]["postTokenBalances"].append({"owner": WALLET, "mint": NEWMINT, "uiTokenAmount": {"amount": "3"}})
+    assert all(e["kind"] != "CREATE" for e in WT.analyse(other, WALLET))
+
+
+def _stank(tmp_path):
+    w, r = vip_watcher(tmp_path)
+    r["vip"]["external"] = [{"wallet": a, "group": "STANK", "role": "launch"} for a in (OUTSIDER, TWIN, CEX)]
+    w.meta = lambda m: {"symbol": "NEW", "name": "New coin", "price_usd": 100.0}
+    w.state["supply"] = {NEWMINT: {"ui": 1e9, "decimals": 0}}
+    vs = VP.VipStream(w, r, rpc=lambda m, p: [], now=lambda: 2_000.0, focus="STANK")
+    return w, vs
+
+
+def test_three_wallets_of_a_watched_group_buying_one_coin_alert_once(tmp_path):
+    w, vs = _stank(tmp_path)
+    for i, a in enumerate((OUTSIDER, TWIN)):
+        w._ledger({"ts": 1_000 + i, "sig": f"b{i}", "wallet": a, "kind": "BUY", "mint": NEWMINT, "sol": 1.0, "tokens": 5}, "x")
+    ev = {"ts": 1_300, "sig": "b2", "wallet": CEX, "kind": "BUY", "mint": NEWMINT, "sol": 2.0, "tokens": 5}
+    w._ledger(ev, "x")
+    a = vs._group_buy(ev, "x")
+    assert a["kind"] == "GROUPBUY" and a["group"] == "STANK" and a["n_wallets"] == 3 and a["sol"] == 4.0
+    assert a["level"] == "vipstrong" and w.state["coins"][NEWMINT]["strong"]
+    assert vs._group_buy(ev, "x") is None                              # once
+    late = {"ts": 1_300 + VP.COHORT_WINDOW_S + 400, "sig": "b3", "wallet": OUTSIDER, "kind": "BUY", "mint": "M2", "sol": 1.0, "tokens": 1}
+    w._ledger(late, "x")
+    assert vs._group_buy(late, "x") is None                            # one wallet on M2
+
+
+def test_buy_then_move_away_alerts_and_follows_the_store(tmp_path):
+    w, vs = _stank(tmp_path)
+    w._ledger({"ts": 1_000, "sig": "buy", "wallet": OUTSIDER, "kind": "BUY", "mint": NEWMINT, "sol": 1.0, "tokens": 10}, "x")
+    tx = wtx(OUTSIDER, "mv", 1_200, NEWMINT, (10, 0), (10 ** 9, 10 ** 9))
+    store = "9WzDXwBbmkg8ZTbNMqUxvQRAyrZzDsGYdLVL9zYtAWWM"
+    tx["meta"]["preTokenBalances"].append({"owner": store, "mint": NEWMINT, "uiTokenAmount": {"amount": "0"}})
+    tx["meta"]["postTokenBalances"].append({"owner": store, "mint": NEWMINT, "uiTokenAmount": {"amount": "10"}})
+    ev = {"ts": 1_200, "sig": "mv", "wallet": OUTSIDER, "kind": "SEND", "mint": NEWMINT, "sol": 0, "tokens": 10}
+    vs.sol_usd = 200.0
+    a = vs._buy_send(tx, ev, "x")
+    assert a["kind"] == "BUYSEND" and a["to"] == store and a["usd"] == 1000.0 and a["sol"] == 5.0
+    kid = vs.state["children"][store]
+    assert kid["store"] == NEWMINT and kid["parent"] == OUTSIDER
+    kid["bal"] = 0.0
+    assert store in vs.wallets() and "ví cất token" in vs.wallets()[store]   # followed whatever its SOL
+    cheap = {**ev, "tokens": 1, "sig": "mv2"}
+    assert vs._buy_send(tx, cheap, "x") is None                        # $100 < BUYSEND_MIN_USD
+    w2, vs2 = _stank(tmp_path / "b")
+    assert vs2._buy_send(tx, ev, "x") is None                          # nothing bought before
+
+
 # ---------------------------------------------------------------- coin buys priced at what the wallet paid
 def pool_tx(wallet, sig, mint, tok, sol_wallet, curve_sol, extra_mint=None, create=False):
     """A swap against a curve account (off-curve PDA) holding the coin and the SOL side."""
