@@ -1318,17 +1318,24 @@ def test_flows_record_who_paid_whom_and_payers_are_followed(tmp_path):
     send_tok = wtx(WALLET, "t", 1_950, NEWMINT, (9, 4), (sol, sol))
     send_tok["meta"]["preTokenBalances"].append({"owner": TWIN, "mint": NEWMINT, "uiTokenAmount": {"amount": "0"}})
     send_tok["meta"]["postTokenBalances"].append({"owner": TWIN, "mint": NEWMINT, "uiTokenAmount": {"amount": "5"}})
+    cheap = wtx(WALLET, "t2", 1_960, NEWMINT, (4, 3), (sol, sol))
+    cheap["meta"]["preTokenBalances"].append({"owner": TWIN, "mint": NEWMINT, "uiTokenAmount": {"amount": "5"}})
+    cheap["meta"]["postTokenBalances"].append({"owner": TWIN, "mint": NEWMINT, "uiTokenAmount": {"amount": "6"}})
     txs = {"in": recv("in", OUTSIDER, 2 * sol), "dust": recv("dust", CEX, sol // 10),
-           "fund": wtx(WALLET, "fund", 1_920, transfer=(TWIN, sol)), "t": send_tok}
+           "fund": wtx(WALLET, "fund", 1_920, transfer=(TWIN, sol)), "t": send_tok, "t2": cheap}
+    w.state["supply"] = {NEWMINT: {"ui": 1e9, "decimals": 0}}
+    w.meta = lambda m: {"symbol": "NEW", "name": "New coin", "price_usd": 20.0}
     vs = VP.VipStream(w, r, rpc=lambda m, p: txs[p[0]], now=lambda: 2_000.0)
     vs.retry_sleep = False
-    for s_ in ("in", "dust", "fund", "t"):
+    for s_ in ("in", "dust", "fund", "t", "t2"):
         vs.handle(WALLET, s_)
     fl = {(f["sig"], f["dir"]): f for f in w.state["flows"]}
     assert fl[("in", "in")]["other"] == OUTSIDER and fl[("in", "in")]["sol"] == 2.0
     assert ("dust", "in") not in fl                                   # 0.1 SOL: below FLOW_MIN_SOL
     assert fl[("fund", "out")]["other"] == TWIN and fl[("fund", "out")]["sol"] == 1.0
     assert fl[("t", "out")]["other"] == TWIN and fl[("t", "out")]["mint"] == NEWMINT and fl[("t", "out")]["tokens"] == 5
+    assert fl[("t", "out")]["usd"] == 100.0 and fl[("t", "out")]["symbol"] == "NEW"   # 5 tokens at $20
+    assert ("t2", "out") not in fl                                    # 1 token = $20: below TOKEN_FLOW_MIN_USD
     kids = vs.state["children"]
     assert kids[OUTSIDER]["dir"] == "in" and kids[OUTSIDER]["parent"] == WALLET     # the payer is followed now
     assert kids[TWIN]["dir"] == "out"
@@ -1497,11 +1504,11 @@ def test_wallets_lost_to_the_cascade_come_back_once(tmp_path):
     assert TWIN not in vs2.wallets()                                  # one-off
 
 
-def test_only_parents_and_children_holding_5_sol_are_followed(tmp_path):
+def test_only_parents_and_children_holding_enough_sol_are_followed(tmp_path):
     w, r = vip_watcher(tmp_path)
     r["vip"]["linked"] = [{"wallet": TWIN, "parent": WALLET, "dir": "in", "sol": 5.0}]
     clock = [2_000.0]
-    bal = {TWIN: 2.0, CEX: 40.0}
+    bal = {TWIN: 0.4, CEX: 40.0}                                       # threshold: CHILD_MIN_SOL (1 SOL)
     calls = []
 
     def rpc(m, p):

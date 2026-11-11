@@ -53,7 +53,11 @@ ADOPT_MIN_SOL = float(os.environ.get("INSIDER_ADOPT_MIN_SOL") or 0.5)   # a new 
 MAX_WALLETS = int(os.environ.get("INSIDER_MAX_WALLETS") or (1000 if _HELIUS else 300))
 # Parents / children are only followed while they hold CHILD_MIN_SOL (balances re-read every BAL_EVERY_S): the others
 # stay known (up to MAX_CHILDREN) and come back on their own once funded again. The base list is always followed.
-CHILD_MIN_SOL = float(os.environ.get("INSIDER_CHILD_MIN_SOL") or 5)
+CHILD_MIN_SOL = float(os.environ.get("INSIDER_CHILD_MIN_SOL") or 1)
+# Tokens moved between a listed wallet and another wallet are kept only when worth this much (DexScreener / Jupiter
+# price): spam airdrops and dust have no market or almost no value.
+TOKEN_FLOW_MIN_USD = float(os.environ.get("INSIDER_TOKEN_FLOW_MIN_USD") or 50)
+PRICE_TTL_S = 120
 BAL_EVERY_S = int(os.environ.get("INSIDER_BAL_EVERY_S") or 300)
 MAX_CHILDREN = int(os.environ.get("INSIDER_MAX_CHILDREN") or 5000)
 WS_MAX = int(os.environ.get("INSIDER_WS_MAX") or (1000 if _HELIUS else 90))   # live on the socket; the rest polled
@@ -156,6 +160,7 @@ class VipStream:
         self.external = {x["wallet"]: x for x in v.get("external", [])}
         self.ws_refused: set[str] = set()
         self.bal_ts, self.ws_dirty = 0.0, False
+        self.px: dict[str, tuple] = {}                         # mint -> (time, name / symbol / price facts)
         self.sol_usd, self.sol_usd_ts = None, 0.0
         self.pstat = {"rounds": 0, "wallets": 0, "round_s": None, "new": 0, "errors": 0, "last": None}
         self.holders = {h["wallet"] for h in v.get("holders", [])}
@@ -466,6 +471,32 @@ class VipStream:
             self.w._send(out)
         return out
 
+    def _coin_px(self, mint: str) -> dict:
+        hit = self.px.get(mint)
+        if hit and self.now() - hit[0] < PRICE_TTL_S:
+            return hit[1]
+        try:
+            info = self.w._meta(mint) or {}
+        except Exception:
+            info = {}
+        self.px[mint] = (self.now(), info)
+        if len(self.px) > 2000:
+            for k in sorted(self.px, key=lambda k: self.px[k][0])[:500]:
+                del self.px[k]
+        return info
+
+    def _token_value(self, r: dict) -> bool:
+        """Name, symbol and USD value of a token transfer row; False when it is worth < TOKEN_FLOW_MIN_USD or has no
+        price at all (spam / dust)."""
+        info = self._coin_px(r["mint"])
+        dec = ((self.w.state.get("supply") or {}).get(r["mint"]) or {}).get("decimals")
+        px = info.get("price_usd")
+        if dec is None or not px:
+            return False
+        ui = (r.get("tokens") or 0) / 10 ** dec
+        r.update(ui=ui, usd=round(ui * float(px), 2), symbol=info.get("symbol"), name=info.get("name"))
+        return r["usd"] >= TOKEN_FLOW_MIN_USD
+
     def _flows(self, tx: dict, wallet: str, evs: list, got: float, frm: str | None, moved: bool) -> None:
         """Money and tokens between a listed wallet and other wallets (who paid it, whom it paid), for the trace."""
         ts, sig = tx.get("blockTime"), ((tx.get("transaction") or {}).get("signatures") or [None])[0]
@@ -481,6 +512,7 @@ class VipStream:
                                  "mint": ev["mint"], "tokens": dt})
         if got >= FLOW_MIN_SOL and not moved and frm and on_curve(frm):
             rows.append({"dir": "in", "other": frm, "sol": round(got, 3), "mint": None, "tokens": None})
+        rows = [r for r in rows if not r.get("mint") or self._token_value(r)]
         if not rows:
             return
         listed = self.wallets()

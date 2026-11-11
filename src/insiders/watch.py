@@ -284,7 +284,7 @@ def coin_meta(mint: str, get=_get_json) -> dict:
             made = [int(x["pairCreatedAt"] / 1000) for x in ds if x.get("pairCreatedAt")]
             out = {"name": bt.get("name"), "symbol": bt.get("symbol"), "mcap": p.get("marketCap") or p.get("fdv"),
                    "created_ts": min(made) if made else None, "dex": p.get("dexId"), "chart": p.get("url"),
-                   "src": "dexscreener"}
+                   "price_usd": float(p["priceUsd"]) if p.get("priceUsd") else None, "src": "dexscreener"}
     except Exception:
         pass
     try:
@@ -296,7 +296,7 @@ def coin_meta(mint: str, get=_get_json) -> dict:
             ts = int(datetime.fromisoformat(c.replace("Z", "+00:00")).timestamp()) if c else None
             if not out:
                 out = {"name": j.get("name"), "symbol": j.get("symbol"), "mcap": j.get("mcap"), "created_ts": ts,
-                       "dex": j.get("launchpad"), "chart": None, "src": "jupiter"}
+                       "dex": j.get("launchpad"), "chart": None, "price_usd": j.get("usdPrice"), "src": "jupiter"}
             elif ts and (out.get("created_ts") is None or ts < out["created_ts"]):
                 out["created_ts"] = ts
     except Exception:
@@ -668,7 +668,7 @@ class Watcher:
         return {"min_sol": MIN_SOL, "board_min_sol": BOARD_MIN_SOL, "flip_s": FLIP_S, "hold_s": HOLD_CONFIRM_S,
                 "win_hold_s": _p.HOLD_S, "win_min_sol": _p.WIN_MIN_SOL, "win_min_mult": _p.WIN_MIN_MULT,
                 **({"max_wallets": _v.MAX_WALLETS, "ws_max": _v.WS_MAX, "adopt_in_min_sol": _v.ADOPT_IN_MIN_SOL,
-                    "flow_min_sol": _v.FLOW_MIN_SOL, "adopt_min_sol": _v.ADOPT_MIN_SOL, "child_days": _v.CHILD_TTL_S / 86400,
+                    "flow_min_sol": _v.FLOW_MIN_SOL, "adopt_min_sol": _v.ADOPT_MIN_SOL, "child_min_sol": _v.CHILD_MIN_SOL, "token_flow_min_usd": _v.TOKEN_FLOW_MIN_USD, "child_days": _v.CHILD_TTL_S / 86400,
                     "strong_window_s": _v.STRONG_WINDOW_S} if vip else {})}
 
     def bots(self) -> list[str]:
