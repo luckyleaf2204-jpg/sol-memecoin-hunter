@@ -137,11 +137,14 @@ def records_from_logs(signature: str, slot: int, logs: list[str], pool_resolver=
 
     evs, truncated = events_from_logs(logs)
     out = {"trades": [], "creates": [], "completes": [], "migrations": [], "unresolved_pools": [],
-           "truncated": truncated}
+           "truncated": truncated, "multi_hop": False}
     ordinal = 0
     for _prog, ev in evs:
         if isinstance(ev, PumpTradeEvent):
-            out["trades"].append(trade_record_from_curve_event(signature, slot, ordinal, ev))
+            if not (ev.virtual_sol_reserves == 0 and ev.sol_amount == 0):
+                out["trades"].append(trade_record_from_curve_event(signature, slot, ordinal, ev))
+            else:
+                out["multi_hop"] = True  # non-SOL quoted curve: only the verifier can value it
             ordinal += 1
         elif isinstance(ev, AmmSwapEvent):
             mints = pool_resolver(ev.pool) if pool_resolver else None

@@ -59,9 +59,11 @@ DEFAULTS: dict[str, Any] = {
     "backfill_days": 30,
     "backfill_max_signatures": 3000,
     "tracked_wallet_limit": 2000,
+    "skip_high_frequency_wallets": True,  # >= hf_signatures_per_day -> not backfilled (bot-like)
+    "hf_signatures_per_day": 1000,
     "wallet_sync_interval_minutes": 30,
-    "stream_store_min_sol": 0.5,
-    "stream_retention_days": 14,
+    "stream_store_min_sol": 1.0,
+    "stream_retention_days": 7,
     # backtest
     "backtest_slippage_bps": 100,
     "backtest_detection_latency_seconds": 5,
@@ -123,6 +125,8 @@ SPEC: dict[str, Spec] = {
     "backfill_days": Spec(int, 1, 120),
     "backfill_max_signatures": Spec(int, 100, 100000),
     "tracked_wallet_limit": Spec(int, 10, 100000),
+    "skip_high_frequency_wallets": Spec(bool),
+    "hf_signatures_per_day": Spec(int, 50, 100000),
     "wallet_sync_interval_minutes": Spec((int, float), 1, 1440),
     "stream_store_min_sol": Spec((int, float), 0, 1000),
     "stream_retention_days": Spec(int, 1, 365),

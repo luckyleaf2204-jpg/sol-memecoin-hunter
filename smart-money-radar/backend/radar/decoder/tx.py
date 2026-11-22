@@ -183,6 +183,7 @@ def decode_transaction(tx: dict, signature: str | None = None,
 
     # ---- events -> records -------------------------------------------------------------
     ordinal = 0
+    nonsol: list[TradeRecord] = []
     for pid, ev in events:
         if isinstance(ev, PumpTradeEvent):
             rec = trade_record_from_curve_event(sig, dec.slot, ordinal, ev, source="rpc_tx")
@@ -190,7 +191,11 @@ def decode_transaction(tx: dict, signature: str | None = None,
             if d is not None and d != PUMP_DECIMALS:
                 rec.decimals = d
                 rec.token_amount = ev.token_amount / 10 ** d
-            dec.trades.append(rec)
+            if ev.virtual_sol_reserves == 0 and ev.sol_amount == 0:
+                # curve quoted in another token (multi-hop): not a SOL trade by itself
+                nonsol.append(rec)
+            else:
+                dec.trades.append(rec)
             ordinal += 1
         elif isinstance(ev, AmmSwapEvent):
             mints = _pool_mints(ev, book, keys, pool_resolver)
@@ -216,6 +221,8 @@ def decode_transaction(tx: dict, signature: str | None = None,
 
     for (src, dst, lamports, under_swap, _kind) in raw_sol:
         dec.sol_transfers.append(SolTransfer(src, dst, lamports, under_swap))
+    if nonsol:
+        _collapse_multi_hop(dec, nonsol, book)
 
     if dec.block_time is None and dec.trades:
         dec.block_time = dec.trades[0].block_time
@@ -233,6 +240,32 @@ def decode_transaction(tx: dict, signature: str | None = None,
         _signers_cache.pop(dec.signature, None)
     _token_transfers(dec, book, raw_tok)
     return dec
+
+
+def _collapse_multi_hop(dec: DecodedTx, nonsol: list[TradeRecord], book: _TokenBook) -> None:
+    """Token A traded against token B on a B-quoted curve, and B traded against SOL in the
+    same tx while the wallet's B balance did not change (B only passed through): record ONE
+    trade of A whose SOL amount is the SOL leg. Otherwise the A leg is dropped (no SOL value)."""
+    for a in nonsol:
+        legs = [t for t in dec.trades if t.wallet == a.wallet and t.mint != a.mint
+                and abs(book.delta(a.wallet, t.mint)) <= 1
+                and ((a.tx_type == "sell" and t.tx_type == "sell") or (a.tx_type == "buy" and t.tx_type == "buy"))]
+        if len(legs) != 1:
+            dec.notes.append(f"{a.mint}: traded on a non-SOL quoted curve; no single SOL leg found, not counted")
+            continue
+        leg = legs[0]
+        dec.trades.remove(leg)
+        a.sol_amount = leg.sol_amount
+        a.fee_trading_sol = leg.fee_trading_sol
+        a.effective_price_sol = (a.sol_amount / a.token_amount) if a.token_amount else None
+        a.price_sol = a.effective_price_sol
+        a.market_cap_sol = (a.price_sol * 1e9) if a.price_sol else None
+        a.liquidity_sol = None
+        a.venue = "pump_curve_multihop"
+        a.extra["hop_mint"] = leg.mint
+        a.extra["hop_event_key"] = leg.event_key
+        dec.trades.append(a)
+    dec.trades.sort(key=lambda t: int(t.event_key.split(":")[1]))
 
 
 def _signers(tx: dict, keys: list[str]) -> set[str]:
@@ -282,7 +315,7 @@ def _reconcile(dec: DecodedTx, lam_delta: dict[str, int], book: _TokenBook,
                          if k in owned and v["mint"] == WSOL_MINT)
         rent = sum(lam_delta.get(a, 0) for a in owned) - wsol_delta
         fee_net = dec.fee_lamports if wallet == dec.fee_payer else 0
-        tips = other_out = other_in = 0
+        tips = other_out = other_in = swap_sys_out = 0
         for (src, dst, lamports, under_swap, kind) in raw_sol:
             if src == wallet and dst != wallet and dst not in owned:
                 if dst in JITO_TIP_ACCOUNTS and not under_swap:
@@ -290,8 +323,17 @@ def _reconcile(dec: DecodedTx, lam_delta: dict[str, int], book: _TokenBook,
                 elif not under_swap or kind.startswith("createAccount") or dst in created_other:
                     # outside the swap, or funding an account created in this tx (token launch)
                     other_out += lamports
+                else:
+                    swap_sys_out += lamports
             elif dst == wallet and src != wallet and src not in owned and not under_swap:
                 other_in += lamports
+        # SOL the wallet sent inside pump.fun beyond what its buy events account for
+        # (rent top-up of protocol accounts such as the creator vault / volume accumulator)
+        implied = sum(round((r.sol_amount + r.fee_trading_sol) * LAMPORTS) for r in recs
+                      if r.tx_type == "buy" and r.venue == "pump_curve")
+        extra_in_swap = swap_sys_out - implied if implied else 0
+        if extra_in_swap > 0:
+            other_out += extra_in_swap
         expected = -fee_net - tips - other_out + other_in
         for r in recs:
             s = round(r.sol_amount * LAMPORTS)
@@ -333,6 +375,8 @@ def _reconcile(dec: DecodedTx, lam_delta: dict[str, int], book: _TokenBook,
             notes.append(f"SOL residual {residual} lamports")
         if dec.logs_truncated:
             notes.append("program logs truncated")
+        if extra_in_swap > 0:
+            notes.append(f"{extra_in_swap} lamports paid inside pump.fun beyond the event (account rent top-up)")
         note = "; ".join(notes) if notes else "balances reconciled with on-chain events"
         if len(recs) > 1:
             note += f"; {len(recs)} trades by this wallet in one tx (costs on {first.event_key})"

@@ -103,11 +103,14 @@ class RateLimiter:
                 await asyncio.sleep(max(0.01, sec + 1 - time.time()))
 
     def on_rate_limited(self) -> None:
-        self.penalty = min(self.penalty * 1.6, 8.0)
+        # multiplicative back-off on 429 ...
+        self.penalty = min(self.penalty * 1.5, 6.0)
 
     def on_success(self) -> None:
+        # ... and a faster recovery, so an occasional 429 (other traffic on the same IP)
+        # does not ratchet the rate down: with 10 % 429s the penalty still converges to 1.
         if self.penalty > 1.0:
-            self.penalty = max(1.0, self.penalty * 0.98)
+            self.penalty = max(1.0, self.penalty * 0.9)
 
 
 @dataclass

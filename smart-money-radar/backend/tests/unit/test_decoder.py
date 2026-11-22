@@ -140,7 +140,10 @@ def test_log_stream_decoder_matches_full_transaction_decoder():
         if stream["truncated"]:
             continue
         fk = {t.event_key: t for t in full.trades}
+        hop_keys = {t.extra.get("hop_event_key") for t in full.trades if t.venue == "pump_curve_multihop"}
         for r in stream["trades"]:
+            if r.event_key in hop_keys:
+                continue  # SOL leg folded into the multi-hop record by the full decoder
             assert r.event_key in fk, (f.stem, r.event_key)
             assert fk[r.event_key].wallet == r.wallet
             assert fk[r.event_key].mint == r.mint
@@ -149,3 +152,16 @@ def test_log_stream_decoder_matches_full_transaction_decoder():
             assert r.verification_status == "partially_verified"
             checked += 1
     assert checked >= 25
+
+
+def test_multi_hop_through_a_non_sol_curve_is_one_sol_trade():
+    """Real tx: token A sold on a curve quoted in token B, B sold for SOL in the same tx."""
+    import json as _j
+    tx = _j.loads((FIX.parent / "multihop" / "multi_hop_sell.json").read_text())
+    d = decode_transaction(tx)
+    assert len(d.trades) == 1
+    t = d.trades[0]
+    assert t.venue == "pump_curve_multihop" and t.tx_type == "sell"
+    assert t.mint == "CkXfLpvTYLiWhytNRLsGyxuVsQ9gH8fPbHf2HH3Ypump"
+    assert t.sol_amount == pytest.approx(0.372544205, abs=1e-9)
+    assert t.verification_status == "verified" and t.reconciliation_residual_sol == 0
