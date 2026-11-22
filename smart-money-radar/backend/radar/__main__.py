@@ -10,6 +10,8 @@
     python -m radar redecode                re-decode stored raw transactions (after a decoder upgrade)
     python -m radar backtest [--out FILE]   walk-forward backtest on stored data
     python -m radar crosscheck [--n 25]     re-fetch stored trades from a second RPC and compare
+    python -m radar history --days 60       sample graduated tokens of the last N days, seed their
+                                            early buyers and backfill N days of their history
 """
 from __future__ import annotations
 
@@ -124,6 +126,10 @@ def main(argv: list[str] | None = None) -> None:
     ap.add_argument("--port", type=int, default=int(os.environ.get("API_PORT", "8000")))
     ap.add_argument("--out", default=None)
     ap.add_argument("--n", type=int, default=25)
+    ap.add_argument("--days", type=int, default=60)
+    ap.add_argument("--per-day", dest="per_day", type=int, default=2)
+    ap.add_argument("--early", type=int, default=120)
+    ap.add_argument("--promote", type=int, default=150)
     a = ap.parse_args(argv)
     if a.command == "api":
         import uvicorn
@@ -144,6 +150,9 @@ def main(argv: list[str] | None = None) -> None:
     elif a.command == "backtest":
         from .tools.backtest_cli import run
         asyncio.run(run(a.out))
+    elif a.command == "history":
+        from .tools.history import run as hist
+        asyncio.run(hist(a.days, a.per_day, a.early, a.promote, a.out))
     elif a.command == "crosscheck":
         from .tools.crosscheck import run as cc
         asyncio.run(cc(a.n, a.out))
