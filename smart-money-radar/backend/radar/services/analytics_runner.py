@@ -12,7 +12,8 @@ from typing import Any
 
 from ..analytics import relationships as rel
 from ..analytics.backtest import peak_config
-from ..analytics.performance import compute_performance
+from ..analytics.behavior import classify_behavior, simulate_copy
+from ..analytics.performance import COPY_DELAYS, compute_performance
 from ..analytics.positions import build_positions, group_events, mark_to_market
 from ..analytics.price_hits import bars_from_rows, analyse_entry
 from ..analytics.risk import RiskInputs, assess, wash_share
@@ -56,6 +57,7 @@ async def recompute_wallet(ctx: Ctx, wallet: str, s: dict[str, Any], now: int, c
               for r in await ctx.pool.fetch("SELECT mint, last_price_sol, last_trade_at FROM tokens WHERE mint = ANY($1::text[])",
                                             list(by_mint))}
     cfg = peak_config(s)
+    copy_delays = sorted(set(COPY_DELAYS) | {int(s["copy_delay_seconds"])})
     positions, orphans = [], 0
     need_prices = []
     for mint, evs in by_mint.items():
@@ -73,6 +75,12 @@ async def recompute_wallet(ctx: Ctx, wallet: str, s: dict[str, Any], now: int, c
             # last executed on-chain price; None when the token was never seen trading
             price, _last_trade = prices.get(mint, (None, None))
             mark_to_market(p, price, now, float(s["write_off_after_hours"]), float(s["write_off_value_fraction"]))
+            # after the write-off rule, so a dead bag is a loss for the follower too
+            bars = bar_cache.get((mint, p.first_buy_at)) if p.first_buy_at else None
+            if p.is_closed and bars:
+                p.price_metrics["copy"] = {
+                    str(d): simulate_copy(p.buy_events, p.sell_events, p.status == "written_off", bars, d,
+                                          float(s["copy_cost_pct"])) for d in copy_delays}
         positions.extend(ps)
     for mint, t0 in need_prices[:50]:
         await ctx.enqueue(Q_PRICE_BACKFILL, {"mint": mint, "start": t0}, dedupe_key=f"{mint}", dedupe_ttl=6 * 3600)
@@ -82,11 +90,19 @@ async def recompute_wallet(ctx: Ctx, wallet: str, s: dict[str, Any], now: int, c
     backfill_ok = w["backfill_status"] == "complete"
     backfill_from = w["backfill_from"].timestamp() if w["backfill_from"] else None
     excluded = w["is_excluded"] or wallet in set(s.get("excluded_wallets") or [])
+    created = {r["mint"]: (int(r["created_at"].timestamp()) if r["created_at"] else None)
+               for r in await ctx.pool.fetch("SELECT mint, created_at FROM tokens WHERE mint = ANY($1::text[])",
+                                             list(by_mint))}
     for period in PERIODS:
+        start = now - period * 86400
+        trades = [r for r in rows if r["tx_type"] in ("buy", "sell") and r["block_time"].timestamp() >= start]
+        holds = [p.holding_seconds for p in positions if p.is_closed and (p.first_buy_at or p.opened_at) >= start]
+        behavior = classify_behavior(trades, created, holds).as_dict()
         covered = backfill_ok and backfill_from is not None and backfill_from <= now - period * 86400 + 86400
         perf = compute_performance(positions, period, now, float(s["min_buy_sol"]), covered, orphans)
+        perf.metrics["behavior"] = behavior
         res = score_wallet(perf, s, cluster_size=cluster_size, excluded=excluded, signer_share=signer_share,
-                           history_read=w["backfill_status"] in ("complete", "partial"))
+                           history_read=w["backfill_status"] in ("complete", "partial"), behavior=behavior)
         await _write_perf_score(ctx, wallet, perf, res)
         out[period] = (perf, res)
     return out
@@ -183,7 +199,7 @@ async def rank_and_status(ctx: Ctx, s: dict[str, Any]) -> None:
     period = int(s["analysis_period_days"])
     min_closed = int(s["min_closed_positions_official"])
     rows = await ctx.pool.fetch("""SELECT w.address, w.status, w.backfill_status, sc.qualifies, sc.confidence, sc.score,
-            p.closed_qualifying, p.positions_qualifying FROM wallets w
+            sc.components, p.closed_qualifying, p.positions_qualifying FROM wallets w
         LEFT JOIN smart_money_scores sc ON sc.wallet = w.address AND sc.period_days = $1
         LEFT JOIN wallet_performance p ON p.wallet = w.address AND p.period_days = $1
         WHERE w.status IN ('candidate','tracked','smart')""", period)
@@ -191,7 +207,11 @@ async def rank_and_status(ctx: Ctx, s: dict[str, Any]) -> None:
     for r in rows:
         if r["backfill_status"] in ("queued", "running", "none"):
             continue
-        if r["qualifies"] and r["confidence"] in ("HIGH", "MEDIUM") and float(r["score"] or 0) >= float(s["signal_min_wallet_score"]):
+        checks = (r["components"] or {}).get("checks") or {}
+        # signal wallets must also be human-like and copyable when those rules are on
+        copy_ok = checks.get("human_like", True) and checks.get("copyable", True)
+        if (r["qualifies"] and r["confidence"] in ("HIGH", "MEDIUM") and copy_ok
+                and float(r["score"] or 0) >= float(s["signal_min_wallet_score"])):
             new = "smart"
         elif (r["closed_qualifying"] or 0) < min_closed and (r["positions_qualifying"] or 0) > 0:
             new = "tracked"

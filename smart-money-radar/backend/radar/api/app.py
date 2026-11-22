@@ -165,28 +165,36 @@ async def overview(period: int = 30):
 # ---------------------------------------------------------------- wallets
 SORTS = {"score": "sc.score", "win_rate": "p.win_rate", "median_buy": "p.median_buy_sol",
          "realized_pnl": "p.realized_pnl_sol", "roi": "p.roi", "hit_5x": "p.hit_rate_5x", "hit_10x": "p.hit_rate_10x",
-         "last_active": "p.last_active_at"}
+         "last_active": "p.last_active_at", "copy_win_rate": "copy_rank"}
 
 WALLET_SELECT = """SELECT sc.wallet, sc.score, sc.category, sc.confidence, sc.qualifies, sc.official_rank, sc.reasons,
         sc.computed_at, p.win_rate, p.median_buy_sol, p.avg_buy_sol, p.largest_buy_sol, p.total_buy_sol,
         p.realized_pnl_sol, p.unrealized_pnl_sol, p.roi, p.hit_rate_2x, p.hit_rate_3x, p.hit_rate_5x, p.hit_rate_10x,
         p.last_active_at, p.closed_qualifying, p.positions_qualifying, p.wins, p.losses, p.verified_share,
-        p.coverage_complete, p.profit_factor, w.status, w.cluster_id, w.cluster_size, w.backfill_status
+        p.coverage_complete, p.profit_factor, w.status, w.cluster_id, w.cluster_size, w.backfill_status,
+        p.avg_holding_seconds, p.metrics->'behavior'->>'label' AS behavior,
+        p.metrics->'behavior'->'metrics'->>'median_entry_after_creation_s' AS median_entry_after_creation_s,
+        sc.components->'copy' AS copy, (sc.components->'copy'->>'win_rate')::float AS copy_win_rate,
+        -- Laplace-smoothed copy win rate for sorting: 1/1 must not outrank 9/10
+        (COALESCE((sc.components->'copy'->>'win_rate')::float * (sc.components->'copy'->>'positions')::float, 0) + 1)
+          / (COALESCE((sc.components->'copy'->>'positions')::float, 0) + 2) AS copy_rank
     FROM smart_money_scores sc JOIN wallet_performance p ON p.wallet = sc.wallet AND p.period_days = sc.period_days
     JOIN wallets w ON w.address = sc.wallet"""
 
 
 @app.get("/api/wallets/top", dependencies=[Auth])
 async def top_wallets(period: int = Query(30, enum=[7, 30, 90]), sort: str = "score", limit: int = 10,
-                      official: bool = True, order: str = "desc"):
+                      official: bool = True, order: str = "desc", human_only: bool = False):
     col = SORTS.get(sort, "sc.score")
     direction = "ASC" if order == "asc" else "DESC"
     where = "sc.period_days = $1 AND NOT w.is_excluded" + (" AND sc.official_rank IS NOT NULL" if official else "")
+    if human_only:
+        where += " AND p.metrics->'behavior'->>'label' = 'HUMAN'"
     limit = max(1, min(limit, 500))
     if official:
         # Top N is always the official N by score; sorting re-orders those N rows
         rs = await ctx().pool.fetch(f"""SELECT * FROM ({WALLET_SELECT} WHERE {where} ORDER BY sc.official_rank LIMIT $2) q
-            ORDER BY {col.split('.')[1]} {direction} NULLS LAST""", period, limit)
+            ORDER BY {col.split('.')[-1]} {direction} NULLS LAST""", period, limit)
     else:
         rs = await ctx().pool.fetch(f"{WALLET_SELECT} WHERE {where} ORDER BY {col} {direction} NULLS LAST LIMIT $2",
                                     period, limit)
@@ -201,15 +209,18 @@ CHECK_LABELS = {
     "verified_share_ok": "≥ 50% vị thế đã xác minh on-chain",
     "active_last_7_days": "Có giao dịch trong 7 ngày gần nhất",
     "not_single_win_dependent": "Vẫn có lãi khi bỏ lệnh thắng lớn nhất",
+    "human_like": "Giao dịch giống người, không phải bot",
+    "copyable": "Copy trễ vẫn thắng đủ thường xuyên (mô phỏng theo giá lịch sử)",
 }
 
 
 @app.get("/api/wallets/candidates", dependencies=[Auth])
-async def candidate_wallets(period: int = Query(30, enum=[7, 30, 90]), limit: int = 20):
+async def candidate_wallets(period: int = Query(30, enum=[7, 30, 90]), limit: int = 20, human_only: bool = False):
     """Top 20 candidates (wallets whose history has been read) with the review checklist.
     Wallets passing every check, best of each relationship cluster, form the official Top 10."""
+    hum = " AND p.metrics->'behavior'->>'label' = 'HUMAN'" if human_only else ""
     rs = await ctx().pool.fetch(f"""{WALLET_SELECT} WHERE sc.period_days = $1 AND NOT w.is_excluded
-        AND w.backfill_status IN ('complete','partial')
+        AND w.backfill_status IN ('complete','partial'){hum}
         ORDER BY sc.score DESC, p.median_buy_sol DESC NULLS LAST LIMIT $2""", period, max(1, min(limit, 50)))
     comps = {r["wallet"]: r["components"] for r in await ctx().pool.fetch(
         "SELECT wallet, components FROM smart_money_scores WHERE period_days = $1 AND wallet = ANY($2::text[])",
@@ -250,6 +261,7 @@ async def list_wallets(status: str | None = None, q: str | None = None, period: 
     rs = await ctx().pool.fetch(f"""SELECT w.address, w.status, w.discovery_source, w.backfill_status, w.cluster_size,
             COALESCE((w.discovery_detail->>'high_frequency')::boolean, false) AS high_frequency,
             w.is_excluded, w.last_synced_at, sc.score, sc.category, sc.confidence, sc.official_rank, p.win_rate,
+            p.metrics->'behavior'->>'label' AS behavior, (sc.components->'copy'->>'win_rate')::float AS copy_win_rate,
             p.median_buy_sol, p.realized_pnl_sol, p.closed_qualifying, p.last_active_at
         FROM wallets w LEFT JOIN smart_money_scores sc ON sc.wallet = w.address AND sc.period_days = $1
         LEFT JOIN wallet_performance p ON p.wallet = w.address AND p.period_days = $1

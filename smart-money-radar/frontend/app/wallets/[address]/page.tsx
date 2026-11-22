@@ -5,7 +5,7 @@ import { Area, AreaChart, Bar, BarChart, CartesianGrid, Cell, ResponsiveContaine
 import { api, useApi } from "@/lib/api";
 import { ago, dateTime, duration, multiple, num, pct, price, signedPct, sol } from "@/lib/format";
 import { RELATION_LABEL, statusLabel } from "@/lib/labels";
-import { Address, Card, CategoryBadge, ConfBadge, Copy, Empty, ErrorBox, Loading, Pill, Segmented, Stat, Td, Th, Tone, VerifBadge } from "@/components/ui";
+import { Address, BehaviorBadge, Card, CategoryBadge, ConfBadge, Copy, Empty, ErrorBox, Loading, Pill, Segmented, Stat, Td, Th, Tone, VerifBadge } from "@/components/ui";
 
 const COMP_LABEL: Record<string, [string, number]> = {
   win_rate: ["Win Rate", 20], median_buy: ["Median Buy SOL", 20], realized_pnl: ["Realized PnL", 15], roi: ["ROI thực tế", 15],
@@ -35,6 +35,7 @@ export default function WalletPage({ params }: { params: { address: string } }) 
         <div className="mt-1 text-base font-semibold"><Address a={a} /></div>
         <div className="mt-2 flex flex-wrap items-center gap-1 text-xs">
           <Pill className="bg-slate-100 dark:bg-slate-800">{statusLabel(w.status)}</Pill>
+          {perf?.metrics?.behavior && <BehaviorBadge b={perf.metrics.behavior.label} />}
           {sc && <CategoryBadge c={sc.category} />}{sc && <ConfBadge c={sc.confidence} />}
           {sc?.official_rank && <Pill className="bg-brand text-white">Top #{sc.official_rank}</Pill>}
           {w.cluster_size > 1 && <Pill className="bg-rose-100 text-rose-800 dark:bg-rose-500/20 dark:text-rose-300">Cụm {w.cluster_size} ví liên quan</Pill>}
@@ -78,6 +79,8 @@ export default function WalletPage({ params }: { params: { address: string } }) 
             <Stat label="Tỷ lệ Verified" value={pct(perf.verified_share, 0)} sub={perf.coverage_complete ? "lịch sử đầy đủ" : "lịch sử chưa đủ cho kỳ này"} />
             <Stat label="Last Active" value={ago(perf.last_active_at)} />
           </div>
+
+          <CopyCard perf={perf} main={sc?.components?.copy?.delay_s ?? 60} />
 
           {sc && (
             <Card title="Cấu thành Smart Money Score">
@@ -248,5 +251,71 @@ function ExcludeBox({ address, excluded }: { address: string; excluded: boolean 
         location.reload();
       }}>{excluded ? "Bỏ loại trừ ví này" : "Loại trừ ví này khỏi xếp hạng & tín hiệu"}</button>
     </div>
+  );
+}
+
+const BEHAVIOR_METRICS: [string, string, (v: any) => string][] = [
+  ["max_trades_per_minute", "Số lệnh nhiều nhất trong 1 phút", (v) => num(v, 0)],
+  ["trades_per_active_day", "Số lệnh / ngày có giao dịch", (v) => num(v, 0)],
+  ["multi_token_burst_share", "Lệnh nhiều token khác nhau trong ≤ 5 giây", (v) => pct(v, 0)],
+  ["snipe_share", "Mua trong 5 giây đầu khi token vừa tạo", (v) => pct(v, 0)],
+  ["quick_flip_share", "Vị thế bán trong ≤ 20 giây", (v) => pct(v, 0)],
+  ["no_rest_day_share", "Ngày bận không nghỉ 4 tiếng nào", (v) => pct(v, 0)],
+  ["median_entry_after_creation_s", "Vào lệnh sau khi token ra mắt (trung vị)", (v) => duration(v)],
+  ["median_holding_s", "Thời gian giữ lệnh (trung vị)", (v) => duration(v)],
+];
+
+function CopyCard({ perf, main }: { perf: any; main: number }) {
+  const b = perf.metrics?.behavior;
+  const copy = perf.metrics?.copy || {};
+  const delays = Object.keys(copy).map(Number).sort((x, y) => x - y);
+  const lbl = (d: number) => (d === 0 ? "Copy ngay lập tức" : d % 60 === 0 ? `Trễ ${d / 60} phút` : `Trễ ${d} giây`);
+  return (
+    <Card title="Có copy được ví này không?">
+      <div className="grid gap-4 lg:grid-cols-2">
+        <div>
+          <div className="mb-2 flex items-center gap-2 text-sm">Kiểu giao dịch: <BehaviorBadge b={b?.label} /></div>
+          <table className="w-full text-xs">
+            <tbody>
+              {BEHAVIOR_METRICS.map(([k, label, f]) => {
+                const v = b?.metrics?.[k];
+                const hit = b?.hits?.[k];
+                return (
+                  <tr key={k} className="border-t border-slate-100 dark:border-slate-800">
+                    <td className="py-1 pr-2 text-slate-500">{label}</td>
+                    <td className={`py-1 text-right tabular-nums ${hit === "bot" ? "text-rose-600 dark:text-rose-400" : hit ? "text-amber-600 dark:text-amber-400" : ""}`}>
+                      {v === null || v === undefined ? "—" : f(v)}{hit === "bot" ? " · kiểu bot" : hit ? " · hơi giống bot" : ""}</td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
+        <div>
+          <div className="mb-2 text-sm">Nếu bạn copy các vị thế ≥ 2 SOL đã đóng của ví này:</div>
+          {delays.length === 0 ? <Empty>Chưa có dữ liệu giá để mô phỏng.</Empty> : (
+            <table className="w-full text-xs">
+              <thead><tr className="text-left text-slate-500"><th className="py-1">Độ trễ</th><th className="py-1 text-right">Tỷ lệ thắng</th><th className="py-1 text-right">Lãi/lỗ TB mỗi lệnh</th><th className="py-1 text-right">Số lệnh có giá</th></tr></thead>
+              <tbody>
+                {delays.map((d) => {
+                  const c = copy[String(d)];
+                  return (
+                    <tr key={d} className={`border-t border-slate-100 dark:border-slate-800 ${d === main ? "font-semibold" : ""}`}>
+                      <td className="py-1">{lbl(d)}{d === main ? " ★" : ""}</td>
+                      <td className="py-1 text-right tabular-nums">{pct(c?.win_rate, 0)}</td>
+                      <td className="py-1 text-right tabular-nums"><Tone v={c?.avg_return}>{signedPct(c?.avg_return, 0)}</Tone></td>
+                      <td className="py-1 text-right tabular-nums">{c ? `${c.positions}/${c.closed_total}` : "—"}</td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          )}
+          <p className="mt-2 text-[11px] text-slate-500">Bạn mua cùng số SOL và bán cùng tỷ lệ như ví, nhưng trễ hơn. Giá lấy từ nến 1 phút lịch sử,
+            đã trừ 3% phí và trượt giá. Nếu ví bán trước lúc bạn kịp mua thì lệnh của bạn hòa vốn và mất phí. ★ là mức trễ dùng để xếp hạng
+            (đổi trong Cài đặt). “Copy ngay lập tức” gần bằng kết quả thật của ví.</p>
+        </div>
+      </div>
+    </Card>
   );
 }

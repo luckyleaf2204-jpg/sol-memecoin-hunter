@@ -21,7 +21,10 @@ import statistics
 from dataclasses import dataclass, field
 from typing import Any, Iterable
 
+from .behavior import copy_summary
 from .positions import Position
+
+COPY_DELAYS = (0, 30, 60, 180)   # 0 = reference: copying instantly reproduces the wallet
 
 
 @dataclass
@@ -176,6 +179,13 @@ def compute_performance(positions: Iterable[Position], period_days: int, now: in
         five = [p for p in priced if p.price_metrics["hits"].get(5)]
         perf.metrics["realized_5x_given_token_5x"] = (
             sum(1 for p in five if (p.realized_multiple or 0) >= 5) / len(five)) if five else None
+
+    # copying this wallet late: closed qualifying positions simulated by the analytics runner
+    copy = {}
+    delays = set(COPY_DELAYS) | {int(k) for p in closed for k in (p.price_metrics.get("copy") or {})}
+    for d in sorted(delays):
+        copy[str(d)] = copy_summary([(p.price_metrics.get("copy") or {}).get(str(d)) for p in closed], len(closed))
+    perf.metrics["copy"] = copy
 
     if q:
         perf.verified_share = sum(1 for p in q if p.verification == "verified") / len(q)

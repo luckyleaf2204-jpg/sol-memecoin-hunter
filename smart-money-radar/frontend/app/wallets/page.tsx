@@ -3,11 +3,12 @@ import Link from "next/link";
 import { useState } from "react";
 import { api, useApi } from "@/lib/api";
 import { statusLabel } from "@/lib/labels";
-import { ago, num, pct, sol } from "@/lib/format";
-import { Address, Card, CategoryBadge, ConfBadge, Empty, ErrorBox, Loading, Segmented, Td, Th, Tone } from "@/components/ui";
+import { ago, duration, num, pct, sol } from "@/lib/format";
+import { Address, BehaviorBadge, Card, CategoryBadge, ConfBadge, Empty, ErrorBox, Loading, Segmented, Td, Th, Tone } from "@/components/ui";
 
 const SORTS = [
   { v: "score", label: "Smart Money Score" }, { v: "win_rate", label: "Win Rate" },
+  { v: "copy_win_rate", label: "Thắng khi copy" },
   { v: "median_buy", label: "Median Buy SOL" }, { v: "realized_pnl", label: "Realized PnL" },
   { v: "roi", label: "ROI" }, { v: "hit_5x", label: "5x Hit Rate" }, { v: "hit_10x", label: "10x Hit Rate" },
 ];
@@ -16,11 +17,12 @@ export default function Wallets() {
   const [period, setPeriod] = useState<number>(30);
   const [sort, setSort] = useState("score");
   const [official, setOfficial] = useState(true);
+  const [human, setHuman] = useState(false);
   const limit = official ? 10 : 100;
-  const { data, error, loading } = useApi<any>(`/api/wallets/top?period=${period}&sort=${sort}&limit=${limit}&official=${official}`,
+  const { data, error, loading } = useApi<any>(`/api/wallets/top?period=${period}&sort=${sort}&limit=${limit}&official=${official}&human_only=${human}`,
     60000, ["rankings_updated"]);
   const all = useApi<any>(`/api/wallets?period=${period}&page_size=100`, 60000, ["rankings_updated"]);
-  const cand = useApi<any>(`/api/wallets/candidates?period=${period}`, 60000, ["rankings_updated"]);
+  const cand = useApi<any>(`/api/wallets/candidates?period=${period}&human_only=${human}`, 60000, ["rankings_updated"]);
   const [addr, setAddr] = useState("");
   const [msg, setMsg] = useState<string | null>(null);
   const rows = data?.rows || [];
@@ -31,6 +33,7 @@ export default function Wallets() {
         <div className="flex flex-wrap gap-2">
           <Segmented value={period} onChange={setPeriod} options={[{ v: 7, label: "7 ngày" }, { v: 30, label: "30 ngày" }, { v: 90, label: "90 ngày" }]} />
           <Segmented value={official ? "o" : "a"} onChange={(v) => setOfficial(v === "o")} options={[{ v: "o", label: "Chính thức" }, { v: "a", label: "Tất cả" }]} />
+          <Segmented value={human ? "h" : "x"} onChange={(v) => setHuman(v === "h")} options={[{ v: "x", label: "Mọi ví" }, { v: "h", label: "Chỉ ví người" }]} />
         </div>
       </div>
       <div className="flex items-center gap-2 overflow-x-auto pb-1 text-xs">
@@ -41,7 +44,8 @@ export default function Wallets() {
       </div>
       {official && (
         <p className="text-xs text-slate-500">Top 10 chính thức chỉ gồm ví đạt mọi tiêu chí bắt buộc (Win Rate ≥ 65%, Median Buy ≥ 2 SOL, PnL & ROI dương sau phí,
-          ≥ 5 vị thế đã đóng), độ tin cậy dữ liệu High/Medium và Smart Money Score ≥ 65. Tính lại tự động khi có dữ liệu mới.</p>
+          ≥ 5 vị thế đã đóng), độ tin cậy dữ liệu High/Medium, Smart Money Score ≥ 65, <b>giao dịch giống người (không phải bot)</b> và
+          <b> copy trễ 1 phút vẫn thắng ≥ 60%</b> (mô phỏng trên giá lịch sử, đã trừ phí). Tính lại tự động khi có dữ liệu mới.</p>
       )}
       {loading && !data ? <Loading /> : error ? <ErrorBox msg={error} /> : rows.length === 0 ? (
         <Card><Empty>Chưa có ví nào đủ điều kiện trong {period} ngày. Hệ thống đang backfill lịch sử các ví ứng viên — xem trạng thái ở danh sách bên dưới.</Empty></Card>
@@ -55,9 +59,9 @@ export default function Wallets() {
                   <div className="text-right"><div className="text-2xl font-bold text-brand dark:text-teal-300">{num(r.score, 1)}</div><div className="text-[10px] text-slate-500">/ 100</div></div>
                 </div>
                 <div className="mt-1"><Address a={r.wallet} /></div>
-                <div className="mt-2 flex flex-wrap gap-1"><CategoryBadge c={r.category} /><ConfBadge c={r.confidence} /></div>
+                <div className="mt-2 flex flex-wrap gap-1"><BehaviorBadge b={r.behavior} /><CategoryBadge c={r.category} /><ConfBadge c={r.confidence} /></div>
                 <div className="mt-2 grid grid-cols-3 gap-2 text-xs">
-                  <M l="Win Rate" v={pct(r.win_rate, 0)} /><M l="Median Buy" v={sol(r.median_buy_sol)} /><M l="Realized PnL" v={<Tone v={r.realized_pnl_sol}>{sol(r.realized_pnl_sol, 1)}</Tone>} />
+                  <M l="Win Rate" v={pct(r.win_rate, 0)} /><M l={`Thắng khi copy trễ ${copyDelay(r)}`} v={copyText(r)} /><M l="Giữ lệnh TB" v={duration(r.avg_holding_seconds)} /><M l="Median Buy" v={sol(r.median_buy_sol)} /><M l="Realized PnL" v={<Tone v={r.realized_pnl_sol}>{sol(r.realized_pnl_sol, 1)}</Tone>} />
                   <M l="ROI" v={<Tone v={r.roi}>{pct(r.roi, 0)}</Tone>} /><M l="2x / 3x / 5x / 10x" v={`${pct(r.hit_rate_2x, 0)} · ${pct(r.hit_rate_3x, 0)} · ${pct(r.hit_rate_5x, 0)} · ${pct(r.hit_rate_10x, 0)}`} /><M l="Last Active" v={ago(r.last_active_at)} />
                   <M l="Average Buy" v={sol(r.avg_buy_sol)} /><M l="Largest Buy" v={sol(r.largest_buy_sol)} /><M l="Vị thế đóng" v={`${r.closed_qualifying} (${r.wins}W/${r.losses}L)`} />
                 </div>
@@ -69,7 +73,8 @@ export default function Wallets() {
               <table>
                 <thead><tr>
                   <Th>Rank</Th><Th>Wallet</Th><Th active={sort === "score"} onClick={() => setSort("score")}>Score</Th>
-                  <Th active={sort === "win_rate"} onClick={() => setSort("win_rate")}>Win Rate</Th>
+                  <Th>Loại ví</Th><Th active={sort === "win_rate"} onClick={() => setSort("win_rate")}>Win Rate</Th>
+                  <Th active={sort === "copy_win_rate"} onClick={() => setSort("copy_win_rate")}>Thắng khi copy</Th>
                   <Th active={sort === "median_buy"} onClick={() => setSort("median_buy")}>Median Buy</Th>
                   <Th>Average Buy</Th><Th>Largest Buy</Th>
                   <Th active={sort === "realized_pnl"} onClick={() => setSort("realized_pnl")}>Realized PnL</Th>
@@ -82,7 +87,8 @@ export default function Wallets() {
                     <tr key={r.wallet}>
                       <Td className="font-bold">{official ? r.official_rank : i + 1}</Td>
                       <Td className="min-w-[220px] max-w-[260px] whitespace-normal"><Address a={r.wallet} href={`/wallets/${r.wallet}`} /></Td>
-                      <Td className="font-semibold">{num(r.score, 1)}</Td><Td>{pct(r.win_rate, 0)}</Td>
+                      <Td className="font-semibold">{num(r.score, 1)}</Td><Td><BehaviorBadge b={r.behavior} /></Td><Td>{pct(r.win_rate, 0)}</Td>
+                      <Td>{copyText(r)}</Td>
                       <Td>{sol(r.median_buy_sol)}</Td><Td>{sol(r.avg_buy_sol)}</Td><Td>{sol(r.largest_buy_sol)}</Td>
                       <Td><Tone v={r.realized_pnl_sol}>{sol(r.realized_pnl_sol, 1)}</Tone></Td><Td><Tone v={r.roi}>{pct(r.roi, 0)}</Tone></Td>
                       <Td>{pct(r.hit_rate_2x, 0)}</Td><Td>{pct(r.hit_rate_3x, 0)}</Td><Td>{pct(r.hit_rate_5x, 0)}</Td><Td>{pct(r.hit_rate_10x, 0)}</Td>
@@ -111,7 +117,8 @@ export default function Wallets() {
                     <span className="w-6 font-bold">{i + 1}</span>
                     <Link href={`/wallets/${r.wallet}`} className="font-mono text-[12px] text-brand dark:text-teal-300">{r.wallet.slice(0, 6)}…{r.wallet.slice(-6)}</Link>
                     <span className="font-semibold">{num(r.score, 1)}</span>
-                    <span className="text-xs text-slate-500">WR {pct(r.win_rate, 0)} · {sol(r.realized_pnl_sol, 1)} · median {sol(r.median_buy_sol)}</span>
+                    <BehaviorBadge b={r.behavior} />
+                    <span className="text-xs text-slate-500">WR {pct(r.win_rate, 0)} · copy {copyText(r)} · {sol(r.realized_pnl_sol, 1)} · median {sol(r.median_buy_sol)}</span>
                     <span className={`ml-auto rounded-full px-2 py-0.5 text-[11px] font-semibold ${passed === all ? "bg-emerald-100 text-emerald-800" : "bg-slate-100 text-slate-600 dark:bg-slate-800 dark:text-slate-300"}`}>
                       {passed === all ? (r.official_rank ? `Top #${r.official_rank}` : "Đạt") : `${passed}/${all} mục`}</span>
                   </summary>
@@ -139,12 +146,13 @@ export default function Wallets() {
         {msg && <div className="mb-2 text-xs text-slate-500">{msg}</div>}
         <div className="table-wrap">
           <table>
-            <thead><tr><Th>Wallet</Th><Th>Trạng thái</Th><Th>Score</Th><Th>Win Rate</Th><Th>Median Buy</Th><Th>PnL</Th><Th>Vị thế đóng</Th><Th>Backfill</Th><Th>Nguồn</Th></tr></thead>
+            <thead><tr><Th>Wallet</Th><Th>Trạng thái</Th><Th>Loại ví</Th><Th>Score</Th><Th>Win Rate</Th><Th>Thắng khi copy</Th><Th>Median Buy</Th><Th>PnL</Th><Th>Vị thế đóng</Th><Th>Backfill</Th><Th>Nguồn</Th></tr></thead>
             <tbody>
               {(all.data?.rows || []).map((r: any) => (
                 <tr key={r.address}>
                   <Td><Address a={r.address} href={`/wallets/${r.address}`} full={false} /></Td>
-                  <Td>{r.high_frequency ? "Bỏ qua: bot tần suất cao" : statusLabel(r.status)}</Td><Td>{r.score !== null ? num(r.score, 1) : "—"}</Td><Td>{pct(r.win_rate, 0)}</Td>
+                  <Td>{r.high_frequency ? "Bỏ qua: bot tần suất cao" : statusLabel(r.status)}</Td><Td><BehaviorBadge b={r.behavior} /></Td><Td>{r.score !== null ? num(r.score, 1) : "—"}</Td><Td>{pct(r.win_rate, 0)}</Td>
+                  <Td>{pct(r.copy_win_rate, 0)}</Td>
                   <Td>{sol(r.median_buy_sol)}</Td><Td><Tone v={r.realized_pnl_sol}>{sol(r.realized_pnl_sol, 1)}</Tone></Td>
                   <Td>{r.closed_qualifying ?? "—"}</Td><Td>{r.backfill_status}</Td><Td>{r.discovery_source || "—"}</Td>
                 </tr>
@@ -155,6 +163,17 @@ export default function Wallets() {
       </Card>
     </div>
   );
+}
+
+function copyDelay(r: any) {
+  const d = r.copy?.delay_s ?? 60;
+  return d % 60 === 0 ? `${d / 60} phút` : `${d} giây`;
+}
+
+function copyText(r: any) {
+  const c = r.copy;
+  if (!c || !c.positions) return "chưa đủ giá";
+  return `${pct(c.win_rate, 0)} (${c.positions} lệnh)`;
 }
 
 function M({ l, v }: { l: string; v: any }) {

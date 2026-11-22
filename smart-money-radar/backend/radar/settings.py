@@ -32,6 +32,13 @@ DEFAULTS: dict[str, Any] = {
     "peak_confirm_points": 2,
     "peak_confirm_window_minutes": 5,
     "peak_min_trade_sol": 0.3,
+    # copyable human traders (Top 10 requires both when switched on)
+    "require_human": True,               # bot / likely-bot wallets are not ranked
+    "require_copyable": True,            # follower copying late must still win often enough
+    "copy_delay_seconds": 60,            # how late the follower copies (simulation also runs 30 s / 180 s)
+    "copy_cost_pct": 0.03,               # follower round-trip fees + slippage (3 %)
+    "min_copy_win_rate": 0.6,
+    "min_copy_positions": 5,             # positions with price data needed to judge copyability
     # co-buy signal
     "signal_window_minutes": 5,
     "signal_min_position_sol": 2.0,
@@ -105,6 +112,12 @@ SPEC: dict[str, Spec] = {
     "peak_confirm_points": Spec(int, 1, 20),
     "peak_confirm_window_minutes": Spec((int, float), 1, 1440),
     "peak_min_trade_sol": Spec((int, float), 0, 1000),
+    "require_human": Spec(bool),
+    "require_copyable": Spec(bool),
+    "copy_delay_seconds": Spec(int, 0, 1800),
+    "copy_cost_pct": Spec((int, float), 0, 0.5),
+    "min_copy_win_rate": Spec((int, float), 0, 1),
+    "min_copy_positions": Spec(int, 1, 1000),
     "signal_window_minutes": Spec((int, float), 0.5, 120),
     "signal_min_position_sol": Spec((int, float), 0, 1000),
     "signal_watch_min_wallets": Spec(int, 2, 100),

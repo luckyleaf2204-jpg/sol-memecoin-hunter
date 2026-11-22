@@ -17,6 +17,14 @@ const GROUPS: { title: string; fields: F[] }[] = [
     { k: "holder_alert_pct", label: "Cảnh báo khi một ví nắm trên (% supply)", type: "number" },
     { k: "fresh_wallet_hours", label: "Ví mới tạo: hoạt động đầu tiên trong vòng (giờ)", type: "number" },
   ] },
+  { title: "Ví copy được (người thật, copy trễ vẫn thắng)", fields: [
+    { k: "require_human", label: "Chỉ xếp hạng ví giao dịch giống người (loại bot)", type: "bool" },
+    { k: "require_copyable", label: "Chỉ xếp hạng ví copy trễ vẫn thắng", type: "bool" },
+    { k: "copy_delay_seconds", label: "Bạn copy trễ bao nhiêu giây", type: "number", hint: "60 = 1 phút" },
+    { k: "min_copy_win_rate", label: "Tỷ lệ thắng tối thiểu khi copy trễ", type: "number", pct: true },
+    { k: "min_copy_positions", label: "Số vị thế có giá tối thiểu để đánh giá copy", type: "number" },
+    { k: "copy_cost_pct", label: "Phí + trượt giá của bạn (cả mua và bán)", type: "number", pct: true },
+  ] },
   { title: "Điều kiện cảnh báo (cùng mua)", fields: [
     { k: "signal_window_minutes", label: "Cửa sổ thời gian (phút)", type: "number" },
     { k: "signal_min_position_sol", label: "Vốn tối thiểu mỗi vị thế (SOL)", type: "number" },

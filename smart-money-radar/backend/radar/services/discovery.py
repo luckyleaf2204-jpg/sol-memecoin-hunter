@@ -7,6 +7,10 @@ when on-chain data shows one of:
                 liquidity-validated peak (bought before a >= 3x move)
   seed          early buyers (>= min_buy SOL) of tokens the operator seeds explicitly, or of
                 tokens that migrated to PumpSwap; read from the token's own signature history
+  patient_winner  copyable-looking traders: >= 2 round trips in 7 days that bought >= min_buy SOL
+                at least 60 s after the token's creation, held >= 3 minutes and sold for >= +10 %,
+                with a human trading rate (<= 100 stored trades/day). Checked first, because
+                big/early buyers are mostly sniper bots that nobody can copy by hand.
 
 Nothing here makes a wallet "smart": only the backfilled history and the score do.
 """
@@ -59,6 +63,38 @@ async def big_buyers(ctx: Ctx, s: dict) -> int:
     chosen = new[:cap]
     async with ctx.pool.acquire() as conn:
         await repo.ensure_wallets(conn, [(w, "big_buyer", detail[w]) for w in chosen])
+    return len(chosen)
+
+
+async def patient_winners(ctx: Ctx, s: dict) -> int:
+    rows = await ctx.pool.fetch("""WITH pos AS (
+            SELECT wallet, mint,
+                   sum(sol_amount) FILTER (WHERE tx_type = 'buy') AS buy_sol,
+                   sum(sol_amount) FILTER (WHERE tx_type = 'sell') AS sell_sol,
+                   min(block_time) FILTER (WHERE tx_type = 'buy') AS first_buy,
+                   max(block_time) FILTER (WHERE tx_type = 'sell') AS last_sell
+            FROM wallet_transactions
+            WHERE block_time > now() - interval '7 days' AND tx_type IN ('buy', 'sell')
+              AND (user_is_signer IS DISTINCT FROM false)
+            GROUP BY wallet, mint),
+        act AS (SELECT wallet, count(*) AS n FROM wallet_transactions
+                WHERE block_time > now() - interval '7 days' GROUP BY wallet)
+        SELECT p.wallet, count(*) AS wins, sum(p.sell_sol - p.buy_sol) AS profit,
+               percentile_cont(0.5) WITHIN GROUP (ORDER BY extract(epoch FROM p.last_sell - p.first_buy)) AS hold_s
+        FROM pos p JOIN act a USING (wallet) LEFT JOIN tokens t ON t.mint = p.mint
+        WHERE p.buy_sol >= $1 AND p.sell_sol >= p.buy_sol * 1.1
+          AND p.last_sell - p.first_buy >= interval '3 minutes'
+          AND (t.created_at IS NULL OR p.first_buy - t.created_at >= interval '60 seconds')
+          AND a.n <= 700
+        GROUP BY p.wallet HAVING count(*) >= 2
+        ORDER BY count(*) DESC, sum(p.sell_sol - p.buy_sol) DESC LIMIT 300""", float(s["min_buy_sol"]))
+    new = await _filter_new(ctx, [r["wallet"] for r in rows], s)
+    cap = await _capacity(ctx, s)
+    detail = {r["wallet"]: {"patient_wins_7d": r["wins"], "profit_sol_7d": float(r["profit"]),
+                            "median_hold_s": float(r["hold_s"])} for r in rows}
+    chosen = new[:cap]
+    async with ctx.pool.acquire() as conn:
+        await repo.ensure_wallets(conn, [(w, "patient_winner", detail[w]) for w in chosen])
     return len(chosen)
 
 
@@ -135,6 +171,7 @@ async def main(ctx: Ctx) -> None:
     while True:
         try:
             s = await ctx.settings.get()
+            pw = await patient_winners(ctx, s)
             a = await big_buyers(ctx, s)
             b = await early_buyers(ctx, s) if n % 3 == 0 else 0
             # seed from tokens that migrated recently (on-chain migration events)
@@ -149,9 +186,9 @@ async def main(ctx: Ctx) -> None:
                     await ctx.pool.execute("""INSERT INTO api_sync_status(source, job, status, details, last_success_at)
                         VALUES ('seed', $1, 'done', $2, now()) ON CONFLICT DO NOTHING""", r["mint"], res)
             await repo.heartbeat(ctx.pool, ctx.worker, ctx.started_at,
-                                 {"big_buyers": a, "early_buyers": b, "seeded": c, "cycle": n})
-            if a or b or c:
-                log.info("discovery: %d big buyers, %d early buyers, %d seeded", a, b, c)
+                                 {"patient_winners": pw, "big_buyers": a, "early_buyers": b, "seeded": c, "cycle": n})
+            if pw or a or b or c:
+                log.info("discovery: %d patient winners, %d big buyers, %d early buyers, %d seeded", pw, a, b, c)
         except Exception:
             log.exception("discovery cycle failed")
         n += 1

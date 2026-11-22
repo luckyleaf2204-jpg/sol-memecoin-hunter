@@ -124,6 +124,65 @@ Top 10 chính thức khi qua **tất cả**:
 * **Tỷ lệ lợi nhuận đã chốt** = |Realized| / (|Realized| + |Unrealized|).
 * **Số lệnh thắng** = `wins`; **3x Hit Rate** hiển thị cùng 2x/5x/10x.
 
+## 5b. Ví copy được: người hay bot, copy trễ có còn thắng (`radar/analytics/behavior.py`)
+
+Mục tiêu: chọn ví **người thật** có tỷ lệ thắng cao mà bạn **copy tay, trễ vài chục giây đến vài phút, vẫn thắng**.
+Ví bot (bắn tỉa lúc token vừa tạo, lướt vài giây) có Win Rate rất cao nhưng không ai copy tay kịp.
+
+### Người hay bot
+
+Tính trên mọi lệnh mua/bán của ví trong kỳ (mọi cỡ lệnh):
+
+| Chỉ số | "Hơi giống bot" | "Bot" |
+|---|---|---|
+| Số lệnh nhiều nhất trong 60 giây | ≥ 6 | ≥ 12 |
+| Số lệnh / ngày có giao dịch | ≥ 120 | ≥ 400 |
+| Tỷ lệ lệnh trên token **khác nhau** cách nhau ≤ 5 giây | ≥ 5% | ≥ 20% |
+| Tỷ lệ token mua trong 5 giây đầu sau khi tạo (cần ≥ 5 token biết giờ tạo) | ≥ 25% | ≥ 60% |
+| Tỷ lệ vị thế đóng trong ≤ 20 giây (cần ≥ 5 vị thế đóng) | ≥ 25% | ≥ 60% |
+| Tỷ lệ ngày bận (≥ 20 lệnh) không có khoảng nghỉ ≥ 4 giờ nào (cần ≥ 3 ngày bận; khoảng nghỉ tính liên tục qua nửa đêm) | ≥ 50% | ≥ 90% |
+
+**BOT** = chạm 1 ngưỡng "Bot" hoặc ≥ 3 ngưỡng "hơi giống bot"; **Có dấu hiệu bot** = 1–2 ngưỡng "hơi giống";
+**Người** = không chạm ngưỡng nào; **Chưa rõ** = dưới 10 lệnh. Người dùng app giao dịch (Axiom, Photon, Phantom…) vẫn là "Người".
+Score nhân ×0,60 với BOT và ×0,85 với "Có dấu hiệu bot".
+
+### Mô phỏng copy trễ
+
+Với mỗi vị thế đã đóng, bạn mua cùng số SOL ở mỗi lệnh mua của ví và bán cùng tỷ lệ ở mỗi lệnh bán, nhưng trễ `D` giây
+(D = 0, 30, 60, 180 và giá trị trong Cài đặt):
+
+* Giá của bạn = giá khớp thật của ví × (giá thị trường lúc t + D / giá thị trường lúc t). Giá thị trường nội suy từ nến 1 phút
+  lịch sử (giá mở ở đầu nến, giá đóng ở cuối nến; nến on-chain, GeckoTerminal dự phòng). Vì vậy D = 0 tái tạo đúng kết quả
+  của ví (đã kiểm tra trên dữ liệu thật: 78,5% so với Win Rate thật 78%), D lớn hơn cho thấy giá đã chạy bao nhiêu khi bạn trễ.
+* Lệnh bán mà ví làm **trước khi bạn kịp vào** (sớm hơn max(D, 60 giây) sau lệnh mua đầu) không cho bạn lợi nhuận: phần đó bán
+  bằng giá vào của bạn. Điều này loại lợi nhuận chỉ bot bắn tỉa mới lấy được, và các biến động trong một nến 1 phút mà dữ liệu
+  không phân giải được.
+* Vị thế ví bị write-off (ôm token chết) là lỗ toàn bộ phần còn lại của bạn.
+* Trừ `copy_cost_pct` (mặc định 3%: phí + trượt giá cả mua và bán). Thắng = nhận về sau phí > vốn bỏ ra.
+* Thiếu giá ở bất kỳ thời điểm cần thiết → vị thế "chưa đủ giá", không tính (không đoán).
+
+**Thắng khi copy** = tỷ lệ thắng trên các vị thế ≥ 2 SOL đã đóng có đủ giá, ở độ trễ `copy_delay_seconds` (mặc định 60 giây).
+
+### Điều kiện mới của Top 10 và của ví phát tín hiệu
+
+Bật mặc định, tắt được trong Cài đặt:
+
+* `require_human`: ví phải là **Người**.
+* `require_copyable`: ≥ `min_copy_positions` (5) vị thế có giá và **Thắng khi copy** ≥ `min_copy_win_rate` (60%).
+
+Ví chỉ được dùng để phát tín hiệu Telegram (trạng thái "smart") khi qua cả hai điều kiện này, để cảnh báo chỉ đến từ ví copy được.
+
+### Tìm ví người (nguồn `patient_winner`)
+
+Bộ tìm ví ưu tiên ví có ≥ 2 lần trong 7 ngày: mua ≥ 2 SOL **sau ≥ 60 giây** kể từ khi token tạo, giữ ≥ 3 phút, bán lãi ≥ 10%,
+và không quá 100 lệnh/ngày. Các ví này được đọc lịch sử trước các ví "mua lớn"/"mua sớm" (phần lớn là bot bắn tỉa).
+
+### Kết quả trên dữ liệu thật (22/11/2026)
+
+Trên 23 ví đã đọc đủ lịch sử: 14 BOT, 6 Có dấu hiệu bot, 1 Người, 2 Chưa rõ. Mọi ví Win Rate ≥ 65% copy trễ 1 phút đều thắng
+≤ 17%. Ví dụ ví `78Fmcv…` (Win Rate 78%): copy ngay 79%, trễ 30 giây 18%, trễ 1 phút 13%, trễ 3 phút 2%. Top 10 theo điều kiện
+mới hiện trống cho tới khi bộ tìm ví người tích lũy đủ ứng viên.
+
 ## 6. Ví độc lập (`radar/analytics/relationships.py`)
 
 Cạnh quan hệ (kèm bằng chứng chữ ký): nạp SOL trực tiếp (0,9), chuyển token qua lại (0,9), chuyển SOL ≥ 0,1 (0,85), cùng ví funding

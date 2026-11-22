@@ -173,6 +173,7 @@ async def scheduler(ctx: Ctx) -> None:
                   AND (backfill_status IN ('queued','none','failed')
                        OR last_synced_at IS NULL OR last_synced_at < now() - make_interval(mins => $1::int))
                 ORDER BY (status = 'smart') DESC, (discovery_source = 'manual') DESC,
+                         (discovery_source = 'patient_winner' AND backfill_status = 'queued') DESC,
                          COALESCE(sc.score, 0) DESC, (discovery_source IN ('early_buyer','seed')) DESC,
                          COALESCE((discovery_detail->>'tokens_7d')::int, jsonb_array_length(
                              CASE WHEN jsonb_typeof(discovery_detail->'tokens') = 'array' THEN discovery_detail->'tokens'

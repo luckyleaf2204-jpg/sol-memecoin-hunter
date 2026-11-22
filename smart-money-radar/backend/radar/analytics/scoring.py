@@ -53,7 +53,8 @@ def category_for(score: float) -> str:
 
 
 def score_wallet(perf: Performance, settings: dict[str, Any], cluster_size: int = 1,
-                 excluded: bool = False, signer_share: float | None = 1.0, history_read: bool = True) -> ScoreResult:
+                 excluded: bool = False, signer_share: float | None = 1.0, history_read: bool = True,
+                 behavior: dict[str, Any] | None = None) -> ScoreResult:
     s = settings
     min_buy = float(s["min_buy_sol"])
     reasons: list[str] = []
@@ -122,6 +123,13 @@ def score_wallet(perf: Performance, settings: dict[str, Any], cluster_size: int 
     if perf.positions_total > 300:
         mult *= 0.85
         reasons.append(f"{perf.positions_total} positions in period: high-frequency / bot-like (x0.85)")
+    label = (behavior or perf.metrics.get("behavior") or {}).get("label", "UNKNOWN")
+    if label == "BOT":
+        mult *= 0.6
+        reasons.append("trading pattern of an automated bot (x0.60)")
+    elif label == "LIKELY_BOT":
+        mult *= 0.85
+        reasons.append("trading pattern partly bot-like (x0.85)")
     score = round(raw * mult, 2)
     comp["multiplier"] = mult
     comp["weights"] = WEIGHTS
@@ -183,6 +191,26 @@ def score_wallet(perf: Performance, settings: dict[str, Any], cluster_size: int 
         "active_last_7_days": dsa is not None and dsa <= 7,
         "not_single_win_dependent": perf.pnl_ex_best_sol > 0,
     }
+    # copyable human trader (switchable in settings)
+    comp["behavior"] = {"label": label}
+    if s.get("require_human", True):
+        comp["checks"]["human_like"] = label == "HUMAN"
+        if label != "HUMAN":
+            reasons.append({"BOT": "looks like a bot: not ranked", "LIKELY_BOT": "partly bot-like: not ranked",
+                            "UNKNOWN": "too few trades to tell person from bot"}.get(label, label))
+    d = str(int(s.get("copy_delay_seconds", 60)))
+    cs = (perf.metrics.get("copy") or {}).get(d) or {}
+    comp["copy"] = {"delay_s": int(d), **cs}
+    if s.get("require_copyable", True):
+        enough = (cs.get("positions") or 0) >= int(s.get("min_copy_positions", 5))
+        ok_copy = enough and (cs.get("win_rate") or 0) >= float(s.get("min_copy_win_rate", 0.6))
+        comp["checks"]["copyable"] = ok_copy
+        if not enough:
+            reasons.append(f"copy test: only {cs.get('positions') or 0} positions with price data "
+                           f"(need {s.get('min_copy_positions', 5)})")
+        elif not ok_copy:
+            reasons.append(f"copying {d}s late wins only {fmt_pct(cs.get('win_rate'))} "
+                           f"(< {fmt_pct(s.get('min_copy_win_rate', 0.6))})")
     if not rep.get("pass"):
         reasons.append("performance not repeatable across both halves of the period" if rep.get("status") == "fail"
                        else "too few closed positions to test repeatability (need 6)")

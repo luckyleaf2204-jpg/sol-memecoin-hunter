@@ -89,6 +89,8 @@ class Position:
     entry_mc_weighted: float = 0.0
     exit_mc_weighted: float = 0.0
     buy_tx_sizes: list[float] = field(default_factory=list)
+    buy_events: list[tuple[int, float, float | None]] = field(default_factory=list)   # (time, SOL, price)
+    sell_events: list[tuple[int, float, float | None]] = field(default_factory=list)  # (time, fraction sold, price)
     entry_liquidity_sol: float | None = None
     flags: list[str] = field(default_factory=list)
     signatures: list[str] = field(default_factory=list)
@@ -218,6 +220,8 @@ def build_positions(wallet: str, mint: str, events: Iterable[Event], dust_fracti
                 p.cost_basis_remaining += e.sol_amount
                 p.fees_sol += e.fees_sol
                 p.buy_tx_sizes.append(e.sol_amount)
+                p.buy_events.append((e.block_time, e.sol_amount,
+                                     e.sol_amount / e.token_amount if e.token_amount > 0 else None))
                 if e.market_cap_sol:
                     p.entry_mc_weighted += e.market_cap_sol * e.sol_amount
                 if p.first_buy_at is None and e.liquidity_sol is not None:
@@ -259,6 +263,7 @@ def build_positions(wallet: str, mint: str, events: Iterable[Event], dust_fracti
             if e.market_cap_sol:
                 p.exit_mc_weighted += e.market_cap_sol * e.sol_amount
             p.first_sell_at = p.first_sell_at or e.block_time
+            p.sell_events.append((e.block_time, frac, e.sol_amount / qty if qty > 0 else None))
         else:
             p.tokens_out += qty
             p.transferred_out_cost += cost_removed

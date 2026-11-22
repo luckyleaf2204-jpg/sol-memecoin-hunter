@@ -25,7 +25,9 @@ def perf(**kw) -> Performance:
         setattr(p, k, v)
     p.metrics.update({"share_positions_qualifying": 0.8, "median_to_mean": 0.92,
                       "positions_with_price_data": 12, "median_entry_share_of_liquidity": 0.1,
-                      "repeatability": {"status": "pass", "pass": True}, "days_since_active": 1.0})
+                      "repeatability": {"status": "pass", "pass": True}, "days_since_active": 1.0,
+                      "behavior": {"label": "HUMAN"},
+                      "copy": {"60": {"positions": 10, "closed_total": 12, "win_rate": 0.7}}})
     return p
 
 
@@ -302,6 +304,27 @@ def test_checklist_blocks_unrepeatable_or_inactive_wallets():
     p = _strong()
     p.metrics["days_since_active"] = 20
     assert not score_wallet(p, S).eligible_official
+
+
+def test_bots_and_uncopyable_wallets_are_not_ranked():
+    p = _strong()
+    p.metrics["behavior"] = {"label": "BOT"}
+    r = score_wallet(p, S)
+    assert not r.eligible_official and not r.components["checks"]["human_like"]
+    assert r.score < score_wallet(_strong(), S).score          # bot multiplier x0.6
+    p = _strong()
+    p.metrics["copy"] = {"60": {"positions": 10, "closed_total": 12, "win_rate": 0.4}}
+    r = score_wallet(p, S)
+    assert not r.eligible_official and not r.components["checks"]["copyable"]
+    p = _strong()
+    p.metrics["copy"] = {"60": {"positions": 2, "closed_total": 12, "win_rate": 1.0}}   # too little price data
+    assert not score_wallet(p, S).components["checks"]["copyable"]
+    # both rules can be switched off in settings
+    p = _strong()
+    p.metrics["behavior"] = {"label": "BOT"}
+    p.metrics["copy"] = {}
+    r = score_wallet(p, dict(S, require_human=False, require_copyable=False))
+    assert "human_like" not in r.components["checks"] and "copyable" not in r.components["checks"]
 
 
 def test_one_slot_per_cluster_in_official_top():

@@ -72,6 +72,15 @@ export const VerifBadge = ({ v }: { v?: string | null }) =>
 export const CategoryBadge = ({ c }: { c?: string | null }) =>
   c ? <Pill className="bg-brand/10 text-brand dark:bg-brand-light/20 dark:text-teal-300">{CATEGORY_LABEL[c] || c}</Pill> : null;
 
+const BEHAVIOR: Record<string, [string, string]> = {
+  HUMAN: ["Người", "bg-emerald-100 text-emerald-800 dark:bg-emerald-900/50 dark:text-emerald-300"],
+  LIKELY_BOT: ["Có dấu hiệu bot", "bg-amber-100 text-amber-800 dark:bg-amber-900/50 dark:text-amber-300"],
+  BOT: ["Bot", "bg-rose-100 text-rose-800 dark:bg-rose-900/50 dark:text-rose-300"],
+  UNKNOWN: ["Chưa rõ người/bot", "bg-slate-100 text-slate-600 dark:bg-slate-800 dark:text-slate-300"],
+};
+export const BehaviorBadge = ({ b }: { b?: string | null }) =>
+  b ? <Pill className={(BEHAVIOR[b] || BEHAVIOR.UNKNOWN)[1]}>{(BEHAVIOR[b] || BEHAVIOR.UNKNOWN)[0]}</Pill> : null;
+
 export function Copy({ text, label }: { text: string; label?: string }) {
   const [ok, setOk] = useState(false);
   return (
