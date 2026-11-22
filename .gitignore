@@ -37,3 +37,7 @@ Thumbs.db
 # bundled public KOL wallet list (not runtime data)
 !smart-money-radar/backend/radar/data/
 !smart-money-radar/backend/radar/data/kol_seed.txt
+
+# database backups (pg_dump) - never commit
+backups/
+*.dump

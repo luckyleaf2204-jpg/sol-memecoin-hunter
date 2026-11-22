@@ -44,6 +44,10 @@ class RpcEndpoint:
     rps: float
     # getTokenLargestAccounts etc. are blocked on public RPCs
     supports_heavy: bool
+    # serves the full transaction history for getSignaturesForAddress. Measured 22/11/2026:
+    # publicnode returned 120 of 670 signatures of a wallet that api.mainnet-beta returned in full,
+    # so a backfill through it would look "complete" while missing most of the history.
+    full_history: bool = True
 
 
 @dataclass(frozen=True)
@@ -100,7 +104,7 @@ def _build_endpoints() -> tuple[RpcEndpoint, ...]:
                                _env_float("PUBLIC_RPC_RPS", 3.5), supports_heavy=False))
         eps.append(RpcEndpoint("publicnode", "https://solana-rpc.publicnode.com",
                                "wss://solana-rpc.publicnode.com",
-                               _env_float("PUBLICNODE_RPS", 4.0), supports_heavy=False))
+                               _env_float("PUBLICNODE_RPS", 4.0), supports_heavy=False, full_history=False))
     return tuple(eps)
 
 

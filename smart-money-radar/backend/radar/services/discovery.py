@@ -170,6 +170,9 @@ async def main(ctx: Ctx) -> None:
     n = 0
     while True:
         try:
+            # alive signal before the (possibly long) work of this cycle: seeding a migrated token
+            # reads up to 6000 signatures, longer than the container health window on a slow RPC
+            await repo.heartbeat(ctx.pool, ctx.worker, ctx.started_at, {"cycle": n, "phase": "start"})
             s = await ctx.settings.get()
             pw = await patient_winners(ctx, s)
             a = await big_buyers(ctx, s)
@@ -183,6 +186,7 @@ async def main(ctx: Ctx) -> None:
                 for r in mig:
                     res = await seed_token(ctx, r["mint"])
                     c += res["new_candidates"]
+                    await repo.heartbeat(ctx.pool, ctx.worker, ctx.started_at, {"cycle": n, "phase": "seeding", "seeded": c})
                     await ctx.pool.execute("""INSERT INTO api_sync_status(source, job, status, details, last_success_at)
                         VALUES ('seed', $1, 'done', $2, now()) ON CONFLICT DO NOTHING""", r["mint"], res)
             await repo.heartbeat(ctx.pool, ctx.worker, ctx.started_at,

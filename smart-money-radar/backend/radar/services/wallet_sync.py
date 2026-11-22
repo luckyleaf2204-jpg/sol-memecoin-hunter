@@ -64,7 +64,14 @@ async def sync_wallet(ctx: Ctx, wallet: str, mode: str, pools: PoolCache, tracke
             and w["discovery_source"] not in ("manual", "watchlist"):
         # one cheap call: 1000 newest signatures spanning < 1 day means >= 1000 tx/day (bot-like)
         probe = await ctx.rpc.get_signatures_for_address(wallet, limit=1000)
-        if len(probe) == 1000 and probe[-1].get("blockTime") and \
+        own = await ctx.pool.fetchrow("""SELECT count(*) AS n, extract(epoch FROM max(block_time) - min(block_time)) AS span
+            FROM wallet_transactions WHERE wallet = $1 AND tx_type IN ('buy','sell')""", wallet)
+        own_per_day = (own["n"] / max(float(own["span"] or 0) / 86400, 1.0)) if own and own["n"] else None
+        flooded = own_per_day is not None and own_per_day < 50   # many signatures, few own trades: spam airdrops
+        if flooded:
+            await ctx.pool.execute("UPDATE wallets SET discovery_detail = discovery_detail || $2 WHERE address = $1",
+                                   wallet, {"signature_flood_suspected": True, "own_pump_trades_per_day": round(own_per_day, 1)})
+        if not flooded and len(probe) == 1000 and probe[-1].get("blockTime") and \
                 (probe[0].get("blockTime") or now) - probe[-1]["blockTime"] < 86400 * 1000 / int(s["hf_signatures_per_day"]):
             await ctx.pool.execute("""UPDATE wallets SET status = 'observed', backfill_status = 'none',
                 discovery_detail = discovery_detail || $2, updated_at = now() WHERE address = $1""",
@@ -78,7 +85,9 @@ async def sync_wallet(ctx: Ctx, wallet: str, mode: str, pools: PoolCache, tracke
         ctx, wallet, cutoff, until, int(s["backfill_max_signatures"]))
     failed = [x for x in sigs if x.get("err") is not None]
     ok = [x for x in sigs if x.get("err") is None]
-    names = [x["signature"] for x in ok]
+    irr_key = f"bf:irrelevant:{wallet}"
+    irrelevant = {x.decode() if isinstance(x, bytes) else x for x in (await ctx.redis.smembers(irr_key) or set())}
+    names = [x["signature"] for x in ok if x["signature"] not in irrelevant]
     have_raw = {r["signature"] for r in await ctx.pool.fetch(
         "SELECT signature FROM raw_transactions WHERE signature = ANY($1::text[])", names)}
     async with ctx.pool.acquire() as conn:
@@ -94,6 +103,7 @@ async def sync_wallet(ctx: Ctx, wallet: str, mode: str, pools: PoolCache, tracke
     traded_mints = {r["mint"] for r in await ctx.pool.fetch(
         "SELECT DISTINCT mint FROM wallet_transactions WHERE wallet = $1 AND tx_type IN ('buy','sell')", wallet)}
     decoded_list = []
+    new_irrelevant: list[str] = []
 
     async def one(sig: str) -> None:
         nonlocal fetched
@@ -107,30 +117,40 @@ async def sync_wallet(ctx: Ctx, wallet: str, mode: str, pools: PoolCache, tracke
                 if tx is not None and _relevant(tx):
                     async with ctx.pool.acquire() as conn:
                         await repo.save_raw_tx(conn, sig, tx, None)
+                elif tx is not None:
+                    new_irrelevant.append(sig)
             if tx is None:
                 return
             decoded_list.append(decode(tx, sig, pools))
 
-    # in chunks so progress is persisted for big wallets
+    # Checkpointed in chunks of 200: each chunk is fetched, decoded and WRITTEN before the next one,
+    # so an interrupted backfill keeps its work. Writes are upserts on (signature, event_key): a
+    # resumed run never duplicates rows, and transactions already stored (raw_transactions) or known
+    # to be unrelated to pump.fun (Redis set) are not fetched again.
     for i in range(0, len(names), 200):
         chunk = names[i:i + 200]
+        decoded_list.clear()
+        new_irrelevant.clear()
         await asyncio.gather(*(one(x) for x in chunk), return_exceptions=True)
+        for d in decoded_list:
+            for t in d.trades:
+                if t.wallet == wallet:
+                    traded_mints.add(t.mint)
+        async with ctx.pool.acquire() as conn:
+            for d in decoded_list:
+                res = await write_decoded(conn, d, keep_wallets=keep, store_min_sol=store_min, sol_usd=sol_usd,
+                                          transfer_mints=traded_mints, sol_transfer_wallets={wallet})
+                decoded_trades += res.get("trades", 0)
+                for st in d.sol_transfers:
+                    if st.destination == wallet and not st.under_swap and st.lamports >= 50_000_000 and d.block_time:
+                        cand = (int(d.block_time), st.source, st.lamports, d.signature)
+                        if earliest_funding is None or cand[0] < earliest_funding[0]:
+                            earliest_funding = cand
+        if new_irrelevant:
+            await ctx.redis.sadd(irr_key, *new_irrelevant)
+            await ctx.redis.expire(irr_key, 14 * 86400)
         await ctx.pool.execute("UPDATE wallets SET backfill_sigs_fetched = backfill_sigs_fetched + $2, "
                                "backfill_sigs_seen = $3 WHERE address = $1", wallet, len(chunk), len(sigs))
-    for d in decoded_list:
-        for t in d.trades:
-            if t.wallet == wallet:
-                traded_mints.add(t.mint)
-    async with ctx.pool.acquire() as conn:
-        for d in decoded_list:
-            res = await write_decoded(conn, d, keep_wallets=keep, store_min_sol=store_min, sol_usd=sol_usd,
-                                      transfer_mints=traded_mints, sol_transfer_wallets={wallet})
-            decoded_trades += res.get("trades", 0)
-            for st in d.sol_transfers:
-                if st.destination == wallet and not st.under_swap and st.lamports >= 50_000_000 and d.block_time:
-                    cand = (int(d.block_time), st.source, st.lamports, d.signature)
-                    if earliest_funding is None or cand[0] < earliest_funding[0]:
-                        earliest_funding = cand
 
     newest = sigs[0]["signature"] if sigs else w["last_synced_signature"]
     if mode == "backfill":
@@ -175,7 +195,12 @@ async def scheduler(ctx: Ctx) -> None:
                   AND (backfill_status IN ('queued','none','failed')
                        OR last_synced_at IS NULL OR last_synced_at < now() - make_interval(mins => $1::int))
                 ORDER BY (status = 'smart') DESC, (discovery_source IN ('manual', 'watchlist')) DESC,
+                         EXISTS (SELECT 1 FROM watched_wallets ww WHERE ww.address = wallets.address AND ww.confirmed) DESC,
                          (discovery_source = 'patient_winner' AND backfill_status = 'queued') DESC,
+                         -- most evidence first: preliminary (live-stream) score passes the mandatory rules,
+                         -- then number of closed >= 2 SOL positions already seen, then the score
+                         COALESCE(sc.qualifies, false) DESC,
+                         COALESCE((sc.components->'confidence_inputs'->>'closed')::int, 0) DESC,
                          COALESCE(sc.score, 0) DESC, (discovery_source IN ('early_buyer','seed')) DESC,
                          COALESCE((discovery_detail->>'tokens_7d')::int, jsonb_array_length(
                              CASE WHEN jsonb_typeof(discovery_detail->'tokens') = 'array' THEN discovery_detail->'tokens'

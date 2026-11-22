@@ -56,9 +56,10 @@ class SolanaRpc:
     async def close(self) -> None:
         await self._client.aclose()
 
-    def _ordered(self, heavy: bool) -> list[RpcEndpoint]:
+    def _ordered(self, heavy: bool, history: bool = False) -> list[RpcEndpoint]:
         now = time.monotonic()
-        eps = [e for e in self.endpoints if (e.supports_heavy or not heavy)]
+        eps = [e for e in self.endpoints if (e.supports_heavy or not heavy)
+               and (getattr(e, "full_history", True) or not history)]
         ready = [e for e in eps if self._cooldown_until.get(e.name, 0) <= now]
         cooling = sorted((e for e in eps if e not in ready), key=lambda e: self._cooldown_until.get(e.name, 0))
         # spread load across equally ranked public endpoints
@@ -68,11 +69,11 @@ class SolanaRpc:
         return ready + cooling
 
     async def call(self, method: str, params: list | None = None, *, heavy: bool = False,
-                   max_rounds: int = 3) -> Any:
+                   max_rounds: int = 3, history: bool = False) -> Any:
         params = params or []
         last: RpcError | None = None
         for rnd in range(max_rounds):
-            for ep in self._ordered(heavy):
+            for ep in self._ordered(heavy, history):
                 try:
                     return await self._call_one(ep, method, params)
                 except RpcError as e:
@@ -139,7 +140,8 @@ class SolanaRpc:
             opts["before"] = before
         if until:
             opts["until"] = until
-        return await self.call("getSignaturesForAddress", [address, opts]) or []
+        # history listing only from endpoints that keep the full history (see RpcEndpoint.full_history)
+        return await self.call("getSignaturesForAddress", [address, opts], history=True) or []
 
     async def get_account_info(self, address: str, encoding: str = "base64") -> dict | None:
         res = await self.call("getAccountInfo", [address, {"encoding": encoding, "commitment": "confirmed"}])

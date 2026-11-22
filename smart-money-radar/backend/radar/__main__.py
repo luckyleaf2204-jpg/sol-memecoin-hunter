@@ -173,6 +173,8 @@ def main(argv: list[str] | None = None) -> None:
     ap.add_argument("--per-day", dest="per_day", type=int, default=2)
     ap.add_argument("--early", type=int, default=120)
     ap.add_argument("--promote", type=int, default=150)
+    ap.add_argument("--apply", action="store_true")
+    ap.add_argument("--minutes", type=int, default=30)
     a = ap.parse_args(argv)
     if a.command == "api":
         import uvicorn
@@ -186,6 +188,18 @@ def main(argv: list[str] | None = None) -> None:
         asyncio.run(_run_role(a.command))
     elif a.command == "seed":
         asyncio.run(_seed(a.args))
+    elif a.command == "verify-pnl":
+        from .tools.verify_pnl import run as vp
+        import json as _json
+        print(_json.dumps(asyncio.run(vp(a.out)), indent=1, default=str))
+    elif a.command == "latency":
+        from .tools.latency import run as lat
+        import json as _json
+        print(_json.dumps(asyncio.run(lat(a.minutes, a.out)), indent=1, default=str))
+    elif a.command == "backfill-audit":
+        from .tools.backfill_audit import run as bfa
+        r = asyncio.run(bfa("--apply" in (a.args or []) or a.apply, a.out))
+        print({k: (v if not isinstance(v, list) else len(v)) for k, v in r.items()})
     elif a.command == "kol-import":
         asyncio.run(_kol_import_cmd(a.args))
     elif a.command == "add-wallet":

@@ -198,3 +198,25 @@ def test_route_leg_of_token_quoted_curve_is_not_reported_by_the_stream():
     assert out["nonsol_users"] == ["CXnf4Tt7qFz3KZNwn3Yve5MKaRyxGoAy2eDX3QT8e99m"]
     d = decode_transaction(tx, pool_resolver=pools.get)
     assert [(t.mint[:6], t.tx_type, round(t.sol_amount, 3)) for t in d.trades] == [("Ad2yCH", "buy", 1.036)]
+
+
+def test_history_listing_skips_endpoints_without_full_history():
+    """publicnode returned 120 of 670 signatures (22/11/2026): it must never serve getSignaturesForAddress."""
+    from radar.config import RpcEndpoint
+    from radar.solana.rpc import SolanaRpc
+    eps = (RpcEndpoint("solana_public", "https://a", "wss://a", 3.5, supports_heavy=False),
+           RpcEndpoint("publicnode", "https://b", "wss://b", 4.0, supports_heavy=False, full_history=False))
+    rpc = SolanaRpc.__new__(SolanaRpc)
+    rpc.endpoints, rpc._cooldown_until = eps, {}
+    assert [e.name for e in rpc._ordered(False, history=True)] == ["solana_public"]
+    assert sorted(e.name for e in rpc._ordered(False)) == ["publicnode", "solana_public"]
+
+
+def test_independent_wallet_delta_matches_balances():
+    """verify-pnl's on-chain side: wallet SOL change incl. its token accounts, from raw balances."""
+    import json, pathlib
+    from radar.tools.verify_pnl import wallet_delta_lamports
+    tx = json.loads((pathlib.Path(__file__).parent.parent / "fixtures/nonsol/usdc_curve_router_buy.json").read_text())
+    d, mints = wallet_delta_lamports(tx, "B9K2wTQcRDLRLhMKFyRh2hPqHrr6VKiCC9yNGpkMUXrh")
+    assert mints == {"GGo31zd8piSnzHe5hJqeFMk18rJpaHZzc4NJwVUspump"}
+    assert -1_510_000_000 < d < -1_500_000_000          # paid ~1.5035 SOL incl. fee; new token-account rent nets out
