@@ -24,7 +24,8 @@ def perf(**kw) -> Performance:
     for k, v in base.items():
         setattr(p, k, v)
     p.metrics.update({"share_positions_qualifying": 0.8, "median_to_mean": 0.92,
-                      "positions_with_price_data": 12, "median_entry_share_of_liquidity": 0.1})
+                      "positions_with_price_data": 12, "median_entry_share_of_liquidity": 0.1,
+                      "repeatability": {"status": "pass", "pass": True}, "days_since_active": 1.0})
     return p
 
 
@@ -93,7 +94,7 @@ def test_high_frequency_wallets_are_dampened():
 def test_categories_and_official_ranking():
     assert category_for(90) == "EXCELLENT" and category_for(80) == "STRONG"
     assert category_for(70) == "WATCHLIST" and category_for(50) == "NOT_PRIORITY"
-    good = score_wallet(perf(wins=10, losses=2, win_rate=10 / 12, median_buy_sol=12.0, realized_pnl_sol=60.0, roi=0.9), S)
+    good = score_wallet(_strong(), S)
     assert good.score >= 65 and good.eligible_official
     low = score_wallet(perf(closed_qualifying=2, positions_qualifying=2, wins=2, losses=0, win_rate=1.0), S)
     weak = score_wallet(perf(), S)          # passes every mandatory criterion but scores < 65
@@ -285,3 +286,66 @@ def test_simulation_applies_costs_and_detects_liquidity_loss():
     r = simulate(BtSignal("M", "WATCH", T0 + 30, 2, 6), bars, dict(S))
     assert r["entry_price"] > 1.0
     assert r["liquidity_lost"] and r["drawdown_50"]
+
+
+def _strong():
+    return perf(wins=10, losses=2, win_rate=10 / 12, median_buy_sol=12.0, realized_pnl_sol=60.0, roi=0.9)
+
+
+def test_checklist_blocks_unrepeatable_or_inactive_wallets():
+    ok = score_wallet(_strong(), S)
+    assert ok.eligible_official and all(ok.components["checks"].values())
+    p = _strong()
+    p.metrics["repeatability"] = {"status": "fail", "pass": False}
+    r = score_wallet(p, S)
+    assert not r.eligible_official and not r.components["checks"]["repeatable_both_halves"]
+    p = _strong()
+    p.metrics["days_since_active"] = 20
+    assert not score_wallet(p, S).eligible_official
+
+
+def test_one_slot_per_cluster_in_official_top():
+    a, b, c = score_wallet(_strong(), S), score_wallet(_strong(), S), score_wallet(_strong(), S)
+    b.score -= 1
+    c.score -= 2
+    ranked = rank_official({"A": a, "B": b, "C": c}, clusters={"A": "X", "B": "X", "C": "C"})
+    assert [w for w, _ in ranked] == ["A", "C"]          # B shares owner cluster X with A
+
+
+def test_repeatability_split_halves():
+    from radar.analytics.performance import repeatability
+    from radar.analytics.positions import Event, build_positions
+    ps = []
+    # first half: 4 winners, second half: 4 losers -> one lucky streak, not repeatable
+    for i, sell in enumerate([5, 5, 5, 5, 1, 1, 1, 1]):
+        p, _ = build_positions("W", f"M{i}", [Event(f"b{i}", "trade:0", i * 10, T0 + i * 100, "buy", 3, 10),
+                                              Event(f"s{i}", "trade:0", i * 10 + 1, T0 + i * 100 + 50, "sell", sell, 10)])
+        ps += p
+    r = repeatability(ps)
+    assert r["status"] == "fail" and r["first_half"]["roi"] > 0 and r["second_half"]["roi"] < 0
+    assert repeatability(ps[:4])["status"] == "insufficient"
+
+
+def test_exit_progress_weights_by_position_and_ignores_pre_signal_sells():
+    from radar.analytics.signals import exit_progress
+    det = T0 + 1000
+    trades = {
+        "A": [(T0, "buy", 100, 4.0), (det + 60, "sell", 100, 6.0)],          # fully exited after signal
+        "B": [(T0, "buy", 100, 2.0), (T0 + 10, "sell", 50, 1.0)],            # sold half BEFORE signal, holds 50
+        "C": [(T0, "buy", 100, 2.0)],                                        # still holding
+    }
+    p = exit_progress(trades, det)
+    assert p["holders_at_signal"] == 3 and p["fully_exited"] == 1
+    assert p["exited_share"] == pytest.approx(4.0 / (4.0 + 1.0 + 2.0))
+    assert p["sell_sol_after"] == pytest.approx(6.0)
+
+
+def test_signal_records_each_buyers_entry_price_and_mc():
+    b1 = sb("a", T0, 3, price=1e-6)
+    b1.mc_sol = 40.0
+    b2 = sb("b", T0 + 30, 3, price=1.2e-6)
+    b2.mc_sol = 48.0
+    r = evaluate([b2, b1], [], T0 + 60, S, 1.2e-6, "LOW")
+    by = {x["wallet"]: x for x in r.buyers}
+    assert by["a"]["entry_price_sol"] == 1e-6 and by["a"]["entry_mc_sol"] == 40.0
+    assert by["b"]["entry_mc_sol"] == 48.0 and by["a"]["first_ts"] == T0

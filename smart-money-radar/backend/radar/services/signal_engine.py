@@ -17,7 +17,7 @@ import os
 import time
 
 from ..analytics.positions import build_positions, group_events
-from ..analytics.signals import LEVEL_RANK, SmartBuy, SmartSell, evaluate
+from ..analytics.signals import LEVEL_RANK, SmartBuy, SmartSell, evaluate, exit_progress
 from ..context import S_SMART_TRADES, Ctx
 from ..db import repo
 from . import telegram
@@ -68,7 +68,8 @@ async def evaluate_token(ctx: Ctx, mint: str, s: dict, profiles: dict[str, dict]
                 buys.append(SmartBuy(w, t, float(r["sol_amount"]), cur.buy_sol if cur else float(r["sol_amount"]),
                                      float(r["effective_price_sol"]) if r["effective_price_sol"] else None,
                                      r["verification_status"], prof["cluster"], prof["score"], prof["win_rate"],
-                                     r["signature"]))
+                                     r["signature"],
+                                     float(r["market_cap_sol"]) if r["market_cap_sol"] is not None else None))
             elif r["tx_type"] == "sell":
                 sells.append(SmartSell(w, t, float(r["sol_amount"])))
     if not buys:
@@ -148,22 +149,7 @@ async def store_and_alert(ctx: Ctx, sig: dict, s: dict) -> None:
     sig_row = dict(await ctx.pool.fetchrow("SELECT * FROM smart_money_signals WHERE id = $1", sig_id))
     sig_row["buyers"] = sig["buyers"]
     text = telegram.format_alert(sig_row, token, await ctx.sol_usd(), os.environ.get("PUBLIC_URL"))
-    chat = s.get("telegram_chat_id") or ctx.cfg.telegram_chat_id
-    status, err, sent_at = "dashboard_only", None, None
-    if s.get("telegram_enabled") and ctx.cfg.telegram_bot_token and chat:
-        try:
-            await telegram.send_message(ctx.http, ctx.cfg.telegram_bot_token, chat, text)
-            status, sent_at = "sent", dt.datetime.now(UTC)
-        except Exception as e:
-            status, err = "failed", str(e)[:300]
-    inserted = await ctx.pool.fetchval("""INSERT INTO alerts(signal_id, mint, level, reason, dedupe_key, channel, status,
-            message, error, sent_at) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)
-        ON CONFLICT (dedupe_key, channel) DO NOTHING RETURNING id""",
-        sig_id, sig["mint"], sig["level"], reason, key, "telegram" if status in ("sent", "failed") else "dashboard",
-        status, text, err, sent_at)
-    if inserted:
-        await ctx.publish("alert", {"id": inserted, "mint": sig["mint"], "level": sig["level"], "status": status})
-        log.info("alert %s %s %s (%s)", sig["mint"], sig["level"], reason, status)
+    await _deliver(ctx, s, sig_id, sig["mint"], sig["level"], reason, key, text)
 
 
 async def bot_handler(ctx: Ctx, cmd: str) -> str:
@@ -186,11 +172,65 @@ async def bot_handler(ctx: Ctx, cmd: str) -> str:
     return "Lệnh: /top, /status"
 
 
+EXIT_LEVELS = (("EXIT50", 0.5), ("EXIT90", 0.9))
+
+
+async def check_exits(ctx: Ctx, mint: str, s: dict) -> None:
+    """Exit / distribution alert: the wallets of an active signal are selling what they bought."""
+    if not s.get("exit_alert_enabled", True):
+        return
+    sig = await ctx.pool.fetchrow("""SELECT * FROM smart_money_signals WHERE mint = $1 AND status = 'active'
+        AND detected_at > now() - interval '48 hours' ORDER BY detected_at DESC LIMIT 1""", mint)
+    if sig is None:
+        return
+    wallets = [b["wallet"] for b in sig["buyers"]]
+    rows = await ctx.pool.fetch("""SELECT wallet, extract(epoch from block_time)::bigint AS ts, tx_type, token_amount,
+            sol_amount FROM wallet_transactions WHERE mint = $1 AND wallet = ANY($2::text[])
+            AND tx_type IN ('buy','sell') AND verification_status <> 'unverified'
+            AND block_time > $3::timestamptz - interval '7 days'""", mint, wallets, sig["detected_at"])
+    by_w: dict[str, list] = {}
+    for r in rows:
+        by_w.setdefault(r["wallet"], []).append((int(r["ts"]), r["tx_type"], float(r["token_amount"]),
+                                                 float(r["sol_amount"])))
+    prog = exit_progress(by_w, int(sig["detected_at"].timestamp()))
+    threshold = float(s.get("exit_alert_share", 0.5))
+    for level, share in EXIT_LEVELS:
+        share = max(share, threshold) if level == "EXIT50" else share
+        if prog["exited_share"] < share:
+            continue
+        key = f"{mint}:{level}:{sig['id']}"
+        if await ctx.pool.fetchval("SELECT 1 FROM alerts WHERE dedupe_key = $1", key):
+            continue
+        token = dict(await ctx.pool.fetchrow("SELECT * FROM tokens WHERE mint = $1", mint) or {"mint": mint})
+        text = telegram.format_exit_alert(dict(sig), token, prog, level, os.environ.get("PUBLIC_URL"))
+        await _deliver(ctx, s, sig["id"], mint, level, "exit", key, text)
+
+
+async def _deliver(ctx: Ctx, s: dict, sig_id, mint: str, level: str, reason: str, key: str, text: str) -> None:
+    chat = s.get("telegram_chat_id") or ctx.cfg.telegram_chat_id
+    status, err, sent_at = "dashboard_only", None, None
+    if s.get("telegram_enabled") and ctx.cfg.telegram_bot_token and chat:
+        try:
+            await telegram.send_message(ctx.http, ctx.cfg.telegram_bot_token, chat, text)
+            status, sent_at = "sent", dt.datetime.now(UTC)
+        except Exception as e:
+            status, err = "failed", str(e)[:300]
+    inserted = await ctx.pool.fetchval("""INSERT INTO alerts(signal_id, mint, level, reason, dedupe_key, channel, status,
+            message, error, sent_at) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)
+        ON CONFLICT (dedupe_key, channel) DO NOTHING RETURNING id""",
+        sig_id, mint, level, reason, key, "telegram" if status in ("sent", "failed") else "dashboard",
+        status, text, err, sent_at)
+    if inserted:
+        await ctx.publish("alert", {"id": inserted, "mint": mint, "level": level, "status": status})
+        log.info("alert %s %s %s (%s)", mint, level, reason, status)
+
+
 async def consumer(ctx: Ctx) -> None:
     s = await ctx.settings.get()
     profiles = await smart_profiles(ctx, int(s["analysis_period_days"]))
     last_refresh = time.time()
     pending: dict[str, float] = {}
+    exits: dict[str, float] = {}
     while True:
         msgs = await ctx.consume(S_SMART_TRADES, GROUP, count=200, block_ms=2000)
         ids = []
@@ -198,6 +238,8 @@ async def consumer(ctx: Ctx) -> None:
             ids.append(mid)
             if p.get("wallet") in profiles:
                 pending[p["mint"]] = time.time()
+                if p.get("tx_type") == "sell":
+                    exits[p["mint"]] = time.time()
         await ctx.ack(S_SMART_TRADES, GROUP, ids)
         if time.time() - last_refresh > 30:
             s = await ctx.settings.get()
@@ -211,6 +253,12 @@ async def consumer(ctx: Ctx) -> None:
                     await store_and_alert(ctx, sig, s)
             except Exception:
                 log.exception("signal evaluation %s failed", mint)
+        for mint in list(exits):
+            exits.pop(mint, None)
+            try:
+                await check_exits(ctx, mint, s)
+            except Exception:
+                log.exception("exit check %s failed", mint)
         await repo.heartbeat(ctx.pool, ctx.worker, ctx.started_at, {"smart_wallets": len(profiles)})
 
 

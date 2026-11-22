@@ -186,3 +186,31 @@ async def test_signal_storage_and_alert_dedupe(ctx):
     assert [(r["level"], r["status"]) for r in sigs] == [("WATCH", "superseded"), ("STRONG", "active")]
     msg = await ctx.pool.fetchval("SELECT message FROM alerts WHERE mint = $1 AND level = 'STRONG'", mint)
     assert "SMART MONEY ALERT" in msg and mint in msg and "Test Token" in msg and "pump.fun/coin/" in msg
+
+
+async def test_exit_alert_when_signal_wallets_sell(ctx):
+    import datetime as dt
+    from radar.services.signal_engine import check_exits
+    s = dict(await ctx.settings.get())
+    s["telegram_enabled"] = False
+    mint = "MintExit99999999999999999999999999999999999"
+    det = dt.datetime.now(dt.timezone.utc) - dt.timedelta(minutes=30)
+    buyers = [{"wallet": "ExitWalletA", "position_sol": 4.0}, {"wallet": "ExitWalletB", "position_sol": 4.0}]
+    await ctx.pool.execute("INSERT INTO tokens(mint, name, symbol) VALUES ($1,'Exit Token','EXT') ON CONFLICT DO NOTHING", mint)
+    sid = await ctx.pool.fetchval("""INSERT INTO smart_money_signals(mint, level, detected_at, window_start, window_end,
+        raw_buyers, independent_buyers, total_buy_sol, net_flow_sol, verification, buyers)
+        VALUES ($1,'WATCH',$2,$2,$2,2,2,8,8,'verified',$3) RETURNING id""", mint, det, buyers)
+    rows = []
+    for w in ("ExitWalletA", "ExitWalletB"):
+        rows.append((f"buy-{w}", w, det - dt.timedelta(minutes=2), "buy", 4.0, 1000.0))
+    rows.append(("sell-A", "ExitWalletA", det + dt.timedelta(minutes=10), "sell", 5.0, 1000.0))   # A exits fully
+    for sig_, w, t, side, sol, tok in rows:
+        await ctx.pool.execute("""INSERT INTO wallet_transactions(signature, event_key, wallet, mint, slot, block_time,
+            tx_type, sol_amount, token_amount, source, verification_status)
+            VALUES ($1,'trade:0',$2,$3,1,$4,$5,$6,$7,'rpc_tx','verified')""", sig_, w, mint, t, side, sol, tok)
+    await check_exits(ctx, mint, s)
+    await check_exits(ctx, mint, s)          # idempotent: no second EXIT50
+    alerts = await ctx.pool.fetch("SELECT level, reason, message FROM alerts WHERE mint = $1", mint)
+    assert [(a["level"], a["reason"]) for a in alerts] == [("EXIT50", "exit")]
+    assert "SMART MONEY EXIT" in alerts[0]["message"] and "50%" in alerts[0]["message"]
+    assert sid

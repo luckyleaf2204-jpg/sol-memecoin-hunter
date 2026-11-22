@@ -8,7 +8,7 @@ import { Card, Empty, ErrorBox, LevelBadge, Loading, Pill, RiskBadge, Segmented 
 const STATUS: Record<string, string> = {
   sent: "Đã gửi Telegram", failed: "Gửi lỗi", dashboard_only: "Chỉ dashboard", suppressed: "Đã chặn trùng",
 };
-const REASON: Record<string, string> = { new: "Mới", upgrade: "Tăng cấp", important_change: "Biến động quan trọng" };
+const REASON: Record<string, string> = { new: "Mới", upgrade: "Tăng cấp", important_change: "Biến động quan trọng", exit: "Smart Money đang thoát" };
 
 export default function Alerts() {
   const [filter, setFilter] = useState<"all" | "unseen">("all");

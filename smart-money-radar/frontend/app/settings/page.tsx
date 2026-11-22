@@ -34,6 +34,8 @@ const GROUPS: { title: string; fields: F[] }[] = [
     { k: "alert_min_level", label: "Mức tối thiểu để gửi", type: "level" },
     { k: "alert_cooldown_minutes", label: "Thời gian chờ trước khi gửi lại (phút)", type: "number" },
     { k: "alert_resend_new_buyers", label: "Gửi lại khi thêm ≥ N ví độc lập", type: "number" },
+    { k: "exit_alert_enabled", label: "Cảnh báo khi ví Smart Money của tín hiệu bán ra (thoát lệnh)", type: "bool" },
+    { k: "exit_alert_share", label: "Ngưỡng cảnh báo thoát: tỷ lệ vị thế đã bán", type: "number", pct: true },
   ] },
   { title: "Thu thập dữ liệu", fields: [
     { k: "backfill_days", label: "Số ngày backfill lịch sử ví", type: "number" },

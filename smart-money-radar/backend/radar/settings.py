@@ -53,6 +53,8 @@ DEFAULTS: dict[str, Any] = {
     "alert_resend_new_buyers": 2,        # resend same level when >= 2 new independent buyers joined
     "alert_resend_flow_multiple": 2.0,   # ... or smart-money buy SOL doubled
     "alert_cooldown_minutes": 10,
+    "exit_alert_enabled": True,          # alert when signal wallets sell what they bought
+    "exit_alert_share": 0.5,             # ... once >= 50 % (and again at >= 90 %)
     # discovery / backfill
     "discovery_min_buy_sol": 2.0,
     "discovery_min_distinct_tokens": 2,
@@ -120,6 +122,8 @@ SPEC: dict[str, Spec] = {
     "alert_resend_new_buyers": Spec(int, 1, 100),
     "alert_resend_flow_multiple": Spec((int, float), 1.1, 100),
     "alert_cooldown_minutes": Spec((int, float), 0, 1440),
+    "exit_alert_enabled": Spec(bool),
+    "exit_alert_share": Spec((int, float), 0.1, 0.95),
     "discovery_min_buy_sol": Spec((int, float), 0.1, 1000),
     "discovery_min_distinct_tokens": Spec(int, 1, 100),
     "backfill_days": Spec(int, 1, 120),

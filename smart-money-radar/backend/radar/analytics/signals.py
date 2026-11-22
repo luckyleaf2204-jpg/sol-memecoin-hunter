@@ -37,6 +37,7 @@ class SmartBuy:
     score: float
     win_rate: float | None
     signature: str
+    mc_sol: float | None = None
 
 
 @dataclass
@@ -82,6 +83,10 @@ def _aggregate(buys: list[SmartBuy]) -> tuple[dict[str, dict], int, float]:
                                              "first_ts": b.ts, "verification": "verified", "signatures": []})
         d["buy_sol_window"] += b.sol
         d["position_sol"] = max(d["position_sol"], b.position_sol)
+        if b.ts <= d["first_ts"] or "entry_price_sol" not in d:
+            # entry of this wallet inside the window: time, price and market cap of its first buy
+            d["entry_price_sol"] = b.price_sol
+            d["entry_mc_sol"] = b.mc_sol
         d["first_ts"] = min(d["first_ts"], b.ts)
         d["signatures"].append(b.signature)
         if b.verification != "verified":
@@ -147,3 +152,42 @@ def flow_label(net_flow: float, gross: float) -> str:
     if abs(net_flow) < 0.15 * gross:
         return "BALANCED"
     return "ACCUMULATING" if net_flow > 0 else "DISTRIBUTING"
+
+
+
+def exit_progress(trades_by_wallet: dict[str, list[tuple[int, str, float, float]]], detected_at: int
+                  ) -> dict[str, Any]:
+    """How much of the signal buyers' holdings has been sold since the signal.
+
+    trades_by_wallet: wallet -> [(ts, 'buy'|'sell', tokens, sol)] for the signal token.
+    For each wallet: held = tokens bought - sold up to `detected_at`; exited = tokens sold after,
+    capped at held. The overall share is weighted by the SOL each wallet had in the position.
+    """
+    per = []
+    w_total = w_exit = 0.0
+    sell_sol = 0.0
+    for wallet, lst in trades_by_wallet.items():
+        held = cost = 0.0
+        sold_after = sol_after = 0.0
+        for ts, side, tokens, sol in sorted(lst):
+            if ts <= detected_at:
+                if side == "buy":
+                    held += tokens
+                    cost += sol
+                else:
+                    if held > 0:
+                        cost *= max(0.0, 1 - tokens / held)
+                    held = max(0.0, held - tokens)
+            elif side == "sell":
+                sold_after += tokens
+                sol_after += sol
+        if held <= 0:
+            continue
+        frac = min(1.0, sold_after / held)
+        per.append({"wallet": wallet, "exited_share": frac, "sell_sol_after": sol_after, "position_sol": cost})
+        w_total += cost
+        w_exit += cost * frac
+        sell_sol += sol_after
+    share = (w_exit / w_total) if w_total > 0 else 0.0
+    return {"exited_share": share, "wallets": per, "sell_sol_after": sell_sol,
+            "fully_exited": sum(1 for x in per if x["exited_share"] >= 0.95), "holders_at_signal": len(per)}

@@ -31,7 +31,10 @@ const LEVEL_STYLE: Record<string, string> = {
   VERY_STRONG: "bg-rose-600 text-white",
   STRONG: "bg-orange-500 text-white",
   WATCH: "bg-amber-200 text-amber-900 dark:bg-amber-500/30 dark:text-amber-200",
+  EXIT50: "bg-violet-200 text-violet-900 dark:bg-violet-500/30 dark:text-violet-200",
+  EXIT90: "bg-violet-600 text-white",
 };
+const LEVEL_TEXT: Record<string, string> = { EXIT50: "EXIT ≥ 50%", EXIT90: "EXIT ≥ 90%" };
 const RISK_STYLE: Record<string, string> = {
   LOW: "bg-emerald-100 text-emerald-800 dark:bg-emerald-500/20 dark:text-emerald-300",
   MEDIUM: "bg-amber-100 text-amber-800 dark:bg-amber-500/20 dark:text-amber-300",
@@ -59,7 +62,7 @@ export function Pill({ children, className = "" }: { children: ReactNode; classN
   return <span className={`inline-flex items-center whitespace-nowrap rounded-full px-2 py-0.5 text-[11px] font-semibold ${className}`}>{children}</span>;
 }
 export const LevelBadge = ({ level }: { level?: string | null }) =>
-  level ? <Pill className={LEVEL_STYLE[level] || ""}>{level.replace("_", " ")}</Pill> : <span className="text-slate-400">—</span>;
+  level ? <Pill className={LEVEL_STYLE[level] || ""}>{LEVEL_TEXT[level] || level.replace("_", " ")}</Pill> : <span className="text-slate-400">—</span>;
 export const RiskBadge = ({ level }: { level?: string | null }) =>
   <Pill className={RISK_STYLE[level || "UNKNOWN"]}>{level ? `${level} RISK` : "RISK ?"}</Pill>;
 export const ConfBadge = ({ c }: { c?: string | null }) =>

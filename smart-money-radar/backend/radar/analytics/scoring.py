@@ -34,7 +34,11 @@ class ScoreResult:
 
     @property
     def eligible_official(self) -> bool:
-        # passes the mandatory criteria, enough trustworthy data, and at least "Watchlist" (>= 65)
+        # passes the mandatory criteria, enough trustworthy data, at least "Watchlist" (>= 65)
+        # and every item of the candidate-review checklist
+        checks = self.components.get("checks")
+        if checks is not None and not all(checks.values()):
+            return False
         return self.qualifies and self.confidence in ("HIGH", "MEDIUM") and self.score >= OFFICIAL_MIN_SCORE
 
 
@@ -166,6 +170,22 @@ def score_wallet(perf: Performance, settings: dict[str, Any], cluster_size: int 
         reasons.append(f"only {vs:.0%} of positions fully verified on-chain")
     comp["confidence_inputs"] = {"closed": closed, "verified_share": vs, "coverage_complete": perf.coverage_complete,
                                  "priced_share": priced_share}
+    # Candidate review checklist (Top 20 -> Top 10). All must pass for the official list;
+    # the independence (one wallet per cluster) check is applied at ranking time.
+    rep = perf.metrics.get("repeatability") or {"status": "insufficient", "pass": False}
+    dsa = perf.metrics.get("days_since_active")
+    comp["checks"] = {
+        "mandatory_criteria": ok,
+        "confidence_high_or_medium": conf in ("HIGH", "MEDIUM"),
+        "score_at_least_65": score >= OFFICIAL_MIN_SCORE,
+        "repeatable_both_halves": bool(rep.get("pass")),
+        "verified_share_ok": vs >= float(s["medium_confidence_min_verified_share"]),
+        "active_last_7_days": dsa is not None and dsa <= 7,
+        "not_single_win_dependent": perf.pnl_ex_best_sol > 0,
+    }
+    if not rep.get("pass"):
+        reasons.append("performance not repeatable across both halves of the period" if rep.get("status") == "fail"
+                       else "too few closed positions to test repeatability (need 6)")
     return ScoreResult(score=score, category=category_for(score), confidence=conf, qualifies=ok,
                        components=comp, reasons=reasons)
 
@@ -174,11 +194,30 @@ def fmt_pct(x) -> str:
     return "n/a" if x is None else f"{float(x):.0%}"
 
 
-def rank_official(results: dict[str, ScoreResult], limit: int = 10) -> list[tuple[str, ScoreResult]]:
-    """Official Top list: only wallets that pass the mandatory criteria with HIGH/MEDIUM confidence.
-    Ties broken by confidence (HIGH first) then median buy."""
+def _order_key(x):
     conf_rank = {"HIGH": 0, "MEDIUM": 1, "LOW": 2}
-    elig = [(w, r) for w, r in results.items() if r.eligible_official]
-    elig.sort(key=lambda x: (-x[1].score, conf_rank[x[1].confidence],
-                             -(x[1].components.get("median_buy", {}).get("median_buy_sol") or 0)))
-    return elig[:limit]
+    return (-x[1].score, conf_rank.get(x[1].confidence, 3),
+            -(x[1].components.get("median_buy", {}).get("median_buy_sol") or 0))
+
+
+def rank_official(results: dict[str, ScoreResult], limit: int = 10,
+                  clusters: dict[str, str] | None = None) -> list[tuple[str, ScoreResult]]:
+    """Official Top list: wallets passing the mandatory criteria + checklist with HIGH/MEDIUM
+    confidence. Only the best wallet of each relationship cluster is listed (one owner = one slot).
+    Ties broken by confidence (HIGH first) then median buy."""
+    elig = sorted(((w, r) for w, r in results.items() if r.eligible_official), key=_order_key)
+    out, seen = [], set()
+    for w, r in elig:
+        c = (clusters or {}).get(w) or w
+        if c in seen:
+            continue
+        seen.add(c)
+        out.append((w, r))
+        if len(out) >= limit:
+            break
+    return out
+
+
+def candidate_review(results: dict[str, ScoreResult], limit: int = 20) -> list[tuple[str, ScoreResult]]:
+    """Top 20 candidates by score (history read), shown with their checklist before Top 10."""
+    return sorted(results.items(), key=_order_key)[:limit]

@@ -67,7 +67,11 @@ export default function WalletPage({ params }: { params: { address: string } }) 
             <Stat label="Average Loss" value={sol(perf.avg_loss_sol, 2)} />
             <Stat label="Lệnh thắng lớn nhất" value={sol(perf.largest_win_sol, 2)} />
             <Stat label="Lệnh thua lớn nhất" value={sol(perf.largest_loss_sol, 2)} />
-            <Stat label="2x / 5x / 10x Hit" value={`${pct(perf.hit_rate_2x, 0)} · ${pct(perf.hit_rate_5x, 0)} · ${pct(perf.hit_rate_10x, 0)}`} sub="token tăng sau entry (đã xác nhận thanh khoản)" />
+            <Stat label="2x / 3x / 5x / 10x Hit" value={`${pct(perf.hit_rate_2x, 0)} · ${pct(perf.hit_rate_3x, 0)} · ${pct(perf.hit_rate_5x, 0)} · ${pct(perf.hit_rate_10x, 0)}`} sub="token tăng sau entry (đã xác nhận thanh khoản)" />
+            <Stat label="Average Sell SOL" value={sol(perf.metrics?.avg_sell_tx_sol)} sub={`mỗi lệnh bán · ${sol(perf.metrics?.avg_sell_position_sol)} / vị thế`} />
+            <Stat label="Lợi nhuận đã chốt" value={pct(perf.metrics?.realized_share, 0)} sub="|đã chốt| / (|đã chốt| + |chưa chốt|)" />
+            <Stat label="Lặp lại hiệu suất" value={({ pass: "Đạt", fail: "Không đạt", insufficient: "Chưa đủ dữ liệu" } as any)[perf.metrics?.repeatability?.status] || "—"}
+              sub={perf.metrics?.repeatability?.first_half ? `ROI nửa đầu ${pct(perf.metrics.repeatability.first_half.roi, 0)} · nửa sau ${pct(perf.metrics.repeatability.second_half.roi, 0)}` : "cần ≥ 6 vị thế đóng"} />
             <Stat label="Avg / Median realized ROI" value={`${pct(perf.avg_realized_roi, 0)} · ${pct(perf.median_realized_roi, 0)}`} />
             <Stat label="Avg Max Favorable Excursion" value={multiple(perf.avg_mfe)} />
             <Stat label="Avg Holding Time" value={duration(perf.avg_holding_seconds)} />

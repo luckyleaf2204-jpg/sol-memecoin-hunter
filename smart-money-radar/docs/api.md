@@ -16,6 +16,7 @@ Số SOL là số thực (đơn vị SOL), thời gian ISO-8601 UTC. API **chỉ
 |---|---|---|---|
 | GET | `/api/overview` | `period` | số ví theo dõi / đạt tiêu chí, token đang gom, SOL mua 24h, cảnh báo chưa xem, tín hiệu mạnh nhất, trạng thái stream |
 | GET | `/api/wallets/top` | `period=7|30|90`, `sort=score|win_rate|median_buy|realized_pnl|roi|hit_5x|hit_10x|last_active`, `order`, `limit`, `official=true|false` | Top N (chính thức: chỉ ví đạt chuẩn, độ tin cậy High/Medium) |
+| GET | `/api/wallets/candidates` | `period`, `limit` (20) | Top 20 ứng viên đã đọc lịch sử + bảng kiểm từng mục (đạt/không đạt) |
 | GET | `/api/wallets` | `status`, `q` (tiền tố địa chỉ), `period`, `page`, `page_size` | mọi ví đang theo dõi |
 | POST | `/api/wallets` | `{"address": "..."}` | thêm ví, xếp hàng backfill |
 | GET | `/api/wallets/{address}` | | thông tin ví, hiệu suất 7/30/90, điểm + thành phần, quan hệ, cụm, đường PnL |

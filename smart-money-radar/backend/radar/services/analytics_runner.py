@@ -167,7 +167,9 @@ async def rank_and_status(ctx: Ctx, s: dict[str, Any]) -> None:
         rows = await ctx.pool.fetch("SELECT * FROM smart_money_scores WHERE period_days = $1", period)
         results = {r["wallet"]: ScoreResult(float(r["score"]), r["category"], r["confidence"], r["qualifies"],
                                             r["components"], r["reasons"]) for r in rows}
-        ranked = rank_official(results, limit=100000)
+        clusters = {r["address"]: r["cluster_id"] for r in await ctx.pool.fetch(
+            "SELECT address, cluster_id FROM wallets WHERE address = ANY($1::text[])", list(results))}
+        ranked = rank_official(results, limit=100000, clusters=clusters)
         async with ctx.pool.acquire() as conn:
             async with conn.transaction():
                 await conn.execute("UPDATE smart_money_scores SET official_rank = NULL WHERE period_days = $1", period)
@@ -380,7 +382,8 @@ async def run_cycle(ctx: Ctx, full: bool) -> dict:
     now = int(time.time())
     if full:
         wallets = [r["address"] for r in await ctx.pool.fetch(
-            "SELECT address FROM wallets WHERE status IN ('candidate','tracked','smart')")]
+            "SELECT address FROM wallets WHERE status IN ('candidate','tracked','smart') "
+            "OR (backfill_status IN ('complete','partial') AND NOT is_excluded)")]
         await ctx.redis.delete(K_DIRTY_WALLETS)
     else:
         wallets = list(await ctx.redis.spop(K_DIRTY_WALLETS, 500) or [])

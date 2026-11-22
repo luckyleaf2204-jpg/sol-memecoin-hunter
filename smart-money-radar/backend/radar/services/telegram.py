@@ -62,6 +62,10 @@ def format_alert(sig: dict[str, Any], token: dict[str, Any], sol_usd: float | No
         wr = b.get("win_rate")
         lines.append(f"{i}. <code>{e(b['wallet'])}</code> – {fmt_sol(b['position_sol'])} – "
                      f"WR {('n/a' if wr is None else fmt_num(100 * wr, 0) + '%')} – Score {fmt_num(b.get('score'), 0)}")
+        if b.get("first_ts"):
+            t = dt.datetime.fromtimestamp(int(b["first_ts"]), dt.timezone.utc).astimezone(VN).strftime("%H:%M:%S")
+            lines.append(f"   vào {t} · giá {fmt_price(b.get('entry_price_sol'))} · MC {fmt_sol(b.get('entry_mc_sol'), 1)}"
+                         + (" · cùng cụm ví khác" if b.get("cluster_id") not in (None, b["wallet"]) else ""))
     det = sig.get("detected_at") or dt.datetime.now(dt.timezone.utc)
     lines += ["", f"Thời gian phát hiện: {det.astimezone(VN).strftime('%d/%m/%Y %H:%M:%S')} (GMT+7)",
               f"Giá tại thời điểm phát hiện: {fmt_price(sig.get('price_at_detection_sol'))}"
@@ -111,3 +115,25 @@ async def poll_commands(http: HttpClient, token: str, allowed_chat: str | None, 
         except Exception as e:
             log.warning("telegram polling error: %s", type(e).__name__)
             await asyncio.sleep(5)
+
+
+def format_exit_alert(sig: dict[str, Any], token: dict[str, Any], prog: dict[str, Any], level: str,
+                      public_url: str | None) -> str:
+    e = html.escape
+    pct = fmt_num(100 * prog["exited_share"], 0)
+    lines = [f"⚠️ <b>SMART MONEY EXIT — {pct}% vị thế đã bán</b>", "",
+             f"Token: <b>{e(token.get('name') or '?')}</b> ({e(token.get('symbol') or '?')})",
+             f"Mint Address: <code>{e(sig['mint'])}</code>",
+             f"Tín hiệu gốc: {e(sig['level'].replace('_', ' '))} lúc "
+             f"{sig['detected_at'].astimezone(VN).strftime('%d/%m/%Y %H:%M')} (GMT+7)",
+             f"Ví đã thoát hoàn toàn: {prog['fully_exited']}/{prog['holders_at_signal']}",
+             f"SOL Smart Money đã bán sau tín hiệu: {fmt_sol(prog['sell_sol_after'])}",
+             f"Giá hiện tại: {fmt_price(float(token['last_price_sol']) if token.get('last_price_sol') else None)}", ""]
+    for w in sorted(prog["wallets"], key=lambda x: -x["exited_share"])[:8]:
+        lines.append(f"• <code>{e(w['wallet'])}</code> – đã bán {fmt_num(100 * w['exited_share'], 0)}% – "
+                     f"{fmt_sol(w['sell_sol_after'])}")
+    lines += ["", f"DexScreener: https://dexscreener.com/solana/{sig['mint']}"]
+    if public_url:
+        lines.append(f"Dashboard: {public_url.rstrip('/')}/tokens/{sig['mint']}")
+    lines.append("Chỉ là dữ liệu on-chain, không phải khuyến nghị. Hệ thống không tự giao dịch.")
+    return "\n".join(lines)

@@ -147,6 +147,18 @@ def compute_performance(positions: Iterable[Position], period_days: int, now: in
     perf.unrealized_pnl_sol = sum(p.unrealized_pnl_sol or 0 for p in opened)
     perf.total_pnl_sol = perf.realized_pnl_sol + perf.unrealized_pnl_sol
 
+    # selling behaviour: SOL received per sell transaction and per position
+    sells_pos = [p.sell_sol for p in q if p.n_sells > 0]
+    perf.metrics["avg_sell_position_sol"] = _mean(sells_pos)
+    n_sell_tx = sum(p.n_sells for p in q)
+    perf.metrics["avg_sell_tx_sol"] = (sum(sells_pos) / n_sell_tx) if n_sell_tx else None
+    perf.metrics["n_sell_txs"] = n_sell_tx
+    # how much of the PnL is already locked in: |realised| / (|realised| + |unrealised|)
+    denom = abs(perf.realized_pnl_sol) + abs(perf.unrealized_pnl_sol)
+    perf.metrics["realized_share"] = (abs(perf.realized_pnl_sol) / denom) if denom > 0 else None
+    perf.metrics["days_since_active"] = ((now - perf.last_active_at) / 86400) if perf.last_active_at else None
+    perf.metrics["repeatability"] = repeatability(closed)
+
     priced = [p for p in q if p.price_metrics.get("price_data")]
     perf.metrics["positions_with_price_data"] = len(priced)
     if priced:
@@ -169,3 +181,22 @@ def compute_performance(positions: Iterable[Position], period_days: int, now: in
         perf.verified_share = sum(1 for p in q if p.verification == "verified") / len(q)
         perf.metrics["partial_share"] = sum(1 for p in q if p.verification == "partially_verified") / len(q)
     return perf
+
+
+def repeatability(closed: list[Position], min_per_half: int = 3) -> dict[str, Any]:
+    """Split closed qualifying positions in time (by close time) into two halves. The record is
+    'repeatable' when BOTH halves have a positive ROI and a win rate >= 50 %. A wallet whose
+    profit comes from one lucky streak fails this check."""
+    order = sorted(closed, key=lambda p: p.closed_at or 0)
+    if len(order) < 2 * min_per_half:
+        return {"status": "insufficient", "pass": False, "positions": len(order)}
+    mid = len(order) // 2
+    halves = []
+    for part in (order[:mid], order[mid:]):
+        pnl = sum(p.realized_pnl_sol for p in part)
+        cost = sum(p.net_entry_cost for p in part)
+        wins = sum(1 for p in part if p.realized_pnl_sol > 0)
+        halves.append({"positions": len(part), "pnl_sol": pnl, "roi": (pnl / cost) if cost > 0 else None,
+                       "win_rate": wins / len(part)})
+    ok = all(h["roi"] is not None and h["roi"] > 0 and h["win_rate"] >= 0.5 for h in halves)
+    return {"status": "pass" if ok else "fail", "pass": ok, "first_half": halves[0], "second_half": halves[1]}

@@ -103,6 +103,27 @@ Realized PnL > 0, ROI > 0, không bị loại trừ, phần lớn lệnh do chí
 **Độ tin cậy dữ liệu:** High = ≥ 10 vị thế đóng, ≥ 80% Verified, lịch sử backfill đủ cả kỳ, ≥ 60% vị thế có dữ liệu giá ·
 Medium = ≥ 5 vị thế đóng, ≥ 50% Verified · còn lại Low. **Top 10 chính thức chỉ gồm High/Medium.**
 
+### Bảng kiểm Top 20 → Top 10
+
+Trang **Top Wallets → Ứng viên Top 20** liệt kê 20 ví điểm cao nhất **đã đọc lịch sử on-chain**, kèm bảng kiểm. Một ví chỉ vào
+Top 10 chính thức khi qua **tất cả**:
+
+| Mục | Điều kiện |
+|---|---|
+| Tiêu chí bắt buộc | ≥ 5 vị thế ≥ 2 SOL đã đóng, Win Rate ≥ 65%, Median Buy ≥ 2 SOL, Realized PnL > 0, ROI > 0 |
+| Độ tin cậy | High hoặc Medium (lịch sử đã backfill) |
+| Điểm | Smart Money Score ≥ 65 |
+| Lặp lại hiệu suất | chia vị thế đóng theo thời gian thành 2 nửa (mỗi nửa ≥ 3); **cả hai nửa** ROI > 0 và Win Rate ≥ 50% |
+| Đã xác minh | ≥ 50% vị thế Verified |
+| Còn hoạt động | có giao dịch trong 7 ngày |
+| Không phụ thuộc một lệnh | vẫn có lãi khi bỏ lệnh thắng lớn nhất |
+| Độc lập | mỗi cụm ví (cùng chủ) chỉ giữ ví điểm cao nhất |
+
+### Chỉ số bổ sung
+* **Average Sell SOL**: SOL nhận trung bình mỗi lệnh bán (và mỗi vị thế có bán).
+* **Tỷ lệ lợi nhuận đã chốt** = |Realized| / (|Realized| + |Unrealized|).
+* **Số lệnh thắng** = `wins`; **3x Hit Rate** hiển thị cùng 2x/5x/10x.
+
 ## 6. Ví độc lập (`radar/analytics/relationships.py`)
 
 Cạnh quan hệ (kèm bằng chứng chữ ký): nạp SOL trực tiếp (0,9), chuyển token qua lại (0,9), chuyển SOL ≥ 0,1 (0,85), cùng ví funding
@@ -115,6 +136,12 @@ nạp tiền thì không được tính khi mua token của chính creator đó.
 Trong cửa sổ 5 phút, ví Smart Money (điểm ≥ 65, đạt tiêu chí, độ tin cậy ≥ Medium) có vị thế hiện tại ≥ 2 SOL:
 WATCH ≥ 2 cụm & ≥ 5 SOL · STRONG ≥ 3 & ≥ 10 SOL · VERY STRONG ≥ 5 & ≥ 20 SOL. Huỷ nếu giá đã > 2× entry Smart Money đầu tiên.
 STRONG trở lên đòi hỏi các lệnh được tính đều Verified; token HIGH RISK bị giới hạn ở WATCH. Mọi ngưỡng chỉnh được trong Cài đặt.
+
+### Cảnh báo thoát lệnh (EXIT)
+Khi một ví Smart Money có trong tín hiệu đang hoạt động (≤ 48 giờ) bán token đó, hệ thống tính lượng token mỗi ví đang giữ **tại thời điểm
+tín hiệu** và phần đã bán **sau** thời điểm đó. Tỷ lệ thoát chung được gia quyền theo vốn SOL của từng ví. Cảnh báo **EXIT ≥ 50%**
+(ngưỡng chỉnh được) và **EXIT ≥ 90%**, mỗi mức một lần cho mỗi tín hiệu. Tín hiệu và Telegram ghi **giờ vào, giá vào, Market Cap lúc vào**
+của từng ví và đánh dấu ví thuộc cùng cụm.
 
 ## 8. Rủi ro token (`radar/analytics/risk.py`)
 

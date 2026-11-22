@@ -81,6 +81,17 @@ export default function TokenPage({ params }: { params: { mint: string } }) {
               <li key={s.id} className="flex flex-wrap items-center gap-2">
                 <LevelBadge level={s.level} /><span>{s.independent_buyers} ví độc lập · {sol(s.total_buy_sol, 1)}</span>
                 <span className="text-xs text-slate-500">{dateTime(s.detected_at)} · {s.status}</span>
+                <ul className="w-full pl-2 text-xs text-slate-600 dark:text-slate-300">
+                  {(s.buyers || []).map((b: any) => (
+                    <li key={b.wallet} className="flex flex-wrap gap-x-2">
+                      <Link href={`/wallets/${b.wallet}`} className="font-mono text-brand dark:text-teal-300">{b.wallet.slice(0, 8)}…</Link>
+                      <span>{sol(b.position_sol)}</span>
+                      <span>vào {b.first_ts ? dateTime(new Date(b.first_ts * 1000).toISOString()) : "—"}</span>
+                      <span>giá {price(b.entry_price_sol)}</span><span>MC {sol(b.entry_mc_sol, 1)}</span>
+                      <span>score {num(b.score, 0)}</span>
+                    </li>
+                  ))}
+                </ul>
               </li>
             ))}
           </ul>

@@ -139,3 +139,24 @@ kết quả hiển thị ở trang **Backtest** của dashboard.
 * Funding "đầu tiên" chỉ chắc chắn khi lịch sử ví nằm gọn trong cửa sổ backfill (`funding_is_first_ever`).
 * Cảnh báo Telegram đã kiểm thử ở chế độ dashboard (không có bot token trong môi trường thử); gửi thật cần `TELEGRAM_BOT_TOKEN`
   (Cài đặt → Gửi tin nhắn thử).
+
+## 9. Bổ sung Giai đoạn 1 (đánh giá phương pháp copy Smart Money)
+
+| Tính năng | Kiểm thử |
+|---|---|
+| Average Sell SOL, tỷ lệ lợi nhuận đã chốt, 3x hit rate | chỉ số trong `performance.py`, hiển thị trang ví |
+| Kiểm tra lặp lại theo hai nửa kỳ | `test_repeatability_split_halves` (4 thắng rồi 4 thua ⇒ không đạt) |
+| Bảng kiểm Top 20 → Top 10, mỗi cụm một suất | `test_checklist_blocks_unrepeatable_or_inactive_wallets`, `test_one_slot_per_cluster_in_official_top` |
+| Giá / MC / thời điểm vào của từng ví trong tín hiệu | `test_signal_records_each_buyers_entry_price_and_mc` |
+| Cảnh báo thoát lệnh EXIT ≥ 50% / ≥ 90% | `test_exit_progress_weights_by_position_and_ignores_pre_signal_sells`, integration `test_exit_alert_when_signal_wallets_sell` (một lần mỗi mức) |
+
+Kết quả bảng kiểm trên dữ liệu thật (kỳ 30 ngày, các ví đã backfill):
+
+| Ví | Vị thế đóng | Win Rate | Realized PnL | Điểm | Trượt mục |
+|---|---:|---:|---:|---:|---|
+| `78FmcvKtbWEMTeZ8Z5jc1DjfskQ8oJNf6XgAyaf6tSPE` | 58 | 76% | +50,7 SOL | 64,5 | điểm < 65 (median buy 2,17 SOL, > 30 vị thế) |
+| `ArkdCAPE…` | 31 | 94% | +24,6 SOL | 50,9 | điểm < 65: kiểu sniper lướt sóng, 0/12 token có giá đạt 2x sau khi mua |
+| `4oN6EAEw…` | 9 | 89% | +1,8 SOL | 51,5 | không lặp lại ở 2 nửa kỳ, phụ thuộc một lệnh thắng |
+| `499jWrZj…`, `8UGcQnU7…`, `E4BMFSG1…` | 54–55 | 42–50% | −2,4 … +21,3 SOL | < 42 | Win Rate < 65% (nhóm bot bundle) |
+
+Chưa ví nào qua đủ bảng kiểm ⇒ Top 10 chính thức đang trống — đúng theo yêu cầu "không xếp ví thiếu năng lực/thiếu dữ liệu".

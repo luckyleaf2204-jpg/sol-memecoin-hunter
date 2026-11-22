@@ -193,6 +193,47 @@ async def top_wallets(period: int = Query(30, enum=[7, 30, 90]), sort: str = "sc
     return {"period": period, "sort": sort, "official": official, "rows": rows(rs)}
 
 
+CHECK_LABELS = {
+    "mandatory_criteria": "Đạt tiêu chí bắt buộc (WR ≥ 65%, Median ≥ 2 SOL, PnL & ROI > 0, ≥ 5 vị thế đóng)",
+    "confidence_high_or_medium": "Độ tin cậy dữ liệu High/Medium",
+    "score_at_least_65": "Smart Money Score ≥ 65",
+    "repeatable_both_halves": "Hiệu suất lặp lại ở cả hai nửa kỳ",
+    "verified_share_ok": "≥ 50% vị thế đã xác minh on-chain",
+    "active_last_7_days": "Có giao dịch trong 7 ngày gần nhất",
+    "not_single_win_dependent": "Vẫn có lãi khi bỏ lệnh thắng lớn nhất",
+}
+
+
+@app.get("/api/wallets/candidates", dependencies=[Auth])
+async def candidate_wallets(period: int = Query(30, enum=[7, 30, 90]), limit: int = 20):
+    """Top 20 candidates (wallets whose history has been read) with the review checklist.
+    Wallets passing every check, best of each relationship cluster, form the official Top 10."""
+    rs = await ctx().pool.fetch(f"""{WALLET_SELECT} WHERE sc.period_days = $1 AND NOT w.is_excluded
+        AND w.backfill_status IN ('complete','partial')
+        ORDER BY sc.score DESC, p.median_buy_sol DESC NULLS LAST LIMIT $2""", period, max(1, min(limit, 50)))
+    comps = {r["wallet"]: r["components"] for r in await ctx().pool.fetch(
+        "SELECT wallet, components FROM smart_money_scores WHERE period_days = $1 AND wallet = ANY($2::text[])",
+        period, [r["wallet"] for r in rs])}
+    out = []
+    seen_cluster: dict[str, str] = {}
+    for r in rs:
+        d = j(dict(r))
+        checks = (comps.get(r["wallet"]) or {}).get("checks") or {}
+        cl = r["cluster_id"] or r["wallet"]
+        dup_of = seen_cluster.get(cl)
+        if dup_of is None and all(checks.values()) and checks:
+            seen_cluster[cl] = r["wallet"]
+        d["checks"] = [{"key": k, "label": CHECK_LABELS.get(k, k), "ok": bool(v)} for k, v in checks.items()]
+        if not checks:
+            d["checks"] = [{"key": "not_recomputed", "label": "Chưa được tính lại với bảng kiểm (chờ chu kỳ phân tích)",
+                            "ok": False}]
+        d["checks"].append({"key": "independent", "label": "Không trùng chủ với ví xếp trên",
+                            "ok": dup_of is None or dup_of == r["wallet"]})
+        d["repeatability"] = ((comps.get(r["wallet"]) or {}).get("checks") or {}).get("repeatable_both_halves")
+        out.append(d)
+    return {"period": period, "rows": out}
+
+
 @app.get("/api/wallets", dependencies=[Auth])
 async def list_wallets(status: str | None = None, q: str | None = None, period: int = 30, page: int = 1,
                        page_size: int = 50):
