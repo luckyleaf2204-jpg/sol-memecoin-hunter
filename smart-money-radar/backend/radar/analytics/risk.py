@@ -78,7 +78,7 @@ def assess(i: RiskInputs) -> RiskResult:
     if i.bundle_wallets is None:
         _chk(c, "bundle_buying", "unknown", 0.5, "creation slot not analysed")
     elif i.bundle_wallets >= 3 or (i.bundle_supply_pct or 0) >= 15:
-        _chk(c, "bundle_buying", "fail", 3, f"{i.bundle_wallets} wallets bought in the creation slot "
+        _chk(c, "bundle_buying", "fail", 3, f"{i.bundle_wallets} wallet(s) bought in the creation slot "
                                              f"({(i.bundle_supply_pct or 0):.1f}% supply)", True)
     elif i.bundle_wallets >= 1:
         _chk(c, "bundle_buying", "warn", 1, f"{i.bundle_wallets} wallet(s) bought in the creation slot")

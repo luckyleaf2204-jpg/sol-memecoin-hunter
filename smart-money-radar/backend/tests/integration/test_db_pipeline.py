@@ -152,3 +152,37 @@ async def test_api_requires_login_and_validates_settings(ctx):
             sec = (await c.get("/api/settings")).json()["secrets"]
             assert all(isinstance(v, (bool, list)) for v in sec.values())   # never the key itself
             assert (await c.get("/api/wallets/xyz")).status_code == 400
+
+
+async def test_signal_storage_and_alert_dedupe(ctx):
+    """Same level twice -> one alert; upgrade -> new alert; small change -> no resend."""
+    import datetime as dt
+    from radar.services.signal_engine import store_and_alert
+    s = dict(await ctx.settings.get())
+    s["telegram_enabled"] = False            # dashboard-only channel in tests
+    mint = "Mint9999999999999999999999999999999999999999"
+    await ctx.pool.execute("INSERT INTO tokens(mint, name, symbol, last_price_sol, last_mc_sol, last_liquidity_sol) "
+                           "VALUES ($1, 'Test Token', 'TST', 0.00000003, 30, 12) ON CONFLICT DO NOTHING", mint)
+    now = dt.datetime.now(dt.timezone.utc)
+
+    def sig(level, n, total):
+        buyers = [{"wallet": f"W{i}", "position_sol": total / n, "cluster_id": f"W{i}", "score": 80, "win_rate": 0.7}
+                  for i in range(n)]
+        return {"mint": mint, "level": level, "raw_buyers": n, "independent_buyers": n, "total_buy_sol": total,
+                "total_sell_sol": 0.0, "net_flow_sol": total, "window_start": now, "window_end": now,
+                "first_entry_price_sol": 3e-8, "price_at_detection_sol": 3e-8, "runup_multiple": 1.0,
+                "market_cap_sol": 30.0, "liquidity_sol": 12.0, "risk_level": "MEDIUM", "avg_buyer_score": 80.0,
+                "verification": "verified", "buyers": buyers, "downgrade_reasons": []}
+
+    await store_and_alert(ctx, sig("WATCH", 2, 6.0), s)
+    await store_and_alert(ctx, sig("WATCH", 2, 6.5), s)          # same level, tiny change -> no new alert
+    rows = await ctx.pool.fetch("SELECT level, reason, status FROM alerts WHERE mint = $1 ORDER BY id", mint)
+    assert [(r["level"], r["reason"]) for r in rows] == [("WATCH", "new")]
+    assert rows[0]["status"] == "dashboard_only"
+    await store_and_alert(ctx, sig("STRONG", 3, 12.0), s)        # upgrade -> alert
+    rows = await ctx.pool.fetch("SELECT level, reason FROM alerts WHERE mint = $1 ORDER BY id", mint)
+    assert [(r["level"], r["reason"]) for r in rows] == [("WATCH", "new"), ("STRONG", "upgrade")]
+    sigs = await ctx.pool.fetch("SELECT level, status FROM smart_money_signals WHERE mint = $1 ORDER BY id", mint)
+    assert [(r["level"], r["status"]) for r in sigs] == [("WATCH", "superseded"), ("STRONG", "active")]
+    msg = await ctx.pool.fetchval("SELECT message FROM alerts WHERE mint = $1 AND level = 'STRONG'", mint)
+    assert "SMART MONEY ALERT" in msg and mint in msg and "Test Token" in msg and "pump.fun/coin/" in msg

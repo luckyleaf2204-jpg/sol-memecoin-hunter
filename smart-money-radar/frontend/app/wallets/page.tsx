@@ -113,7 +113,7 @@ export default function Wallets() {
               {(all.data?.rows || []).map((r: any) => (
                 <tr key={r.address}>
                   <Td><Address a={r.address} href={`/wallets/${r.address}`} full={false} /></Td>
-                  <Td>{statusLabel(r.status)}</Td><Td>{r.score !== null ? num(r.score, 1) : "—"}</Td><Td>{pct(r.win_rate, 0)}</Td>
+                  <Td>{r.high_frequency ? "Bỏ qua: bot tần suất cao" : statusLabel(r.status)}</Td><Td>{r.score !== null ? num(r.score, 1) : "—"}</Td><Td>{pct(r.win_rate, 0)}</Td>
                   <Td>{sol(r.median_buy_sol)}</Td><Td><Tone v={r.realized_pnl_sol}>{sol(r.realized_pnl_sol, 1)}</Tone></Td>
                   <Td>{r.closed_qualifying ?? "—"}</Td><Td>{r.backfill_status}</Td><Td>{r.discovery_source || "—"}</Td>
                 </tr>

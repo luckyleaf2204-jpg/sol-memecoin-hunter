@@ -1,0 +1,1149 @@
+{
+ "meta": {
+  "generated_at": "2026-11-22T06:58:20.261716+00:00",
+  "wallets": 8,
+  "trades": 1436,
+  "tokens": 123,
+  "tokens_with_bars": 66,
+  "period": [
+   1795197232,
+   1795329951
+  ],
+  "settings": {
+   "peak_window_days": 7,
+   "peak_min_bar_volume_sol": 1.0,
+   "peak_min_liquidity_sol": 3.0,
+   "peak_confirm_points": 2,
+   "peak_confirm_window_minutes": 5,
+   "peak_min_trade_sol": 0.3,
+   "signal_window_minutes": 5,
+   "signal_min_position_sol": 2.0,
+   "signal_watch_min_wallets": 2,
+   "signal_watch_min_total_sol": 5.0,
+   "signal_strong_min_wallets": 3,
+   "signal_strong_min_total_sol": 10.0,
+   "signal_very_strong_min_wallets": 5,
+   "signal_very_strong_min_total_sol": 20.0,
+   "signal_max_runup": 2.0,
+   "signal_min_wallet_score": 65.0,
+   "signal_high_risk_caps_watch": true,
+   "signal_require_verified_for_strong": true,
+   "backtest_slippage_bps": 100,
+   "backtest_detection_latency_seconds": 5,
+   "backtest_trade_size_sol": 1.0
+  }
+ },
+ "grid": [
+  {
+   "params": {
+    "signal_watch_min_wallets": 2,
+    "signal_max_runup": 1.5
+   },
+   "train": {
+    "signals": 0,
+    "tradable": 0,
+    "hit_2x": null,
+    "hit_5x": null,
+    "hit_10x": null,
+    "drawdown_50": null,
+    "liquidity_lost": null,
+    "ret_1h": {
+     "n": 0,
+     "mean": null,
+     "median": null,
+     "win_share": null
+    },
+    "ret_6h": {
+     "n": 0,
+     "mean": null,
+     "median": null,
+     "win_share": null
+    },
+    "ret_24h": {
+     "n": 0,
+     "mean": null,
+     "median": null,
+     "win_share": null
+    },
+    "ret_tp2x_sl50": {
+     "n": 0,
+     "mean": null,
+     "median": null,
+     "win_share": null
+    },
+    "hit_2x_count": 0,
+    "hit_5x_count": 0,
+    "hit_10x_count": 0,
+    "drawdown_50_count": 0,
+    "liquidity_lost_count": 0
+   },
+   "validation": {
+    "signals": 0,
+    "tradable": 0,
+    "hit_2x": null,
+    "hit_5x": null,
+    "hit_10x": null,
+    "drawdown_50": null,
+    "liquidity_lost": null,
+    "ret_1h": {
+     "n": 0,
+     "mean": null,
+     "median": null,
+     "win_share": null
+    },
+    "ret_6h": {
+     "n": 0,
+     "mean": null,
+     "median": null,
+     "win_share": null
+    },
+    "ret_24h": {
+     "n": 0,
+     "mean": null,
+     "median": null,
+     "win_share": null
+    },
+    "ret_tp2x_sl50": {
+     "n": 0,
+     "mean": null,
+     "median": null,
+     "win_share": null
+    },
+    "hit_2x_count": 0,
+    "hit_5x_count": 0,
+    "hit_10x_count": 0,
+    "drawdown_50_count": 0,
+    "liquidity_lost_count": 0
+   },
+   "test": {
+    "signals": 0,
+    "tradable": 0,
+    "hit_2x": null,
+    "hit_5x": null,
+    "hit_10x": null,
+    "drawdown_50": null,
+    "liquidity_lost": null,
+    "ret_1h": {
+     "n": 0,
+     "mean": null,
+     "median": null,
+     "win_share": null
+    },
+    "ret_6h": {
+     "n": 0,
+     "mean": null,
+     "median": null,
+     "win_share": null
+    },
+    "ret_24h": {
+     "n": 0,
+     "mean": null,
+     "median": null,
+     "win_share": null
+    },
+    "ret_tp2x_sl50": {
+     "n": 0,
+     "mean": null,
+     "median": null,
+     "win_share": null
+    },
+    "hit_2x_count": 0,
+    "hit_5x_count": 0,
+    "hit_10x_count": 0,
+    "drawdown_50_count": 0,
+    "liquidity_lost_count": 0
+   },
+   "all": {
+    "signals": 0,
+    "tradable": 0,
+    "hit_2x": null,
+    "hit_5x": null,
+    "hit_10x": null,
+    "drawdown_50": null,
+    "liquidity_lost": null,
+    "ret_1h": {
+     "n": 0,
+     "mean": null,
+     "median": null,
+     "win_share": null
+    },
+    "ret_6h": {
+     "n": 0,
+     "mean": null,
+     "median": null,
+     "win_share": null
+    },
+    "ret_24h": {
+     "n": 0,
+     "mean": null,
+     "median": null,
+     "win_share": null
+    },
+    "ret_tp2x_sl50": {
+     "n": 0,
+     "mean": null,
+     "median": null,
+     "win_share": null
+    },
+    "hit_2x_count": 0,
+    "hit_5x_count": 0,
+    "hit_10x_count": 0,
+    "drawdown_50_count": 0,
+    "liquidity_lost_count": 0
+   }
+  },
+  {
+   "params": {
+    "signal_watch_min_wallets": 2,
+    "signal_max_runup": 2.0
+   },
+   "train": {
+    "signals": 0,
+    "tradable": 0,
+    "hit_2x": null,
+    "hit_5x": null,
+    "hit_10x": null,
+    "drawdown_50": null,
+    "liquidity_lost": null,
+    "ret_1h": {
+     "n": 0,
+     "mean": null,
+     "median": null,
+     "win_share": null
+    },
+    "ret_6h": {
+     "n": 0,
+     "mean": null,
+     "median": null,
+     "win_share": null
+    },
+    "ret_24h": {
+     "n": 0,
+     "mean": null,
+     "median": null,
+     "win_share": null
+    },
+    "ret_tp2x_sl50": {
+     "n": 0,
+     "mean": null,
+     "median": null,
+     "win_share": null
+    },
+    "hit_2x_count": 0,
+    "hit_5x_count": 0,
+    "hit_10x_count": 0,
+    "drawdown_50_count": 0,
+    "liquidity_lost_count": 0
+   },
+   "validation": {
+    "signals": 0,
+    "tradable": 0,
+    "hit_2x": null,
+    "hit_5x": null,
+    "hit_10x": null,
+    "drawdown_50": null,
+    "liquidity_lost": null,
+    "ret_1h": {
+     "n": 0,
+     "mean": null,
+     "median": null,
+     "win_share": null
+    },
+    "ret_6h": {
+     "n": 0,
+     "mean": null,
+     "median": null,
+     "win_share": null
+    },
+    "ret_24h": {
+     "n": 0,
+     "mean": null,
+     "median": null,
+     "win_share": null
+    },
+    "ret_tp2x_sl50": {
+     "n": 0,
+     "mean": null,
+     "median": null,
+     "win_share": null
+    },
+    "hit_2x_count": 0,
+    "hit_5x_count": 0,
+    "hit_10x_count": 0,
+    "drawdown_50_count": 0,
+    "liquidity_lost_count": 0
+   },
+   "test": {
+    "signals": 0,
+    "tradable": 0,
+    "hit_2x": null,
+    "hit_5x": null,
+    "hit_10x": null,
+    "drawdown_50": null,
+    "liquidity_lost": null,
+    "ret_1h": {
+     "n": 0,
+     "mean": null,
+     "median": null,
+     "win_share": null
+    },
+    "ret_6h": {
+     "n": 0,
+     "mean": null,
+     "median": null,
+     "win_share": null
+    },
+    "ret_24h": {
+     "n": 0,
+     "mean": null,
+     "median": null,
+     "win_share": null
+    },
+    "ret_tp2x_sl50": {
+     "n": 0,
+     "mean": null,
+     "median": null,
+     "win_share": null
+    },
+    "hit_2x_count": 0,
+    "hit_5x_count": 0,
+    "hit_10x_count": 0,
+    "drawdown_50_count": 0,
+    "liquidity_lost_count": 0
+   },
+   "all": {
+    "signals": 0,
+    "tradable": 0,
+    "hit_2x": null,
+    "hit_5x": null,
+    "hit_10x": null,
+    "drawdown_50": null,
+    "liquidity_lost": null,
+    "ret_1h": {
+     "n": 0,
+     "mean": null,
+     "median": null,
+     "win_share": null
+    },
+    "ret_6h": {
+     "n": 0,
+     "mean": null,
+     "median": null,
+     "win_share": null
+    },
+    "ret_24h": {
+     "n": 0,
+     "mean": null,
+     "median": null,
+     "win_share": null
+    },
+    "ret_tp2x_sl50": {
+     "n": 0,
+     "mean": null,
+     "median": null,
+     "win_share": null
+    },
+    "hit_2x_count": 0,
+    "hit_5x_count": 0,
+    "hit_10x_count": 0,
+    "drawdown_50_count": 0,
+    "liquidity_lost_count": 0
+   }
+  },
+  {
+   "params": {
+    "signal_watch_min_wallets": 2,
+    "signal_max_runup": 3.0
+   },
+   "train": {
+    "signals": 0,
+    "tradable": 0,
+    "hit_2x": null,
+    "hit_5x": null,
+    "hit_10x": null,
+    "drawdown_50": null,
+    "liquidity_lost": null,
+    "ret_1h": {
+     "n": 0,
+     "mean": null,
+     "median": null,
+     "win_share": null
+    },
+    "ret_6h": {
+     "n": 0,
+     "mean": null,
+     "median": null,
+     "win_share": null
+    },
+    "ret_24h": {
+     "n": 0,
+     "mean": null,
+     "median": null,
+     "win_share": null
+    },
+    "ret_tp2x_sl50": {
+     "n": 0,
+     "mean": null,
+     "median": null,
+     "win_share": null
+    },
+    "hit_2x_count": 0,
+    "hit_5x_count": 0,
+    "hit_10x_count": 0,
+    "drawdown_50_count": 0,
+    "liquidity_lost_count": 0
+   },
+   "validation": {
+    "signals": 0,
+    "tradable": 0,
+    "hit_2x": null,
+    "hit_5x": null,
+    "hit_10x": null,
+    "drawdown_50": null,
+    "liquidity_lost": null,
+    "ret_1h": {
+     "n": 0,
+     "mean": null,
+     "median": null,
+     "win_share": null
+    },
+    "ret_6h": {
+     "n": 0,
+     "mean": null,
+     "median": null,
+     "win_share": null
+    },
+    "ret_24h": {
+     "n": 0,
+     "mean": null,
+     "median": null,
+     "win_share": null
+    },
+    "ret_tp2x_sl50": {
+     "n": 0,
+     "mean": null,
+     "median": null,
+     "win_share": null
+    },
+    "hit_2x_count": 0,
+    "hit_5x_count": 0,
+    "hit_10x_count": 0,
+    "drawdown_50_count": 0,
+    "liquidity_lost_count": 0
+   },
+   "test": {
+    "signals": 0,
+    "tradable": 0,
+    "hit_2x": null,
+    "hit_5x": null,
+    "hit_10x": null,
+    "drawdown_50": null,
+    "liquidity_lost": null,
+    "ret_1h": {
+     "n": 0,
+     "mean": null,
+     "median": null,
+     "win_share": null
+    },
+    "ret_6h": {
+     "n": 0,
+     "mean": null,
+     "median": null,
+     "win_share": null
+    },
+    "ret_24h": {
+     "n": 0,
+     "mean": null,
+     "median": null,
+     "win_share": null
+    },
+    "ret_tp2x_sl50": {
+     "n": 0,
+     "mean": null,
+     "median": null,
+     "win_share": null
+    },
+    "hit_2x_count": 0,
+    "hit_5x_count": 0,
+    "hit_10x_count": 0,
+    "drawdown_50_count": 0,
+    "liquidity_lost_count": 0
+   },
+   "all": {
+    "signals": 0,
+    "tradable": 0,
+    "hit_2x": null,
+    "hit_5x": null,
+    "hit_10x": null,
+    "drawdown_50": null,
+    "liquidity_lost": null,
+    "ret_1h": {
+     "n": 0,
+     "mean": null,
+     "median": null,
+     "win_share": null
+    },
+    "ret_6h": {
+     "n": 0,
+     "mean": null,
+     "median": null,
+     "win_share": null
+    },
+    "ret_24h": {
+     "n": 0,
+     "mean": null,
+     "median": null,
+     "win_share": null
+    },
+    "ret_tp2x_sl50": {
+     "n": 0,
+     "mean": null,
+     "median": null,
+     "win_share": null
+    },
+    "hit_2x_count": 0,
+    "hit_5x_count": 0,
+    "hit_10x_count": 0,
+    "drawdown_50_count": 0,
+    "liquidity_lost_count": 0
+   }
+  },
+  {
+   "params": {
+    "signal_watch_min_wallets": 3,
+    "signal_max_runup": 1.5
+   },
+   "train": {
+    "signals": 0,
+    "tradable": 0,
+    "hit_2x": null,
+    "hit_5x": null,
+    "hit_10x": null,
+    "drawdown_50": null,
+    "liquidity_lost": null,
+    "ret_1h": {
+     "n": 0,
+     "mean": null,
+     "median": null,
+     "win_share": null
+    },
+    "ret_6h": {
+     "n": 0,
+     "mean": null,
+     "median": null,
+     "win_share": null
+    },
+    "ret_24h": {
+     "n": 0,
+     "mean": null,
+     "median": null,
+     "win_share": null
+    },
+    "ret_tp2x_sl50": {
+     "n": 0,
+     "mean": null,
+     "median": null,
+     "win_share": null
+    },
+    "hit_2x_count": 0,
+    "hit_5x_count": 0,
+    "hit_10x_count": 0,
+    "drawdown_50_count": 0,
+    "liquidity_lost_count": 0
+   },
+   "validation": {
+    "signals": 0,
+    "tradable": 0,
+    "hit_2x": null,
+    "hit_5x": null,
+    "hit_10x": null,
+    "drawdown_50": null,
+    "liquidity_lost": null,
+    "ret_1h": {
+     "n": 0,
+     "mean": null,
+     "median": null,
+     "win_share": null
+    },
+    "ret_6h": {
+     "n": 0,
+     "mean": null,
+     "median": null,
+     "win_share": null
+    },
+    "ret_24h": {
+     "n": 0,
+     "mean": null,
+     "median": null,
+     "win_share": null
+    },
+    "ret_tp2x_sl50": {
+     "n": 0,
+     "mean": null,
+     "median": null,
+     "win_share": null
+    },
+    "hit_2x_count": 0,
+    "hit_5x_count": 0,
+    "hit_10x_count": 0,
+    "drawdown_50_count": 0,
+    "liquidity_lost_count": 0
+   },
+   "test": {
+    "signals": 0,
+    "tradable": 0,
+    "hit_2x": null,
+    "hit_5x": null,
+    "hit_10x": null,
+    "drawdown_50": null,
+    "liquidity_lost": null,
+    "ret_1h": {
+     "n": 0,
+     "mean": null,
+     "median": null,
+     "win_share": null
+    },
+    "ret_6h": {
+     "n": 0,
+     "mean": null,
+     "median": null,
+     "win_share": null
+    },
+    "ret_24h": {
+     "n": 0,
+     "mean": null,
+     "median": null,
+     "win_share": null
+    },
+    "ret_tp2x_sl50": {
+     "n": 0,
+     "mean": null,
+     "median": null,
+     "win_share": null
+    },
+    "hit_2x_count": 0,
+    "hit_5x_count": 0,
+    "hit_10x_count": 0,
+    "drawdown_50_count": 0,
+    "liquidity_lost_count": 0
+   },
+   "all": {
+    "signals": 0,
+    "tradable": 0,
+    "hit_2x": null,
+    "hit_5x": null,
+    "hit_10x": null,
+    "drawdown_50": null,
+    "liquidity_lost": null,
+    "ret_1h": {
+     "n": 0,
+     "mean": null,
+     "median": null,
+     "win_share": null
+    },
+    "ret_6h": {
+     "n": 0,
+     "mean": null,
+     "median": null,
+     "win_share": null
+    },
+    "ret_24h": {
+     "n": 0,
+     "mean": null,
+     "median": null,
+     "win_share": null
+    },
+    "ret_tp2x_sl50": {
+     "n": 0,
+     "mean": null,
+     "median": null,
+     "win_share": null
+    },
+    "hit_2x_count": 0,
+    "hit_5x_count": 0,
+    "hit_10x_count": 0,
+    "drawdown_50_count": 0,
+    "liquidity_lost_count": 0
+   }
+  },
+  {
+   "params": {
+    "signal_watch_min_wallets": 3,
+    "signal_max_runup": 2.0
+   },
+   "train": {
+    "signals": 0,
+    "tradable": 0,
+    "hit_2x": null,
+    "hit_5x": null,
+    "hit_10x": null,
+    "drawdown_50": null,
+    "liquidity_lost": null,
+    "ret_1h": {
+     "n": 0,
+     "mean": null,
+     "median": null,
+     "win_share": null
+    },
+    "ret_6h": {
+     "n": 0,
+     "mean": null,
+     "median": null,
+     "win_share": null
+    },
+    "ret_24h": {
+     "n": 0,
+     "mean": null,
+     "median": null,
+     "win_share": null
+    },
+    "ret_tp2x_sl50": {
+     "n": 0,
+     "mean": null,
+     "median": null,
+     "win_share": null
+    },
+    "hit_2x_count": 0,
+    "hit_5x_count": 0,
+    "hit_10x_count": 0,
+    "drawdown_50_count": 0,
+    "liquidity_lost_count": 0
+   },
+   "validation": {
+    "signals": 0,
+    "tradable": 0,
+    "hit_2x": null,
+    "hit_5x": null,
+    "hit_10x": null,
+    "drawdown_50": null,
+    "liquidity_lost": null,
+    "ret_1h": {
+     "n": 0,
+     "mean": null,
+     "median": null,
+     "win_share": null
+    },
+    "ret_6h": {
+     "n": 0,
+     "mean": null,
+     "median": null,
+     "win_share": null
+    },
+    "ret_24h": {
+     "n": 0,
+     "mean": null,
+     "median": null,
+     "win_share": null
+    },
+    "ret_tp2x_sl50": {
+     "n": 0,
+     "mean": null,
+     "median": null,
+     "win_share": null
+    },
+    "hit_2x_count": 0,
+    "hit_5x_count": 0,
+    "hit_10x_count": 0,
+    "drawdown_50_count": 0,
+    "liquidity_lost_count": 0
+   },
+   "test": {
+    "signals": 0,
+    "tradable": 0,
+    "hit_2x": null,
+    "hit_5x": null,
+    "hit_10x": null,
+    "drawdown_50": null,
+    "liquidity_lost": null,
+    "ret_1h": {
+     "n": 0,
+     "mean": null,
+     "median": null,
+     "win_share": null
+    },
+    "ret_6h": {
+     "n": 0,
+     "mean": null,
+     "median": null,
+     "win_share": null
+    },
+    "ret_24h": {
+     "n": 0,
+     "mean": null,
+     "median": null,
+     "win_share": null
+    },
+    "ret_tp2x_sl50": {
+     "n": 0,
+     "mean": null,
+     "median": null,
+     "win_share": null
+    },
+    "hit_2x_count": 0,
+    "hit_5x_count": 0,
+    "hit_10x_count": 0,
+    "drawdown_50_count": 0,
+    "liquidity_lost_count": 0
+   },
+   "all": {
+    "signals": 0,
+    "tradable": 0,
+    "hit_2x": null,
+    "hit_5x": null,
+    "hit_10x": null,
+    "drawdown_50": null,
+    "liquidity_lost": null,
+    "ret_1h": {
+     "n": 0,
+     "mean": null,
+     "median": null,
+     "win_share": null
+    },
+    "ret_6h": {
+     "n": 0,
+     "mean": null,
+     "median": null,
+     "win_share": null
+    },
+    "ret_24h": {
+     "n": 0,
+     "mean": null,
+     "median": null,
+     "win_share": null
+    },
+    "ret_tp2x_sl50": {
+     "n": 0,
+     "mean": null,
+     "median": null,
+     "win_share": null
+    },
+    "hit_2x_count": 0,
+    "hit_5x_count": 0,
+    "hit_10x_count": 0,
+    "drawdown_50_count": 0,
+    "liquidity_lost_count": 0
+   }
+  },
+  {
+   "params": {
+    "signal_watch_min_wallets": 3,
+    "signal_max_runup": 3.0
+   },
+   "train": {
+    "signals": 0,
+    "tradable": 0,
+    "hit_2x": null,
+    "hit_5x": null,
+    "hit_10x": null,
+    "drawdown_50": null,
+    "liquidity_lost": null,
+    "ret_1h": {
+     "n": 0,
+     "mean": null,
+     "median": null,
+     "win_share": null
+    },
+    "ret_6h": {
+     "n": 0,
+     "mean": null,
+     "median": null,
+     "win_share": null
+    },
+    "ret_24h": {
+     "n": 0,
+     "mean": null,
+     "median": null,
+     "win_share": null
+    },
+    "ret_tp2x_sl50": {
+     "n": 0,
+     "mean": null,
+     "median": null,
+     "win_share": null
+    },
+    "hit_2x_count": 0,
+    "hit_5x_count": 0,
+    "hit_10x_count": 0,
+    "drawdown_50_count": 0,
+    "liquidity_lost_count": 0
+   },
+   "validation": {
+    "signals": 0,
+    "tradable": 0,
+    "hit_2x": null,
+    "hit_5x": null,
+    "hit_10x": null,
+    "drawdown_50": null,
+    "liquidity_lost": null,
+    "ret_1h": {
+     "n": 0,
+     "mean": null,
+     "median": null,
+     "win_share": null
+    },
+    "ret_6h": {
+     "n": 0,
+     "mean": null,
+     "median": null,
+     "win_share": null
+    },
+    "ret_24h": {
+     "n": 0,
+     "mean": null,
+     "median": null,
+     "win_share": null
+    },
+    "ret_tp2x_sl50": {
+     "n": 0,
+     "mean": null,
+     "median": null,
+     "win_share": null
+    },
+    "hit_2x_count": 0,
+    "hit_5x_count": 0,
+    "hit_10x_count": 0,
+    "drawdown_50_count": 0,
+    "liquidity_lost_count": 0
+   },
+   "test": {
+    "signals": 0,
+    "tradable": 0,
+    "hit_2x": null,
+    "hit_5x": null,
+    "hit_10x": null,
+    "drawdown_50": null,
+    "liquidity_lost": null,
+    "ret_1h": {
+     "n": 0,
+     "mean": null,
+     "median": null,
+     "win_share": null
+    },
+    "ret_6h": {
+     "n": 0,
+     "mean": null,
+     "median": null,
+     "win_share": null
+    },
+    "ret_24h": {
+     "n": 0,
+     "mean": null,
+     "median": null,
+     "win_share": null
+    },
+    "ret_tp2x_sl50": {
+     "n": 0,
+     "mean": null,
+     "median": null,
+     "win_share": null
+    },
+    "hit_2x_count": 0,
+    "hit_5x_count": 0,
+    "hit_10x_count": 0,
+    "drawdown_50_count": 0,
+    "liquidity_lost_count": 0
+   },
+   "all": {
+    "signals": 0,
+    "tradable": 0,
+    "hit_2x": null,
+    "hit_5x": null,
+    "hit_10x": null,
+    "drawdown_50": null,
+    "liquidity_lost": null,
+    "ret_1h": {
+     "n": 0,
+     "mean": null,
+     "median": null,
+     "win_share": null
+    },
+    "ret_6h": {
+     "n": 0,
+     "mean": null,
+     "median": null,
+     "win_share": null
+    },
+    "ret_24h": {
+     "n": 0,
+     "mean": null,
+     "median": null,
+     "win_share": null
+    },
+    "ret_tp2x_sl50": {
+     "n": 0,
+     "mean": null,
+     "median": null,
+     "win_share": null
+    },
+    "hit_2x_count": 0,
+    "hit_5x_count": 0,
+    "hit_10x_count": 0,
+    "drawdown_50_count": 0,
+    "liquidity_lost_count": 0
+   }
+  }
+ ],
+ "selected_params": {
+  "signal_watch_min_wallets": 2,
+  "signal_max_runup": 1.5
+ },
+ "selected": {
+  "params": {
+   "signal_watch_min_wallets": 2,
+   "signal_max_runup": 1.5
+  },
+  "train": {
+   "signals": 0,
+   "tradable": 0,
+   "hit_2x": null,
+   "hit_5x": null,
+   "hit_10x": null,
+   "drawdown_50": null,
+   "liquidity_lost": null,
+   "ret_1h": {
+    "n": 0,
+    "mean": null,
+    "median": null,
+    "win_share": null
+   },
+   "ret_6h": {
+    "n": 0,
+    "mean": null,
+    "median": null,
+    "win_share": null
+   },
+   "ret_24h": {
+    "n": 0,
+    "mean": null,
+    "median": null,
+    "win_share": null
+   },
+   "ret_tp2x_sl50": {
+    "n": 0,
+    "mean": null,
+    "median": null,
+    "win_share": null
+   },
+   "hit_2x_count": 0,
+   "hit_5x_count": 0,
+   "hit_10x_count": 0,
+   "drawdown_50_count": 0,
+   "liquidity_lost_count": 0
+  },
+  "validation": {
+   "signals": 0,
+   "tradable": 0,
+   "hit_2x": null,
+   "hit_5x": null,
+   "hit_10x": null,
+   "drawdown_50": null,
+   "liquidity_lost": null,
+   "ret_1h": {
+    "n": 0,
+    "mean": null,
+    "median": null,
+    "win_share": null
+   },
+   "ret_6h": {
+    "n": 0,
+    "mean": null,
+    "median": null,
+    "win_share": null
+   },
+   "ret_24h": {
+    "n": 0,
+    "mean": null,
+    "median": null,
+    "win_share": null
+   },
+   "ret_tp2x_sl50": {
+    "n": 0,
+    "mean": null,
+    "median": null,
+    "win_share": null
+   },
+   "hit_2x_count": 0,
+   "hit_5x_count": 0,
+   "hit_10x_count": 0,
+   "drawdown_50_count": 0,
+   "liquidity_lost_count": 0
+  },
+  "test": {
+   "signals": 0,
+   "tradable": 0,
+   "hit_2x": null,
+   "hit_5x": null,
+   "hit_10x": null,
+   "drawdown_50": null,
+   "liquidity_lost": null,
+   "ret_1h": {
+    "n": 0,
+    "mean": null,
+    "median": null,
+    "win_share": null
+   },
+   "ret_6h": {
+    "n": 0,
+    "mean": null,
+    "median": null,
+    "win_share": null
+   },
+   "ret_24h": {
+    "n": 0,
+    "mean": null,
+    "median": null,
+    "win_share": null
+   },
+   "ret_tp2x_sl50": {
+    "n": 0,
+    "mean": null,
+    "median": null,
+    "win_share": null
+   },
+   "hit_2x_count": 0,
+   "hit_5x_count": 0,
+   "hit_10x_count": 0,
+   "drawdown_50_count": 0,
+   "liquidity_lost_count": 0
+  },
+  "all": {
+   "signals": 0,
+   "tradable": 0,
+   "hit_2x": null,
+   "hit_5x": null,
+   "hit_10x": null,
+   "drawdown_50": null,
+   "liquidity_lost": null,
+   "ret_1h": {
+    "n": 0,
+    "mean": null,
+    "median": null,
+    "win_share": null
+   },
+   "ret_6h": {
+    "n": 0,
+    "mean": null,
+    "median": null,
+    "win_share": null
+   },
+   "ret_24h": {
+    "n": 0,
+    "mean": null,
+    "median": null,
+    "win_share": null
+   },
+   "ret_tp2x_sl50": {
+    "n": 0,
+    "mean": null,
+    "median": null,
+    "win_share": null
+   },
+   "hit_2x_count": 0,
+   "hit_5x_count": 0,
+   "hit_10x_count": 0,
+   "drawdown_50_count": 0,
+   "liquidity_lost_count": 0
+  }
+ },
+ "rows": []
+}

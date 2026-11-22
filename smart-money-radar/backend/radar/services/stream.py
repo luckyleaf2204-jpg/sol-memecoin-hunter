@@ -96,6 +96,7 @@ class StreamService:
         self.pending_migrations: list[tuple] = []
         self.tracked: set[str] = set()
         self.smart: set[str] = set()
+        self.verify_set: set[str] = set()
         self.excluded: set[str] = set()
         self.pools: dict[str, tuple[str, str]] = {}
         self.unknown_pools: set[str] = set()
@@ -113,6 +114,9 @@ class StreamService:
                                          "('candidate','tracked','smart') AND NOT is_excluded")
         self.tracked = {r["address"] for r in rows}
         self.smart = {r["address"] for r in rows if r["status"] == "smart"}
+        # candidates are verified by their own backfill (same transactions): verifying them here
+        # too would spend the RPC budget twice
+        self.verify_set = {r["address"] for r in rows if r["status"] in ("tracked", "smart")}
         s = await self.ctx.settings.get()
         self.excluded = set(s.get("excluded_wallets") or [])
         self.store_min = float(s["stream_store_min_sol"])
@@ -211,8 +215,9 @@ class StreamService:
             await repo.insert_stream_trades(conn, trades, sol_usd)
         for t in trades:
             if t.wallet in self.tracked:
-                await self.ctx.enqueue(Q_VERIFY, {"signature": t.signature, "reason": "tracked_trade"},
-                                       dedupe_key=t.signature)
+                if t.wallet in self.verify_set:
+                    await self.ctx.enqueue(Q_VERIFY, {"signature": t.signature, "reason": "tracked_trade"},
+                                           dedupe_key=t.signature)
                 await self.ctx.redis.sadd(K_DIRTY_WALLETS, t.wallet)
                 await self.ctx.redis.xadd(S_SMART_TRADES, {"p": json.dumps({
                     "signature": t.signature, "event_key": t.event_key, "wallet": t.wallet, "mint": t.mint,

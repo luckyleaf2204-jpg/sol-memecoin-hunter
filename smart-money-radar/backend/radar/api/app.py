@@ -207,6 +207,7 @@ async def list_wallets(status: str | None = None, q: str | None = None, period: 
         cond.append(f"w.address LIKE ${len(args)}")
     args += [page_size, (page - 1) * page_size]
     rs = await ctx().pool.fetch(f"""SELECT w.address, w.status, w.discovery_source, w.backfill_status, w.cluster_size,
+            COALESCE((w.discovery_detail->>'high_frequency')::boolean, false) AS high_frequency,
             w.is_excluded, w.last_synced_at, sc.score, sc.category, sc.confidence, sc.official_rank, p.win_rate,
             p.median_buy_sol, p.realized_pnl_sol, p.closed_qualifying, p.last_active_at
         FROM wallets w LEFT JOIN smart_money_scores sc ON sc.wallet = w.address AND sc.period_days = $1

@@ -17,7 +17,9 @@ async def run(out: str | None = None) -> dict:
     try:
         s = await ctx.settings.get()
         rows = await ctx.pool.fetch("""SELECT t.* FROM wallet_transactions t JOIN wallets w ON w.address = t.wallet
-            WHERE w.status IN ('tracked','smart','candidate') AND w.backfill_status IN ('complete','partial')
+            -- every wallet whose history was read, WHATEVER its current status: filtering on today's
+            -- status (decided with later data) would be survivorship / look-ahead bias
+            WHERE w.backfill_status IN ('complete','partial') AND NOT w.is_excluded
               AND t.tx_type IN ('buy','sell','transfer_out') ORDER BY t.block_time""")
         trades = [BtTrade(r["wallet"], r["mint"], int(r["block_time"].timestamp()), int(r["slot"]), r["tx_type"],
                           float(r["sol_amount"]), float(r["token_amount"]),

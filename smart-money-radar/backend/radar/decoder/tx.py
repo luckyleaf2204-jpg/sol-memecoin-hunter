@@ -347,20 +347,6 @@ def _reconcile(dec: DecodedTx, lam_delta: dict[str, int], book: _TokenBook,
                     swap_sys_out += lamports
             elif dst == wallet and src != wallet and src not in owned and not under_swap:
                 other_in += lamports
-        # SOL the wallet sent inside pump.fun beyond what its buy events account for
-        # (rent top-up of protocol accounts such as the creator vault / volume accumulator)
-        implied = sum(round((r.sol_amount + r.fee_trading_sol) * LAMPORTS) for r in recs
-                      if r.tx_type == "buy" and r.venue == "pump_curve")
-        extra_in_swap = swap_sys_out - implied if implied else 0
-        if extra_in_swap > 0:
-            other_out += extra_in_swap
-        expected = -fee_net - tips - other_out + other_in
-        for r in recs:
-            s = round(r.sol_amount * LAMPORTS)
-            f = round(r.fee_trading_sol * LAMPORTS)
-            expected += (-s - f) if r.tx_type == "buy" else (s - f)
-        residual = d_w - expected
-
         token_ok = True
         notes = []
         for mint in {r.mint for r in recs}:
@@ -372,6 +358,22 @@ def _reconcile(dec: DecodedTx, lam_delta: dict[str, int], book: _TokenBook,
             if abs(got - want) > 1:
                 token_ok = False
                 notes.append(f"token delta {got} != events {want} for {mint}")
+        # SOL the wallet sent inside pump.fun beyond what its buy events account for (rent
+        # top-up of protocol accounts such as the creator vault). Only when the token balance
+        # matches the events: otherwise the extra SOL may be an undecoded trade, not a cost.
+        implied = sum(round((r.sol_amount + r.fee_trading_sol) * LAMPORTS) for r in recs
+                      if r.tx_type == "buy" and r.venue == "pump_curve")
+        extra_in_swap = (swap_sys_out - implied) if (implied and token_ok) else 0
+        if extra_in_swap > 0:
+            other_out += extra_in_swap
+        expected = -fee_net - tips - other_out + other_in
+        for r in recs:
+            s = round(r.sol_amount * LAMPORTS)
+            f = round(r.fee_trading_sol * LAMPORTS)
+            expected += (-s - f) if r.tx_type == "buy" else (s - f)
+        residual = d_w - expected
+
+
         sol_ok = abs(residual) <= RESIDUAL_TOLERANCE_LAMPORTS
         if not sol_ok:
             traded = {r.mint for r in recs} | {WSOL_MINT}

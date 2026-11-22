@@ -46,7 +46,7 @@ async def sweeper(ctx: Ctx) -> None:
     while True:
         try:
             rows = await ctx.pool.fetch("""SELECT DISTINCT t.signature FROM wallet_transactions t
-                JOIN wallets w ON w.address = t.wallet AND w.status IN ('tracked','smart','candidate')
+                JOIN wallets w ON w.address = t.wallet AND w.status IN ('tracked','smart')
                 WHERE t.source <> 'rpc_tx' AND t.ingested_at < now() - interval '20 seconds'
                   AND t.ingested_at > now() - interval '3 days' LIMIT 500""")
             for r in rows:
