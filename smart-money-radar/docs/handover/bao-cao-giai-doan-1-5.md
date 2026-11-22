@@ -229,7 +229,7 @@ Helius sẽ xử lý cả hai, vì có websocket ổn định và tốc độ ca
 
 ### 7. Ảnh giao diện và log kiểm thử mới
 
-- Ảnh chụp từ stack Docker Compose qua `https://localhost` (Caddy), desktop 1440 px và iPhone 13, nằm trong thư mục `anh/`:
+- Ảnh chụp từ stack Docker Compose qua `https://localhost` (Caddy), desktop 1440 px và iPhone 13 (file ảnh 01–06 trong gói bàn giao):
   - Overview, Top Wallets, Live Feed, Data Health (desktop);
   - Overview, Data Health (iPhone).
 - Log: `docs/handover/test-log-giai-doan-1-5.txt`, gồm toàn văn các file bằng chứng A–K. Không chứa khóa, mật khẩu hay chuỗi kết nối.
