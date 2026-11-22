@@ -14,8 +14,11 @@ if not exist ".env" (
 )
 set PORT=8080
 for /f "tokens=1,* delims==" %%a in ('findstr /b "LOCAL_PORT=" .env') do set PORT=%%b
+set PROFILE=
+for /f "tokens=1,* delims==" %%a in ('findstr /b "CLOUDFLARE_TUNNEL_TOKEN=" .env') do if not "%%b"=="" set PROFILE=--profile tunnel
+if defined PROFILE echo Co CLOUDFLARE_TUNNEL_TOKEN: bat ca Cloudflare Tunnel.
 echo Dang khoi dong (lan dau se build image)...
-docker compose -f docker-compose.windows.yml up -d --build
+docker compose -f docker-compose.windows.yml %PROFILE% up -d --build
 if errorlevel 1 (
   echo [LOI] Khoi dong that bai. Chay windows\logs.bat va gui noi dung loi.
   pause

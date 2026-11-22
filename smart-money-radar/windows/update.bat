@@ -7,5 +7,4 @@ if errorlevel 1 (
 ) else (
   git pull
 )
-docker compose -f docker-compose.windows.yml up -d --build
-pause
+call "%~dp0start.bat"

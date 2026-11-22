@@ -122,6 +122,17 @@ services:
       postgres: { condition: service_healthy }
     logging: *logging
 
+  # Optional: public access through a Cloudflare Tunnel (only started with --profile tunnel,
+  # which windows\start.bat adds when CLOUDFLARE_TUNNEL_TOKEN is set in .env).
+  # In the Cloudflare dashboard the tunnel's public hostname must point to http://caddy:80
+  cloudflared:
+    image: cloudflare/cloudflared:2024.12.2
+    restart: unless-stopped
+    profiles: ["tunnel"]
+    command: ["tunnel", "--no-autoupdate", "run", "--token", "${CLOUDFLARE_TUNNEL_TOKEN:-}"]
+    depends_on: [caddy]
+    logging: *logging
+
 volumes:
   pgdata:
   redisdata:

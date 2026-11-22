@@ -14,8 +14,7 @@ if not exist "backups\%FILE%" (
 echo CANH BAO: du lieu hien tai se bi THAY THE boi %FILE%.
 set /p OK=Go YES de tiep tuc: 
 if /i not "%OK%"=="YES" exit /b 1
-docker compose -f docker-compose.windows.yml stop worker api frontend caddy
-docker compose -f docker-compose.windows.yml exec -T backup sh /restore.sh "%FILE%"
-docker compose -f docker-compose.windows.yml up -d
-echo Xong. Mo lai dashboard.
-pause
+docker compose -f docker-compose.windows.yml --profile tunnel stop worker api frontend caddy
+docker compose -f docker-compose.windows.yml --profile tunnel exec -T backup sh /restore.sh "%FILE%"
+echo Xong khoi phuc. Khoi dong lai he thong...
+call "%~dp0start.bat"

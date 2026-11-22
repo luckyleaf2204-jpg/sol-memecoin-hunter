@@ -94,6 +94,7 @@ Nên chỉnh thêm:
 | `backup-now.bat` | Sao lưu database ngay |
 | `restore.bat` | Khôi phục database từ một bản sao lưu |
 | `update.bat` | Cập nhật phiên bản mới (dữ liệu được giữ) |
+| `tailscale-serve.bat` | Mở dashboard cho iPhone/laptop của bạn qua Tailscale (mục 9b) |
 
 Trong Docker Desktop → **Containers** → `smart-money-radar`, bạn sẽ thấy 8 thành phần:
 `postgres`, `redis`, `api`, `worker`, `frontend`, `caddy`, `backup` đang chạy, và `migrate` ở trạng thái *Exited* (đúng như vậy:
@@ -128,6 +129,36 @@ Mặc định dashboard **chỉ mở được trên chính máy tính** (`127.0.
 4. Trên iPhone mở `http://192.168.1.20:8080`.
 
 Kết nối kiểu này **không mã hóa** (HTTP). Chỉ dùng trong mạng nhà tin cậy, và **không mở cổng** trên router ra Internet.
+
+## 9b. Xem dashboard từ bất cứ đâu (máy tính ở nhà vẫn là nơi chạy hệ thống)
+
+Máy tính phải **đang bật** thì mới xem được. Có hai cách, đều miễn phí và không cần VPS:
+
+### Cách 1 — Tailscale (khuyến nghị: riêng tư, có HTTPS, không mở cổng ra Internet)
+Tailscale tạo một mạng riêng giữa **các thiết bị của chính bạn**. Người ngoài không thấy dashboard.
+1. Tạo tài khoản tại https://tailscale.com (đăng nhập bằng Google/Microsoft).
+2. Cài **Tailscale for Windows** trên máy chạy Smart Money Radar, đăng nhập.
+3. Cài app **Tailscale** trên iPhone (App Store), đăng nhập **cùng tài khoản**, bật kết nối.
+4. Trong trang quản trị Tailscale (https://login.tailscale.com/admin/dns): bật **MagicDNS** và **HTTPS Certificates**.
+5. Trên máy tính, bấm đúp `windows\tailscale-serve.bat`. Script in ra địa chỉ dạng
+   `https://ten-may.ten-mang.ts.net`. Mở địa chỉ này bằng Safari trên iPhone, có thể **Thêm vào Màn hình chính**.
+
+Không cần đổi `LOCAL_BIND`: dashboard vẫn chỉ nghe trên `127.0.0.1`; Tailscale chuyển tiếp an toàn.
+Tắt chia sẻ: `"C:\Program Files\Tailscale\tailscale.exe" serve reset`.
+
+### Cách 2 — Cloudflare Tunnel (có địa chỉ web công khai, cần tên miền trên Cloudflare)
+Ai có địa chỉ cũng mở được **trang đăng nhập**; dữ liệu chỉ được bảo vệ bằng mật khẩu dashboard.
+Nên bật thêm **Cloudflare Access** (đăng nhập bằng email) để chặn người lạ từ trước.
+1. Có tài khoản Cloudflare và một tên miền đã chuyển DNS về Cloudflare.
+2. Cloudflare dashboard → **Zero Trust → Networks → Tunnels → Create a tunnel** (loại *Cloudflared*), đặt tên, chọn **Docker**.
+   Chép phần **token** (chuỗi dài sau `--token`).
+3. Trong tunnel → **Public Hostname → Add**: chọn subdomain (ví dụ `radar.tenmien.com`),
+   Service = `HTTP`, URL = `caddy:80`.
+4. Mở `.env` bằng Notepad, điền `CLOUDFLARE_TUNNEL_TOKEN=<token>`, rồi chạy `windows\start.bat`.
+   Script tự bật thêm container `cloudflared`.
+5. (Khuyến nghị) Zero Trust → **Access → Applications → Add** cho `radar.tenmien.com`, chỉ cho phép email của bạn.
+
+Gỡ: xóa giá trị `CLOUDFLARE_TUNNEL_TOKEN` trong `.env`, chạy `stop.bat` rồi `start.bat`.
 
 ## 10. Những điểm có thể không tương thích với Windows và cách đã xử lý
 
