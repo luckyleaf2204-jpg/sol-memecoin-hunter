@@ -14,6 +14,7 @@ from typing import Any
 
 from .performance import Performance
 
+OFFICIAL_MIN_SCORE = 65.0
 WEIGHTS = {"win_rate": 20, "median_buy": 20, "realized_pnl": 15, "roi": 15, "early_entry": 20,
            "stability": 10}
 
@@ -33,7 +34,8 @@ class ScoreResult:
 
     @property
     def eligible_official(self) -> bool:
-        return self.qualifies and self.confidence in ("HIGH", "MEDIUM")
+        # passes the mandatory criteria, enough trustworthy data, and at least "Watchlist" (>= 65)
+        return self.qualifies and self.confidence in ("HIGH", "MEDIUM") and self.score >= OFFICIAL_MIN_SCORE
 
 
 def category_for(score: float) -> str:
@@ -47,7 +49,7 @@ def category_for(score: float) -> str:
 
 
 def score_wallet(perf: Performance, settings: dict[str, Any], cluster_size: int = 1,
-                 excluded: bool = False, signer_share: float | None = 1.0) -> ScoreResult:
+                 excluded: bool = False, signer_share: float | None = 1.0, history_read: bool = True) -> ScoreResult:
     s = settings
     min_buy = float(s["min_buy_sol"])
     reasons: list[str] = []
@@ -155,6 +157,9 @@ def score_wallet(perf: Performance, settings: dict[str, Any], cluster_size: int 
         conf = "MEDIUM"
     else:
         conf = "LOW"
+    if not history_read:
+        conf = "LOW"
+        reasons.append("wallet history not backfilled yet (only live-stream trades): Low confidence")
     if not perf.coverage_complete:
         reasons.append("history not fully backfilled for the period: confidence capped")
     if vs < float(s["medium_confidence_min_verified_share"]):

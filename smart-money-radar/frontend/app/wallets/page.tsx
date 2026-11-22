@@ -40,7 +40,7 @@ export default function Wallets() {
       </div>
       {official && (
         <p className="text-xs text-slate-500">Top 10 chính thức chỉ gồm ví đạt mọi tiêu chí bắt buộc (Win Rate ≥ 65%, Median Buy ≥ 2 SOL, PnL & ROI dương sau phí,
-          ≥ 5 vị thế đã đóng) với độ tin cậy dữ liệu High/Medium. Tính lại tự động khi có dữ liệu mới.</p>
+          ≥ 5 vị thế đã đóng), độ tin cậy dữ liệu High/Medium và Smart Money Score ≥ 65. Tính lại tự động khi có dữ liệu mới.</p>
       )}
       {loading && !data ? <Loading /> : error ? <ErrorBox msg={error} /> : rows.length === 0 ? (
         <Card><Empty>Chưa có ví nào đủ điều kiện trong {period} ngày. Hệ thống đang backfill lịch sử các ví ứng viên — xem trạng thái ở danh sách bên dưới.</Empty></Card>
@@ -80,7 +80,7 @@ export default function Wallets() {
                   {rows.map((r: any, i: number) => (
                     <tr key={r.wallet}>
                       <Td className="font-bold">{official ? r.official_rank : i + 1}</Td>
-                      <Td className="max-w-[280px] whitespace-normal"><Address a={r.wallet} href={`/wallets/${r.wallet}`} /></Td>
+                      <Td className="min-w-[220px] max-w-[260px] whitespace-normal"><Address a={r.wallet} href={`/wallets/${r.wallet}`} /></Td>
                       <Td className="font-semibold">{num(r.score, 1)}</Td><Td>{pct(r.win_rate, 0)}</Td>
                       <Td>{sol(r.median_buy_sol)}</Td><Td>{sol(r.avg_buy_sol)}</Td><Td>{sol(r.largest_buy_sol)}</Td>
                       <Td><Tone v={r.realized_pnl_sol}>{sol(r.realized_pnl_sol, 1)}</Tone></Td><Td><Tone v={r.roi}>{pct(r.roi, 0)}</Tone></Td>

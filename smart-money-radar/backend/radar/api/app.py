@@ -213,7 +213,8 @@ async def list_wallets(status: str | None = None, q: str | None = None, period: 
         LEFT JOIN wallet_performance p ON p.wallet = w.address AND p.period_days = $1
         WHERE {' AND '.join(cond)} ORDER BY sc.score DESC NULLS LAST, w.first_seen_at DESC
         LIMIT ${len(args) - 1} OFFSET ${len(args)}""", *args)
-    total = await ctx().pool.fetchval(f"SELECT count(*) FROM wallets w WHERE {' AND '.join(cond)}", *args[:-2])
+    total = await ctx().pool.fetchval(f"SELECT count(*) FROM wallets w WHERE $1::int IS NOT NULL AND {' AND '.join(cond)}",
+                                      *args[:-2])
     return {"total": total, "rows": rows(rs)}
 
 

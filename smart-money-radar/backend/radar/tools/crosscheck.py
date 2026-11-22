@@ -17,6 +17,7 @@ import json
 from typing import Any
 
 from ..context import create_ctx
+from ..decoder.tx import decode_transaction
 from ..sources.geckoterminal import BASE, HEADERS
 
 
@@ -25,8 +26,8 @@ async def run(n: int = 25, out: str | None = None) -> dict:
     try:
         rows = await ctx.pool.fetch("""SELECT t.*, k.bonding_curve, k.amm_pool FROM wallet_transactions t
             JOIN tokens k ON k.mint = t.mint
-            WHERE t.source = 'rpc_tx' AND t.tx_type IN ('buy','sell') AND t.block_time > now() - interval '20 hours'
-            ORDER BY (t.sol_amount >= 2) DESC, t.block_time DESC LIMIT 400""")
+            WHERE t.source = 'rpc_tx' AND t.tx_type IN ('buy','sell') AND t.block_time > now() - interval '40 minutes'
+            ORDER BY t.block_time DESC LIMIT 3000""")
         by_pool: dict[str, list] = {}
         for r in rows:
             pool = r["bonding_curve"] if r["venue"] == "pump_curve" else r["amm_pool"]
@@ -46,22 +47,38 @@ async def run(n: int = 25, out: str | None = None) -> dict:
             for d in (data or {}).get("data") or []:
                 a = d.get("attributes") or {}
                 gt.setdefault(a.get("tx_hash"), []).append(a)
+            by_sig: dict[str, list] = {}
             for r in trs:
+                by_sig.setdefault(r["signature"], []).append(r)
+            for sig, ours in by_sig.items():
                 if len(results) >= n:
                     break
-                g = gt.get(r["signature"])
+                g = gt.get(sig)
                 if not g:
                     continue
+                raw = await ctx.pool.fetchval("SELECT tx FROM raw_transactions WHERE signature = $1", sig)
+                if raw:  # every event of the tx, also those below the storage threshold
+                    ours = [{"signature": sig, "token_amount": t.token_amount, "sol_amount": t.sol_amount,
+                             "fee_trading_sol": t.fee_trading_sol, "wallet": t.wallet, "mint": t.mint,
+                             "venue": t.venue, "tx_type": t.tx_type, "verification_status": t.verification_status,
+                             "reconciliation_residual_sol": t.reconciliation_residual_sol}
+                            for t in decode_transaction(raw, sig).trades]
+                    if not ours:
+                        continue
                 a = g[0]
-                ours_tok = float(r["token_amount"])
-                ours_sol = float(r["sol_amount"])
-                fee = float(r["fee_trading_sol"])
                 if a.get("kind") == "buy":
                     gt_sol, gt_tok = float(a["from_token_amount"]), float(a["to_token_amount"])
                 else:
                     gt_sol, gt_tok = float(a["to_token_amount"]), float(a["from_token_amount"])
+                # GeckoTerminal reports one trade per transaction: pick our event with the same
+                # token amount, else the one of the same trader
+                r = next((x for x in ours if abs(float(x["token_amount"]) - gt_tok) <= 1e-6 * max(gt_tok, 1)), None) \
+                    or next((x for x in ours if x["wallet"] == a.get("tx_from_address")), None) or ours[0]
+                ours_tok = float(r["token_amount"])
+                ours_sol = float(r["sol_amount"])
+                fee = float(r["fee_trading_sol"])
                 results.append({
-                    "signature": r["signature"], "solscan": f"https://solscan.io/tx/{r['signature']}",
+                    "signature": sig, "solscan": f"https://solscan.io/tx/{sig}", "events_in_tx": len(ours),
                     "wallet": r["wallet"], "mint": r["mint"], "venue": r["venue"], "side": r["tx_type"],
                     "gt_side": a.get("kind"), "ours_sol": ours_sol, "gt_sol": gt_sol, "sol_diff": gt_sol - ours_sol,
                     "trading_fee": fee, "ours_tokens": ours_tok, "gt_tokens": gt_tok,
@@ -74,14 +91,18 @@ async def run(n: int = 25, out: str | None = None) -> dict:
             if "signature" not in res or not alt:
                 continue
             try:
-                raw = await ctx.pool.fetchval("SELECT tx FROM raw_transactions WHERE signature = $1", res["signature"])
+                params = [res["signature"], {"encoding": "jsonParsed", "maxSupportedTransactionVersion": 1,
+                                             "commitment": "confirmed"}]
+                raw = await ctx.rpc._call_one(ctx.rpc.endpoints[0], "getTransaction", params)
                 other = await ctx.rpc._call_one(alt[-1], "getTransaction", [res["signature"], {
                     "encoding": "jsonParsed", "maxSupportedTransactionVersion": 1, "commitment": "confirmed"}])
                 if raw and other:
                     res["providers_identical"] = (raw["meta"]["preBalances"] == other["meta"]["preBalances"]
                                                   and raw["meta"]["postBalances"] == other["meta"]["postBalances"]
                                                   and raw["meta"]["postTokenBalances"] == other["meta"]["postTokenBalances"])
-                    res["second_provider"] = alt[-1].name
+                    res["providers"] = [ctx.rpc.endpoints[0].name, alt[-1].name]
+                else:
+                    res["provider_note"] = f"raw stored: {bool(raw)}, second provider returned: {bool(other)}"
             except Exception as e:
                 res["providers_identical"] = None
                 res["provider_error"] = type(e).__name__
@@ -91,7 +112,8 @@ async def run(n: int = 25, out: str | None = None) -> dict:
             "side_agrees": sum(1 for r in matched if r["side"] == r["gt_side"]),
             "token_amount_exact": sum(1 for r in matched if r["token_diff_rel"] is not None and abs(r["token_diff_rel"]) < 1e-6),
             "sol_within_fee": sum(1 for r in matched if abs(r["sol_diff"]) <= r["trading_fee"] + 1e-6),
-            "trader_agrees": sum(1 for r in matched if r["gt_trader"] in (r["wallet"],)),
+            "trader_agrees": sum(1 for r in matched if r["gt_trader"] == r["wallet"]),
+            "trader_is_fee_payer_of_bundle": sum(1 for r in matched if r["gt_trader"] != r["wallet"] and r["events_in_tx"] > 1),
             "providers_identical": sum(1 for r in matched if r.get("providers_identical")),
         }
         report = {"summary": summary, "rows": results}
@@ -112,17 +134,18 @@ def _markdown(rep: dict) -> str:
     lines = ["# Cross-check giao dịch on-chain", "",
              f"Tạo lúc: {s['generated_at']}", "",
              "Nguồn đối chiếu độc lập: GeckoTerminal `/pools/{pool}/trades` (khớp theo chữ ký giao dịch) "
-             "và một nhà cung cấp RPC thứ hai (so sánh số dư trước/sau).", "",
+             "và hai nhà cung cấp RPC độc lập (api.mainnet-beta.solana.com, solana-rpc.publicnode.com): so sánh số dư SOL/token trước–sau.", "",
              f"- Giao dịch khớp được: **{s['matched']}**",
              f"- Chiều mua/bán trùng khớp: {s['side_agrees']}/{s['matched']}",
              f"- Số lượng token trùng khớp tuyệt đối: {s['token_amount_exact']}/{s['matched']}",
              f"- Chênh lệch SOL nằm trong phạm vi phí giao dịch: {s['sol_within_fee']}/{s['matched']}",
-             f"- Ví giao dịch trùng khớp: {s['trader_agrees']}/{s['matched']}",
+             f"- Ví giao dịch trùng khớp: {s['trader_agrees']}/{s['matched']} "
+             f"(khác nhau ở {s['trader_is_fee_payer_of_bundle']} bundle: GeckoTerminal ghi ví trả phí, hệ thống ghi ví nhận token)",
              f"- Dữ liệu thô giống hệt giữa 2 RPC: {s['providers_identical']}/{s['matched']}", "",
-             "| # | Giao dịch | Chiều | SOL (hệ thống) | SOL (GeckoTerminal) | Chênh lệch | Phí giao dịch | Token khớp | Xác minh |",
-             "|---|---|---|---:|---:|---:|---:|---|---|"]
+             "| # | Giao dịch | Lệnh/tx | Chiều | SOL (hệ thống) | SOL (GeckoTerminal) | Chênh lệch | Phí giao dịch | Token khớp | Xác minh |",
+             "|---|---|---:|---|---:|---:|---:|---:|---|---|"]
     for i, r in enumerate([r for r in rep["rows"] if "signature" in r], 1):
-        lines.append(f"| {i} | [{r['signature'][:12]}…]({r['solscan']}) | {r['side']} | {r['ours_sol']:.6f} | "
+        lines.append(f"| {i} | [{r['signature'][:12]}…]({r['solscan']}) | {r['events_in_tx']} | {r['side']} | {r['ours_sol']:.6f} | "
                      f"{r['gt_sol']:.6f} | {r['sol_diff']:+.6f} | {r['trading_fee']:.6f} | "
                      f"{'✓' if r['token_diff_rel'] is not None and abs(r['token_diff_rel']) < 1e-6 else '✗'} | "
                      f"{r['verification']} |")

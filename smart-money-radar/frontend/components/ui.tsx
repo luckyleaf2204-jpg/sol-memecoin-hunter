@@ -102,7 +102,7 @@ export function Copy({ text, label }: { text: string; label?: string }) {
 export function Address({ a, href, full = true }: { a: string; href?: string; full?: boolean }) {
   const text = full ? a : `${a.slice(0, 6)}…${a.slice(-6)}`;
   return (
-    <span className="inline-flex max-w-full items-center">
+    <span className="inline-flex max-w-full items-center whitespace-normal">
       {href ? (
         <Link href={href} className="break-all font-mono text-[12px] text-brand underline-offset-2 hover:underline dark:text-teal-300">{text}</Link>
       ) : (
@@ -150,5 +150,6 @@ export function Th({ children, onClick, active }: { children: ReactNode; onClick
   );
 }
 export function Td({ children, className = "" }: { children: ReactNode; className?: string }) {
-  return <td className={`whitespace-nowrap px-2 py-2 align-top text-[13px] tabular-nums ${className}`}>{children}</td>;
+  const ws = className.includes("whitespace-normal") ? "" : "whitespace-nowrap";
+  return <td className={`${ws} px-2 py-2 align-top text-[13px] tabular-nums ${className}`}>{children}</td>;
 }

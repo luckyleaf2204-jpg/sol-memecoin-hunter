@@ -85,7 +85,8 @@ async def recompute_wallet(ctx: Ctx, wallet: str, s: dict[str, Any], now: int, c
     for period in PERIODS:
         covered = backfill_ok and backfill_from is not None and backfill_from <= now - period * 86400 + 86400
         perf = compute_performance(positions, period, now, float(s["min_buy_sol"]), covered, orphans)
-        res = score_wallet(perf, s, cluster_size=cluster_size, excluded=excluded, signer_share=signer_share)
+        res = score_wallet(perf, s, cluster_size=cluster_size, excluded=excluded, signer_share=signer_share,
+                           history_read=w["backfill_status"] in ("complete", "partial"))
         await _write_perf_score(ctx, wallet, perf, res)
         out[period] = (perf, res)
     return out
@@ -379,8 +380,7 @@ async def run_cycle(ctx: Ctx, full: bool) -> dict:
     now = int(time.time())
     if full:
         wallets = [r["address"] for r in await ctx.pool.fetch(
-            "SELECT address FROM wallets WHERE status IN ('candidate','tracked','smart') "
-            "AND backfill_status IN ('complete','partial')")]
+            "SELECT address FROM wallets WHERE status IN ('candidate','tracked','smart')")]
         await ctx.redis.delete(K_DIRTY_WALLETS)
     else:
         wallets = list(await ctx.redis.spop(K_DIRTY_WALLETS, 500) or [])

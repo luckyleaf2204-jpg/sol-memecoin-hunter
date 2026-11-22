@@ -56,6 +56,12 @@ def test_unverified_data_lowers_confidence():
     assert r.confidence == "LOW"
 
 
+def test_wallet_without_backfilled_history_is_never_official():
+    good = perf(wins=10, losses=2, win_rate=10 / 12, median_buy_sol=12.0, realized_pnl_sol=60.0, roi=0.9)
+    r = score_wallet(good, S, history_read=False)
+    assert r.confidence == "LOW" and not r.eligible_official
+
+
 def test_incomplete_backfill_caps_confidence():
     p = perf()
     p.coverage_complete = False
@@ -87,9 +93,12 @@ def test_high_frequency_wallets_are_dampened():
 def test_categories_and_official_ranking():
     assert category_for(90) == "EXCELLENT" and category_for(80) == "STRONG"
     assert category_for(70) == "WATCHLIST" and category_for(50) == "NOT_PRIORITY"
-    good = score_wallet(perf(), S)
+    good = score_wallet(perf(wins=10, losses=2, win_rate=10 / 12, median_buy_sol=12.0, realized_pnl_sol=60.0, roi=0.9), S)
+    assert good.score >= 65 and good.eligible_official
     low = score_wallet(perf(closed_qualifying=2, positions_qualifying=2, wins=2, losses=0, win_rate=1.0), S)
-    ranked = rank_official({"A": good, "B": low})
+    weak = score_wallet(perf(), S)          # passes every mandatory criterion but scores < 65
+    assert weak.qualifies and weak.score < 65 and not weak.eligible_official
+    ranked = rank_official({"A": good, "B": low, "C": weak})
     assert [w for w, _ in ranked] == ["A"]
 
 

@@ -110,6 +110,8 @@ async def seed_token(ctx: Ctx, mint: str, max_sigs: int = 6000, early_n: int = 4
         async with sem:
             tx = await ctx.rpc.get_transaction(sig)
             if tx:
+                async with ctx.pool.acquire() as conn:
+                    await repo.save_raw_tx(conn, sig, tx, None)   # audit trail for every decoded tx
                 decoded.append(decode(tx, sig, pools))
 
     await asyncio.gather(*(one(x["signature"]) for x in oldest), return_exceptions=True)
