@@ -1,0 +1,1026 @@
+SMART MONEY RADAR - LOG KIỂM THỬ GIAI ĐOẠN 1.5 (22/11/2026, giờ UTC)
+Môi trường: sandbox Linux, Docker Compose (13 service), RPC công khai (solana_public, publicnode). Không có khóa Helius.
+Không chứa khóa, mật khẩu, SESSION_SECRET hay DATABASE_URL.
+
+==================================================================
+== A-why-zero.txt
+==================================================================
+### 2026-11-22 15:58:04 UTC A. Wallet population (682) by status x backfill
+  status   | backfill_status | count 
+-----------+-----------------+-------
+ candidate | queued          |   429
+ observed  | complete        |    19
+ observed  | none            |   198
+ observed  | partial         |     7
+ tracked   | complete        |    22
+ tracked   | partial         |    10
+ tracked   | queued          |     1
+(7 rows)
+
+### B. Scored wallets (30d) by data confidence and closed qualifying positions
+ confidence | wallets | closed0 | closed1_4 | closed5plus | history_read 
+------------+---------+---------+-----------+-------------+--------------
+ HIGH       |      19 |       0 |         0 |          19 |           19
+ LOW        |     645 |     127 |       276 |         242 |           22
+ MEDIUM     |      17 |       0 |         0 |          17 |           17
+(3 rows)
+
+### C. Failure count per check (30d), only wallets whose history was read
+        check_name         | failed | passed 
+---------------------------+--------+--------
+ score_at_least_65         |     58 |      0
+ copyable                  |     58 |      0
+ human_like                |     55 |      3
+ mandatory_criteria        |     50 |      8
+ repeatable_both_halves    |     48 |     10
+ not_single_win_dependent  |     41 |     17
+ confidence_high_or_medium |     22 |     36
+ verified_share_ok         |     11 |     47
+ active_last_7_days        |      8 |     50
+(9 rows)
+
+### D. Funnel (30d, history read): each rule applied in order
+             step             | count 
+------------------------------+-------
+ history read                 |    58
+ >=5 closed positions >=2 SOL |    37
+ + win rate >=65%             |     8
+ + median buy >=2 SOL         |     8
+ + PnL>0 and ROI>0            |     8
+ + confidence HIGH/MEDIUM     |     8
+ + score >=65                 |     0
+ + human-like                 |     0
+ + copyable                   |     0
+(9 rows)
+
+### E. Wallets passing mandatory criteria (qualifies=true), what else fails
+    w     | score | confidence | cl |  wr  |  pnl  |  behavior  |                                                           failed_checks                                                           
+----------+-------+------------+----+------+-------+------------+-----------------------------------------------------------------------------------------------------------------------------------
+ 8YcbyX92 | 64.26 | LOW        |  8 | 0.75 |  17.3 |            | 
+ 4ZvukwqX | 60.33 | LOW        |  6 | 1.00 |  25.3 | HUMAN      | copyable,score_at_least_65,verified_share_ok,confidence_high_or_medium
+ 58mfxxpA | 57.95 | LOW        |  6 | 1.00 |  15.6 |            | score_at_least_65,verified_share_ok,confidence_high_or_medium
+ 7i55gzcd | 57.95 | LOW        |  6 | 1.00 |  18.3 |            | score_at_least_65,verified_share_ok,confidence_high_or_medium
+ HDuoyCzp | 57.55 | LOW        |  5 | 1.00 |  13.9 |            | score_at_least_65,verified_share_ok,repeatable_both_halves,confidence_high_or_medium
+ 3zeuQZG8 | 57.45 | LOW        |  5 | 1.00 |  12.7 |            | score_at_least_65,verified_share_ok,repeatable_both_halves,confidence_high_or_medium
+ timeworn | 57.07 | LOW        |  5 | 1.00 |   6.4 |            | 
+ 7X1E4coM | 56.94 | HIGH       | 27 | 0.67 | 220.0 | LIKELY_BOT | copyable,human_like,score_at_least_65
+ CGcARbrz | 56.68 | LOW        | 10 | 1.00 |  16.0 |            | score_at_least_65,verified_share_ok,confidence_high_or_medium
+ 8oymkuxV | 56.38 | LOW        |  8 | 1.00 |  12.9 |            | score_at_least_65,verified_share_ok,confidence_high_or_medium
+ 7Gj3p7Ur | 56.02 | LOW        |  7 | 1.00 |  16.1 |            | score_at_least_65,verified_share_ok,confidence_high_or_medium
+ 5RnxbfpL | 56.00 | LOW        |  5 | 1.00 |  10.7 |            | score_at_least_65,verified_share_ok,repeatable_both_halves,confidence_high_or_medium
+ 486yJup2 | 55.92 | LOW        | 13 | 0.92 |  26.9 |            | score_at_least_65,verified_share_ok,confidence_high_or_medium
+ CWkd1C1z | 55.84 | LOW        | 11 | 1.00 |  16.1 |            | score_at_least_65,verified_share_ok,confidence_high_or_medium
+ 8qSB7qtA | 55.68 | LOW        |  8 | 0.88 |  21.6 |            | 
+ 7mrfH6b3 | 55.24 | LOW        | 10 | 0.90 |  23.9 |            | score_at_least_65,verified_share_ok,confidence_high_or_medium
+ DjmXXC9m | 54.82 | LOW        |  5 | 1.00 |   9.7 |            | score_at_least_65,verified_share_ok,repeatable_both_halves,confidence_high_or_medium
+ 8HKsnLRx | 54.72 | LOW        |  8 | 1.00 |   7.2 |            | score_at_least_65,verified_share_ok,confidence_high_or_medium
+ AayPDryi | 54.71 | LOW        | 12 | 1.00 |  19.8 |            | 
+ C4m4CxD3 | 54.16 | LOW        |  8 | 0.88 |  17.3 |            | score_at_least_65,verified_share_ok,confidence_high_or_medium
+ DrpWam5D | 54.11 | LOW        |  7 | 1.00 |  13.0 |            | score_at_least_65,verified_share_ok,confidence_high_or_medium
+ AKG8pZDb | 53.83 | LOW        |  6 | 1.00 |  10.6 |            | score_at_least_65,verified_share_ok,confidence_high_or_medium
+ GncgFshJ | 53.79 | LOW        | 10 | 0.90 |  17.2 |            | score_at_least_65,verified_share_ok,confidence_high_or_medium
+ 3P4GomwG | 53.55 | LOW        |  7 | 1.00 |  12.2 |            | score_at_least_65,verified_share_ok,confidence_high_or_medium
+ EntU8iEh | 53.53 | LOW        |  5 | 1.00 |  18.0 |            | score_at_least_65,verified_share_ok,repeatable_both_halves,confidence_high_or_medium
+ 856pbteG | 53.26 | LOW        | 11 | 1.00 |  13.6 |            | score_at_least_65,verified_share_ok,confidence_high_or_medium
+ EzmWWkxQ | 53.03 | LOW        |  7 | 0.86 |  11.2 |            | score_at_least_65,verified_share_ok,confidence_high_or_medium
+ BNQDt9av | 52.93 | LOW        |  7 | 1.00 |  12.8 |            | score_at_least_65,verified_share_ok,confidence_high_or_medium
+ DehTjPyi | 52.91 | LOW        | 16 | 0.81 |  44.6 |            | score_at_least_65,verified_share_ok,confidence_high_or_medium
+ AmeVJ8Qz | 52.90 | LOW        |  9 | 1.00 |  14.3 |            | score_at_least_65,verified_share_ok,confidence_high_or_medium
+ 78BbziF3 | 52.90 | LOW        |  8 | 1.00 |  13.3 |            | score_at_least_65,verified_share_ok,confidence_high_or_medium
+ BBQix65p | 52.61 | LOW        |  5 | 1.00 |   3.5 |            | score_at_least_65,verified_share_ok,repeatable_both_halves,confidence_high_or_medium
+ 6q5fKPhL | 52.53 | LOW        |  6 | 1.00 |   4.5 |            | score_at_least_65,verified_share_ok,confidence_high_or_medium
+ CwANvNB6 | 52.47 | LOW        |  9 | 1.00 |  11.0 |            | score_at_least_65,verified_share_ok,confidence_high_or_medium
+ 8BmPoCUx | 52.09 | HIGH       | 30 | 0.73 |  99.1 | LIKELY_BOT | copyable,human_like,score_at_least_65
+ B4tWmhfC | 51.93 | LOW        |  5 | 1.00 |   3.1 |            | 
+ 4oN6EAEw | 51.46 | MEDIUM     |  9 | 0.89 |   1.8 | HUMAN      | copyable,score_at_least_65,repeatable_both_halves,not_single_win_dependent
+ GjFTjQq9 | 51.33 | LOW        |  8 | 0.88 |  14.8 |            | score_at_least_65,verified_share_ok,confidence_high_or_medium
+ F2CnV1AG | 51.29 | LOW        |  5 | 1.00 |   7.5 |            | score_at_least_65,verified_share_ok,repeatable_both_halves,confidence_high_or_medium
+ 3NXLhKNr | 51.27 | LOW        |  8 | 0.88 |  13.8 |            | score_at_least_65,verified_share_ok,confidence_high_or_medium
+ VDTx8F64 | 51.27 | LOW        |  7 | 0.86 |  10.5 |            | 
+ 8bcAhi1D | 51.18 | LOW        |  7 | 1.00 |  19.5 |            | 
+ 5TJKfEcb | 51.04 | LOW        |  5 | 1.00 |   9.5 |            | score_at_least_65,verified_share_ok,repeatable_both_halves,confidence_high_or_medium
+ DXYJEmZ5 | 51.00 | LOW        |  5 | 1.00 |   8.8 |            | score_at_least_65,verified_share_ok,repeatable_both_halves,confidence_high_or_medium
+ E99vL7as | 50.84 | LOW        |  6 | 1.00 |   9.0 |            | score_at_least_65,verified_share_ok,confidence_high_or_medium
+ ABTQcAh3 | 50.21 | LOW        | 11 | 0.91 |  10.9 |            | score_at_least_65,verified_share_ok,confidence_high_or_medium
+ E5aiKk91 | 50.18 | LOW        |  7 | 0.86 |  10.5 |            | score_at_least_65,verified_share_ok,confidence_high_or_medium
+ 8iyYqt3m | 50.09 | LOW        |  7 | 0.86 |   6.4 |            | score_at_least_65,verified_share_ok,confidence_high_or_medium
+ 4ZcGDDxG | 50.04 | LOW        |  5 | 1.00 |   9.7 |            | score_at_least_65,verified_share_ok,repeatable_both_halves,confidence_high_or_medium
+ MK9W1zVG | 49.93 | LOW        |  9 | 0.89 |   7.0 |            | score_at_least_65,verified_share_ok,confidence_high_or_medium
+ HYHErQwY | 49.90 | LOW        |  8 | 0.88 |   9.6 |            | score_at_least_65,verified_share_ok,confidence_high_or_medium
+ 6jyLAFoC | 49.75 | LOW        |  5 | 1.00 |  12.6 |            | score_at_least_65,verified_share_ok,repeatable_both_halves,confidence_high_or_medium
+ FdwT2k3z | 49.28 | LOW        |  6 | 1.00 |   3.2 |            | score_at_least_65,verified_share_ok,confidence_high_or_medium
+ 8EwdEfVx | 49.26 | LOW        |  5 | 1.00 |   3.6 |            | score_at_least_65,verified_share_ok,repeatable_both_halves,confidence_high_or_medium
+ 2VS4Qqec | 49.21 | LOW        |  7 | 0.86 |  11.6 |            | score_at_least_65,verified_share_ok,confidence_high_or_medium
+ 5cPwQhFC | 49.02 | LOW        |  6 | 0.83 |   5.5 |            | 
+ F4x1Ujtt | 48.98 | LOW        |  7 | 0.86 |  13.9 |            | score_at_least_65,verified_share_ok,confidence_high_or_medium
+ CemXe3LD | 48.88 | LOW        |  5 | 1.00 |   8.7 |            | 
+ 33HxNFnL | 48.40 | LOW        |  7 | 0.86 |   8.9 |            | score_at_least_65,verified_share_ok,confidence_high_or_medium
+ 7nn6q482 | 47.32 | LOW        |  6 | 1.00 |   3.1 |            | score_at_least_65,verified_share_ok,confidence_high_or_medium
+ 75UheNHY | 46.01 | LOW        |  6 | 1.00 |   5.5 |            | 
+ 8ysYWYHm | 45.98 | LOW        |  5 | 1.00 |   3.3 |            | score_at_least_65,verified_share_ok,repeatable_both_halves,confidence_high_or_medium
+ BBR9tbHE | 45.79 | LOW        |  6 | 0.67 |   1.3 |            | 
+ 3HWBP7zK | 45.41 | LOW        |  6 | 0.83 |   8.1 |            | score_at_least_65,verified_share_ok,confidence_high_or_medium
+ 5bmVqeQb | 44.53 | LOW        |  7 | 0.86 |   7.3 |            | score_at_least_65,verified_share_ok,confidence_high_or_medium
+ 4nD5Sn4y | 44.11 | LOW        |  5 | 0.80 |  12.0 |            | 
+ 2mGjNnue | 43.91 | LOW        | 12 | 0.83 |   8.8 |            | score_at_least_65,verified_share_ok,confidence_high_or_medium
+ 78FmcvKt | 43.58 | HIGH       | 87 | 0.80 | 173.2 | BOT        | copyable,human_like,score_at_least_65
+ FwzVjU7Y | 41.48 | LOW        |  8 | 0.88 |   6.3 |            | score_at_least_65,verified_share_ok,confidence_high_or_medium
+ Dd8HAKxf | 40.70 | LOW        |  5 | 0.80 |  12.5 |            | 
+ 3DtvYVah | 39.73 | LOW        | 23 | 0.87 |  23.8 | BOT        | copyable,human_like,score_at_least_65,verified_share_ok,confidence_high_or_medium
+ 6ntUoFQS | 36.27 | HIGH       | 82 | 0.72 |  68.4 | BOT        | copyable,human_like,score_at_least_65
+ 8ZDznYr8 | 35.95 | LOW        | 20 | 1.00 |  42.0 | BOT        | copyable,human_like,score_at_least_65,verified_share_ok,confidence_high_or_medium
+ Ca3s3qNX | 35.80 | LOW        | 10 | 0.90 |  39.2 | BOT        | copyable,human_like,score_at_least_65,verified_share_ok,confidence_high_or_medium
+ dKMjeGJ4 | 35.75 | LOW        | 21 | 0.71 |  23.0 | BOT        | copyable,human_like,score_at_least_65,verified_share_ok,confidence_high_or_medium
+ GN7xFwPa | 35.55 | LOW        | 14 | 1.00 |  25.1 | BOT        | copyable,human_like,score_at_least_65,verified_share_ok,confidence_high_or_medium
+ EiKocHte | 35.18 | LOW        | 21 | 0.95 |  30.6 | BOT        | copyable,human_like,score_at_least_65,verified_share_ok,confidence_high_or_medium
+ 8tzJHMne | 35.17 | LOW        | 17 | 0.94 |  25.1 | BOT        | copyable,human_like,score_at_least_65,verified_share_ok,confidence_high_or_medium
+ 6f4aYGfw | 34.81 | LOW        |  5 | 0.80 |   2.2 | LIKELY_BOT | copyable,human_like,score_at_least_65,verified_share_ok,repeatable_both_halves,confidence_high_or_medium
+ EHrufHfk | 34.75 | LOW        | 10 | 1.00 |  18.4 | BOT        | copyable,human_like,score_at_least_65,verified_share_ok,confidence_high_or_medium
+ ADHGPWrv | 34.68 | LOW        | 23 | 0.96 |  44.6 | BOT        | copyable,human_like,score_at_least_65,verified_share_ok,confidence_high_or_medium
+ 9G8Ptpt5 | 34.51 | LOW        |  9 | 0.89 |  21.6 | BOT        | copyable,human_like,score_at_least_65,verified_share_ok,confidence_high_or_medium
+ HZM3LBJf | 34.04 | LOW        | 12 | 1.00 |  16.3 | BOT        | copyable,human_like,score_at_least_65,verified_share_ok,confidence_high_or_medium
+ 7qKzxoXJ | 33.96 | LOW        |  6 | 1.00 |  11.7 | BOT        | copyable,human_like,score_at_least_65,verified_share_ok,confidence_high_or_medium
+ BnsMXWGN | 33.95 | LOW        |  5 | 0.80 |   3.6 | LIKELY_BOT | copyable,human_like,score_at_least_65,verified_share_ok,repeatable_both_halves,confidence_high_or_medium
+ AtWsHFFp | 33.87 | LOW        | 15 | 0.93 |  14.8 | BOT        | copyable,human_like,score_at_least_65,verified_share_ok,confidence_high_or_medium
+ EKBRucx8 | 33.82 | LOW        | 21 | 0.90 |  27.2 | BOT        | copyable,human_like,score_at_least_65,verified_share_ok,confidence_high_or_medium
+ Fhbh1DTU | 33.81 | LOW        | 12 | 0.75 |   7.6 | BOT        | copyable,human_like,score_at_least_65,verified_share_ok,confidence_high_or_medium
+ ATVDZ44t | 33.75 | LOW        |  7 | 1.00 |  20.8 | BOT        | copyable,human_like,score_at_least_65,verified_share_ok,confidence_high_or_medium
+ HMMgfFob | 33.52 | LOW        | 10 | 0.90 |  24.0 | BOT        | copyable,human_like,score_at_least_65,verified_share_ok,confidence_high_or_medium
+ 5XDhYm6b | 33.43 | LOW        | 10 | 0.90 |  15.3 | BOT        | copyable,human_like,score_at_least_65,verified_share_ok,confidence_high_or_medium
+ 6Cb4m99z | 33.39 | LOW        | 12 | 0.83 |  21.6 | BOT        | copyable,human_like,score_at_least_65,verified_share_ok,confidence_high_or_medium
+ 5vEyom5x | 33.03 | LOW        | 12 | 0.83 |  28.7 | BOT        | copyable,human_like,score_at_least_65,verified_share_ok,confidence_high_or_medium
+ cLWo838u | 32.91 | LOW        |  9 | 1.00 |  17.9 | BOT        | copyable,human_like,score_at_least_65,verified_share_ok,confidence_high_or_medium
+ H5GPCu9q | 32.74 | LOW        | 16 | 0.94 |  17.9 | BOT        | copyable,human_like,score_at_least_65,verified_share_ok,confidence_high_or_medium
+ ArkdCAPE | 32.57 | HIGH       | 46 | 0.96 |  35.6 | BOT        | copyable,human_like,score_at_least_65
+ 8PnmRzze | 32.56 | LOW        |  7 | 0.86 |  19.8 | BOT        | copyable,human_like,score_at_least_65,verified_share_ok,confidence_high_or_medium
+ 8umLNqVH | 32.45 | LOW        | 13 | 0.85 |  20.2 | BOT        | copyable,human_like,score_at_least_65,verified_share_ok,confidence_high_or_medium
+ 3ksZnFvV | 32.32 | LOW        |  5 | 0.80 |   2.6 | LIKELY_BOT | copyable,human_like,score_at_least_65,verified_share_ok,repeatable_both_halves,confidence_high_or_medium
+ 3nJBwKAz | 32.19 | LOW        | 11 | 0.91 |  12.4 | BOT        | copyable,human_like,score_at_least_65,verified_share_ok,confidence_high_or_medium
+ 6dSQsoJ5 | 31.95 | LOW        | 26 | 0.73 |  85.3 | BOT        | copyable,human_like,score_at_least_65,verified_share_ok,confidence_high_or_medium
+ 57fjx2Ax | 31.64 | LOW        |  7 | 0.86 |   2.7 | LIKELY_BOT | copyable,human_like,score_at_least_65,verified_share_ok,confidence_high_or_medium
+ F1rXiMZT | 31.55 | LOW        |  6 | 1.00 |   6.6 | BOT        | copyable,human_like,score_at_least_65,verified_share_ok,confidence_high_or_medium
+ 4Zamz2Cb | 31.53 | LOW        | 12 | 0.83 |   8.6 | BOT        | copyable,human_like,score_at_least_65,verified_share_ok,confidence_high_or_medium
+ 4oKVXowt | 31.20 | LOW        | 23 | 0.78 |  24.1 | BOT        | copyable,human_like,score_at_least_65,verified_share_ok,confidence_high_or_medium
+ EDw48UXN | 31.08 | LOW        |  7 | 0.86 |  14.6 | BOT        | copyable,human_like,score_at_least_65,verified_share_ok,confidence_high_or_medium
+ E7vjMYHQ | 31.07 | LOW        |  7 | 1.00 |   8.3 | BOT        | copyable,human_like,score_at_least_65,verified_share_ok,confidence_high_or_medium
+ 51DqG8YW | 30.81 | LOW        |  5 | 1.00 |   0.8 | LIKELY_BOT | copyable,human_like,score_at_least_65,verified_share_ok,repeatable_both_halves,confidence_high_or_medium
+ Ag5AEdVr | 30.53 | LOW        |  7 | 1.00 |   5.1 | BOT        | copyable,human_like,score_at_least_65,verified_share_ok,confidence_high_or_medium
+ GUi1TGM7 | 30.13 | LOW        | 14 | 0.93 |   9.2 | BOT        | copyable,human_like,score_at_least_65,verified_share_ok,confidence_high_or_medium
+ 6hNURbx5 | 29.48 | LOW        | 12 | 0.92 |   4.3 | BOT        | copyable,human_like,score_at_least_65,verified_share_ok,confidence_high_or_medium
+ 61SRpgEL | 29.29 | LOW        |  8 | 0.88 |   5.9 | BOT        | copyable,human_like,score_at_least_65,verified_share_ok,confidence_high_or_medium
+ MriyaNN8 | 28.85 | LOW        |  5 | 1.00 |   5.6 | BOT        | human_like,score_at_least_65,verified_share_ok,repeatable_both_halves,confidence_high_or_medium
+ GMj2t2RW | 28.82 | LOW        |  8 | 0.75 |  14.3 | BOT        | copyable,human_like,score_at_least_65,verified_share_ok,confidence_high_or_medium
+ HKCRFDpt | 28.35 | LOW        |  7 | 0.71 |  14.8 | BOT        | copyable,human_like,score_at_least_65,verified_share_ok,repeatable_both_halves,confidence_high_or_medium
+ 8HftY5xY | 28.29 | LOW        |  7 | 0.86 |   3.2 | BOT        | copyable,human_like,score_at_least_65,verified_share_ok,confidence_high_or_medium
+ 6gDZEdj2 | 28.25 | LOW        | 11 | 0.91 |   7.2 | BOT        | copyable,human_like,score_at_least_65,verified_share_ok,confidence_high_or_medium
+ 5PZxgSQn | 27.19 | HIGH       | 14 | 0.79 |   2.2 | BOT        | copyable,human_like,score_at_least_65
+ FbWwk6eh | 26.66 | LOW        |  7 | 0.86 |   3.8 | BOT        | copyable,human_like,score_at_least_65,verified_share_ok,confidence_high_or_medium
+ Hs5X2vx5 | 26.53 | LOW        | 12 | 0.83 |   6.0 | BOT        | copyable,human_like,score_at_least_65,verified_share_ok,confidence_high_or_medium
+ BNrLt9Xo | 26.25 | LOW        | 13 | 0.77 |   8.1 | BOT        | copyable,human_like,score_at_least_65,verified_share_ok,confidence_high_or_medium
+ 92aios2R | 26.23 | HIGH       | 26 | 0.85 |   8.1 | BOT        | copyable,human_like,score_at_least_65
+ 26g97tpx | 26.14 | LOW        |  5 | 0.80 |   1.2 | LIKELY_BOT | copyable,human_like,score_at_least_65,verified_share_ok,repeatable_both_halves,confidence_high_or_medium
+ 7KpSQdee | 25.47 | LOW        | 15 | 0.73 |   9.1 | BOT        | copyable,human_like,score_at_least_65,verified_share_ok,confidence_high_or_medium
+ EXLV38wL | 24.85 | LOW        |  8 | 0.75 |   6.0 | BOT        | copyable,human_like,score_at_least_65,verified_share_ok,confidence_high_or_medium
+ 8xeZXEPc | 23.63 | LOW        | 11 | 0.82 |   2.5 | BOT        | copyable,human_like,score_at_least_65,verified_share_ok,repeatable_both_halves,confidence_high_or_medium
+ DBKZyRBV | 23.45 | LOW        |  7 | 0.71 |   3.5 | BOT        | copyable,human_like,score_at_least_65,verified_share_ok,confidence_high_or_medium
+ FfW5e8gK | 22.57 | LOW        | 15 | 0.67 |   4.4 | BOT        | copyable,human_like,score_at_least_65,verified_share_ok,confidence_high_or_medium
+ 5sr55MD6 | 21.51 | LOW        | 10 | 0.70 |   3.4 | BOT        | copyable,human_like,score_at_least_65,verified_share_ok,confidence_high_or_medium
+ BGFGFeXU | 20.00 | LOW        |  5 | 0.80 |   1.2 | BOT        | copyable,human_like,score_at_least_65,verified_share_ok,repeatable_both_halves,confidence_high_or_medium
+ 2Giyf5L9 | 19.70 | LOW        |  5 | 0.80 |   0.3 | BOT        | copyable,human_like,score_at_least_65,verified_share_ok,repeatable_both_halves,confidence_high_or_medium
+ 743wxXzA | 19.16 | LOW        |  8 | 0.75 |   0.8 | BOT        | copyable,human_like,score_at_least_65,verified_share_ok,repeatable_both_halves,confidence_high_or_medium
+ 4XJo21mm | 14.98 | LOW        |  6 | 0.67 |   1.4 | BOT        | copyable,human_like,score_at_least_65,verified_share_ok,repeatable_both_halves,not_single_win_dependent,confidence_high_or_medium
+(133 rows)
+
+
+==================================================================
+== A2-score.txt
+==================================================================
+### 2026-11-22 15:58:24 UTC F. Score components of the 8 wallets that pass WR/median/PnL with history read (points = factor x weight)
+    w     | score | wr20 | mb20 | med_sol | pnl15 | roi15 | early20 | stab10 |        mult        |    beh     
+----------+-------+------+------+---------+-------+-------+---------+--------+--------------------+------------
+ 7X1E4coM | 56.94 |  8.9 |  6.9 |    3.90 |  15.0 |  12.5 |    16.0 |    7.7 | 0.85               | LIKELY_BOT
+ 8BmPoCUx | 52.09 | 12.5 |  8.3 |    5.13 |  15.0 |   8.5 |     9.0 |    7.9 | 0.85               | LIKELY_BOT
+ 4oN6EAEw | 51.46 | 18.2 |  5.0 |    2.33 |   3.3 |   1.1 |    20.0 |    3.9 | 1.0                | HUMAN
+ 78FmcvKt | 43.58 | 17.0 |  5.4 |    2.17 |  15.0 |  13.7 |    20.0 |    9.1 | 0.543              | BOT
+ 6ntUoFQS | 36.27 | 12.2 |  5.9 |    2.43 |  13.8 |   5.1 |    20.0 |    9.1 | 0.5479999999999999 | BOT
+ ArkdCAPE | 32.57 | 20.0 |  6.7 |    2.96 |  11.7 |   3.6 |     3.8 |   10.0 | 0.584              | BOT
+ 5PZxgSQn | 27.19 | 14.3 | 10.3 |    9.46 |   3.8 |   0.5 |     6.4 |   10.0 | 0.6                | BOT
+ 92aios2R | 26.23 | 18.4 |  7.5 |    5.24 |   7.2 |   0.8 |     0.0 |    9.9 | 0.6                | BOT
+(8 rows)
+
+### G. Average points lost per component across the 37 wallets with >=5 closed positions (history read)
+ wr_lost | medbuy_lost | pnl_lost | roi_lost | early_lost | stab_lost | avg_median_buy 
+---------+-------------+----------+----------+------------+-----------+----------------
+    16.0 |        12.6 |     10.2 |     13.0 |        9.8 |       3.2 |           4.92
+(1 row)
+
+### H. Stale scores: wallets whose score was computed before the current checklist existed (no 'checks')
+ stale_scores |            oldest             |            newest             
+--------------+-------------------------------+-------------------------------
+           53 | 2026-11-22 06:20:10.313421+00 | 2026-11-22 07:06:40.790214+00
+(1 row)
+
+  status  | backfill_status | count 
+----------+-----------------+-------
+ observed | none            |    53
+(1 row)
+
+### I. Why 198 wallets are 'observed / none' (not backfilled)
+      src       |  hf  | count 
+----------------+------+-------
+ big_buyer      | true |   194
+ patient_winner | true |     4
+(2 rows)
+
+
+==================================================================
+== B-verification.txt
+==================================================================
+### 2026-11-22 15:58:42 UTC J. All decoded trade rows by source x verification
+  source  | verification_status | count  | pct  
+----------+---------------------+--------+------
+ rpc_logs | partially_verified  | 334734 | 89.8
+ rpc_tx   | verified            |  35305 |  9.5
+ rpc_tx   | partially_verified  |   2753 |  0.7
+(3 rows)
+
+### K. By wallet group: is the wallet one whose PnL the system computes (history read)?
+                     grp                     |  rows  | verified | partial | unverified 
+---------------------------------------------+--------+----------+---------+------------
+ tracked, history not read yet               | 150605 |     3789 |  146816 |          0
+ observed / skipped                          | 116815 |     2266 |  114549 |          0
+ not a tracked wallet (stream only, >=1 SOL) |  81825 |     6169 |   75656 |          0
+ history read (PnL computed)                 |  23547 |    23081 |     466 |          0
+(4 rows)
+
+### L. Trades of history-read wallets inside 30 days, by tx type x verification (these feed PnL)
+   tx_type    | verification_status | count 
+--------------+---------------------+-------
+ buy          | verified            | 11101
+ buy          | partially_verified  |   256
+ sell         | verified            | 11641
+ sell         | partially_verified  |   210
+ transfer_in  | verified            |   120
+ transfer_out | verified            |   219
+(6 rows)
+
+### M. Why partially verified (history-read wallets): top verification notes
+                                                      note                                                      | count 
+----------------------------------------------------------------------------------------------------------------+-------
+ wallet paid/received another asset in the same tx (EPjFWddN); SOL amount taken from the curve/pool event; SOL  |   192
+ decoded from program logs; balance reconciliation pending                                                      |    98
+ non-SOL quoted curve (eNgN USDC) bought/sold through a router: SOL amount = the wallet's own SOL balance chang |    70
+ reversed pool (base=SOL); fees charged in token units, not counted in SOL                                      |    51
+ SOL residual -N lamports                                                                                       |    17
+ token delta N != events N for EPjFWddNAufqSSqeMNqNNxzybapCNGNwEGGkZwyTDtNv                                     |     9
+ token delta N != events -N for EPjFWddNAufqSSqeMNqNNxzybapCNGNwEGGkZwyTDtNv                                    |     7
+ token delta N != events -N for GexThZHgaswpAQNFiNQrHFubjPimUNSYhJiAANXZpump                                    |     7
+ SOL residual N lamports                                                                                        |     4
+ token delta N != events N for NCxjZyMNoFNpNeXHXHvNTWpSNXNCuUmLwtGeNspump                                       |     2
+ token delta N != events -N for AiNLHZGNMCzgNWKdawwqduVAXpNDUuVNMNuyqNppump; wallet paid/received another asset |     2
+ token delta N != events N for AiNLHZGNMCzgNWKdawwqduVAXpNDUuVNMNuyqNppump; wallet paid/received another asset  |     2
+(12 rows)
+
+### N. Positions of history-read wallets (>=2 SOL) by verification -> usable for PnL
+ERROR:  column reference "status" is ambiguous
+LINE 1: select verification, status, count(*) from wallet_positions ...
+                             ^
+### O. Failed on-chain transactions excluded (not trades)
+ failed_txs | wallets 
+------------+---------
+      32171 |      57
+(1 row)
+
+### N. Positions of history-read wallets (>=2 SOL) by verification -> usable for PnL
+    verification    |   status    | count 
+--------------------+-------------+-------
+ partially_verified | closed      |    65
+ partially_verified | open        |    74
+ partially_verified | written_off |     1
+ verified           | closed      |  1062
+ verified           | open        |   730
+ verified           | written_off |   147
+(6 rows)
+
+ total_positions | closed | closed_verified | pct_closed_verified 
+-----------------+--------+-----------------+---------------------
+            2079 |   1275 |            1209 |                94.8
+(1 row)
+
+
+==================================================================
+== C-backfill.txt
+==================================================================
+### 2026-11-22 15:59:20 UTC P. 198 wallets skipped as 'high frequency': their own pump.fun trade rate seen by the stream
+                           bucket                           | count 
+------------------------------------------------------------+-------
+ >= 200/day (bot-like)                                      |   156
+ 50-200/day                                                 |    33
+ < 50 pump trades/day (probably flooded by spam, not a bot) |     9
+(3 rows)
+
+
+==================================================================
+== D-checkpoint.txt
+==================================================================
+<stdin>:13: DeprecationWarning: datetime.datetime.utcnow() is deprecated and scheduled for removal in a future version. Use timezone-aware objects to represent datetimes in UTC: datetime.datetime.now(datetime.UTC).
+16:00:17 wallet FA3xBWw2E4yTPbeWXcDv5J19yQRcpxaLoSLfA2EZHjtX ~670 signatures (60-day window or less)
+before: trade rows 72
+run 1 INTERRUPTED after 75s
+after run 1: status=running sigs processed=400 trade rows=172 irrelevant cached=21
+run 2 (resume) in 1s: {'mode': 'backfill', 'signatures': 120, 'failed': 6, 'fetched': 0, 'trades': 105, 'truncated': False, 'exhausted': True}
+after run 2: status=complete signatures=120 trade rows=172 duplicate (signature,event_key) rows=0
+run 2 fetched from RPC: 0 of 120 signatures (the rest came from the checkpoint: stored raw txs + irrelevant cache)
+
+==================================================================
+== E-audit.txt
+==================================================================
+### 2026-11-22 16:03:11 UTC backfill-audit --apply
+{'checked': 60, 'short': 44, 'requeued_flooded': 9, 'errors': 0, 'applied': True, 'short_count': 44}
+
+==================================================================
+== F-backfill-run.txt
+==================================================================
+### 2026-11-22 16:04:57 UTC BACKFILL BASELINE (after audit, before resuming workers)
+ backfill_status | count 
+-----------------+-------
+ complete        |     5
+ none            |   189
+ partial         |    11
+ queued          |   479
+ running         |     2
+(5 rows)
+
+ trade_rows | verified 
+------------+----------
+     372892 |    35385
+(1 row)
+
+
+### 2026-11-22 16:10:39 UTC BACKFILL PROGRESS (local workers since 16:05 UTC, public RPC)
+ backfill_status | count 
+-----------------+-------
+ complete        |     5
+ none            |   189
+ partial         |    11
+ queued          |   491
+ running         |     3
+(5 rows)
+
+ w | src | backfill_status | sigs | trunc | done_utc 
+---+-----+-----------------+------+-------+----------
+(0 rows)
+
+ trade_rows | verified 
+------------+----------
+     381962 |    35682
+(1 row)
+
+worker log: wallets processed since restart:
+0
+
+==================================================================
+== G-compose.txt
+==================================================================
+### 2026-11-22 16:11:49 UTC docker compose (docker-compose.yml, VPS layout: one container per worker)
+ Container smart-money-radar-postgres-1 Healthy 
+ Container smart-money-radar-backup-1 Starting 
+ Container smart-money-radar-backup-1 Started 
+postgres: healthy
+--- restore real data with deploy/backup/restore.sh
+restoring /backups/radar-20261122-161059.dump into database radar ...
+DROP DATABASE
+CREATE DATABASE
+NOTICE:  extension "timescaledb" already exists, skipping
+restore finished (pg_restore exit code 0). wallets in database: 699
+real	0m44.076s
+user	0m0.127s
+sys	0m0.040s
+
+### 2026-11-22 16:12:54 UTC docker compose up -d (all services)
+ Container smart-money-radar-frontend-1 Starting 
+ Container smart-money-radar-frontend-1 Started 
+ Container smart-money-radar-caddy-1 Starting 
+ Container smart-money-radar-caddy-1 Started 
+### 2026-11-22 16:15:36 UTC docker compose ps (after 150 s)
+SERVICE     STATE     STATUS
+analytics   running   Up 2 minutes (healthy)
+api         running   Up 2 minutes (healthy)
+backup      running   Up 3 minutes
+caddy       running   Up 2 minutes
+discovery   running   Up 2 minutes (health: starting)
+frontend    running   Up 2 minutes
+postgres    running   Up 3 minutes (healthy)
+prices      running   Up 2 minutes (healthy)
+redis       running   Up 3 minutes (healthy)
+signals     running   Up 2 minutes (healthy)
+stream      running   Up 2 minutes (healthy)
+sync        running   Up 2 minutes (healthy)
+verifier    running   Up 2 minutes (healthy)
+
+### 2026-11-22 16:15:51 UTC checks through Caddy HTTPS (https://localhost, verified with Caddy's local root CA)
+GET /api/health -> 200
+GET /api/overview (no login) -> 401
+POST /api/auth/login -> 200
+cookie flags over HTTPS: set-cookie: smr_session=<redacted>; HttpOnly; Max-Age=1209600; Path=/; SameSite=lax; Secure
+GET / (dashboard) -> 200
+GET /api/overview -> wallets {'tracked': 484, 'smart': 0, 'candidates': 451, 'backfilling': 480} stream degraded None
+security headers: referrer-policy: same-origin strict-transport-security: max-age=31536000; includeSubDomains x-content-type-options: nosniff x-frame-options: DENY 
+--- worker logs (stream connect, errors) last 3 min
+stream-1  | {"ts": "2026-11-22T16:13:33Z", "level": "WARNING", "logger": "radar.services.stream", "msg": "stream publicnode disconnected: gaierror"}
+stream-1  | {"ts": "2026-11-22T16:14:05Z", "level": "WARNING", "logger": "radar.services.stream", "msg": "stream solana_public disconnected: gaierror"}
+stream-1  | {"ts": "2026-11-22T16:15:05Z", "level": "WARNING", "logger": "radar.services.stream", "msg": "stream publicnode disconnected: gaierror"}
+1
+
+### 2026-11-22 16:16:17 UTC re-create workers with the sandbox network override (proxy access); data kept
+ Container smart-money-radar-signals-1 Starting 
+ Container smart-money-radar-prices-1 Starting 
+ Container smart-money-radar-stream-1 Starting 
+ Container smart-money-radar-analytics-1 Starting 
+ Container smart-money-radar-discovery-1 Starting 
+ Container smart-money-radar-verifier-1 Started 
+ Container smart-money-radar-sync-1 Started 
+ Container smart-money-radar-signals-1 Started 
+ Container smart-money-radar-prices-1 Started 
+ Container smart-money-radar-stream-1 Started 
+ Container smart-money-radar-analytics-1 Started 
+ Container smart-money-radar-discovery-1 Started 
+SERVICE     STATE     STATUS
+analytics   running   Up 2 minutes (healthy)
+api         running   Up 5 minutes (healthy)
+backup      running   Up 6 minutes
+caddy       running   Up 5 minutes
+discovery   running   Up 2 minutes (health: starting)
+frontend    running   Up 5 minutes
+postgres    running   Up 2 minutes (healthy)
+prices      running   Up 2 minutes (healthy)
+redis       running   Up 2 minutes (healthy)
+signals     running   Up 2 minutes (healthy)
+stream      running   Up 2 minutes (healthy)
+sync        running   Up 2 minutes (healthy)
+verifier    running   Up 2 minutes (healthy)
+--- stream log
+stream-1  | {"ts": "2026-11-22T16:16:46Z", "level": "INFO", "logger": "radar.services.stream", "msg": "stream connected to solana_public"}
+stream-1  | {"ts": "2026-11-22T16:17:42Z", "level": "WARNING", "logger": "radar.services.stream", "msg": "stream solana_public disconnected: ConnectionClosedError"}
+stream-1  | {"ts": "2026-11-22T16:17:43Z", "level": "INFO", "logger": "radar.services.stream", "msg": "stream connected to publicnode"}
+--- sync log
+sync-1  | {"ts": "2026-11-22T16:16:45Z", "level": "INFO", "logger": "radar.services.wallet_sync", "msg": "wallet 743wxXzAE5asUoboQ7YYzmGQwE3kf7b3Rf7rDq6NxLb4 {'skipped': 'high_frequency'}"}
+sync-1  | {"ts": "2026-11-22T16:16:45Z", "level": "INFO", "logger": "radar.services.wallet_sync", "msg": "wallet 2XBkv5wxbTjtRTy16gEfF896tMuiqCDnxEzVFbbK5ZMZ {'skipped': 'high_frequency'}"}
+sync-1  | {"ts": "2026-11-22T16:16:46Z", "level": "INFO", "logger": "radar.services.wallet_sync", "msg": "wallet BPD9rZb6Jxmrm7cyHoDGuuHY2VggExv5yQom6So696aH {'skipped': 'high_frequency'}"}
+
+### 2026-11-22 16:20:09 UTC stability check
+SERVICE     STATE     STATUS
+analytics   running   Up 3 minutes (healthy)
+api         running   Up 7 minutes (healthy)
+backup      running   Up 8 minutes
+caddy       running   Up 7 minutes
+discovery   running   Up 3 minutes (health: starting)
+frontend    running   Up 7 minutes
+postgres    running   Up 3 minutes (healthy)
+prices      running   Up 3 minutes (healthy)
+redis       running   Up 3 minutes (healthy)
+signals     running   Up 3 minutes (healthy)
+stream      running   Up 3 minutes (healthy)
+sync        running   Up 3 minutes (healthy)
+verifier    running   Up 3 minutes (healthy)
+restart counts:
+  /smart-money-radar-analytics-1 restarts=0 oom=false
+  /smart-money-radar-api-1 restarts=0 oom=false
+  /smart-money-radar-backup-1 restarts=0 oom=false
+  /smart-money-radar-caddy-1 restarts=0 oom=false
+  /smart-money-radar-discovery-1 restarts=0 oom=false
+  /smart-money-radar-frontend-1 restarts=0 oom=false
+  /smart-money-radar-postgres-1 restarts=0 oom=false
+  /smart-money-radar-prices-1 restarts=0 oom=false
+  /smart-money-radar-redis-1 restarts=0 oom=false
+  /smart-money-radar-signals-1 restarts=0 oom=false
+  /smart-money-radar-stream-1 restarts=0 oom=false
+  /smart-money-radar-sync-1 restarts=0 oom=false
+  /smart-money-radar-verifier-1 restarts=0 oom=false
+worker heartbeats (age seconds):
+all|557
+analytics|58
+prices|37
+signals|0
+stream|9
+sync|205
+verifier|12
+error/traceback lines per service (last 15 min):
+  stream: 0
+  verifier: 0
+  sync: 0
+  discovery: 0
+  prices: 0
+  analytics: 0
+  signals: 0
+  api: 0
+resource usage:
+analytics-1 cpu=0.02% mem=121.9MiB / 15.71GiB
+stream-1 cpu=0.12% mem=44.6MiB / 15.71GiB
+prices-1 cpu=0.96% mem=32.4MiB / 15.71GiB
+verifier-1 cpu=0.09% mem=37.5MiB / 15.71GiB
+sync-1 cpu=1.22% mem=40.65MiB / 15.71GiB
+signals-1 cpu=0.02% mem=29.61MiB / 15.71GiB
+discovery-1 cpu=1.90% mem=43.78MiB / 15.71GiB
+postgres-1 cpu=1.85% mem=531.3MiB / 15.71GiB
+redis-1 cpu=0.81% mem=4.73MiB / 15.71GiB
+caddy-1 cpu=0.00% mem=14.39MiB / 15.71GiB
+frontend-1 cpu=0.00% mem=29.49MiB / 15.71GiB
+api-1 cpu=4.10% mem=46.14MiB / 15.71GiB
+backup-1 cpu=0.00% mem=952KiB / 15.71GiB
+
+### 2026-11-22 16:22:02 UTC RESTART TEST: stop the Docker daemon (like a server reboot), start it again
+before: wallets=750 trade_rows=385610
+dockerd stopped: yes
+dockerd started again at 16:22:17
+SERVICE     STATE     STATUS
+analytics   running   Up 2 minutes (healthy)
+api         running   Up 2 minutes (healthy)
+backup      running   Up 2 minutes
+caddy       running   Up 2 minutes
+discovery   running   Up 2 minutes (healthy)
+frontend    running   Up 2 minutes
+postgres    running   Up 2 minutes (healthy)
+prices      running   Up 2 minutes (healthy)
+redis       running   Up 2 minutes (healthy)
+signals     running   Up 2 minutes (healthy)
+stream      running   Up 2 minutes (healthy)
+sync        running   Up 2 minutes (healthy)
+verifier    running   Up 2 minutes (healthy)
+after: wallets=750 trade_rows=386141 (rows keep growing: the workers are running)
+
+==================================================================
+== H-verify-pnl.json
+==================================================================
+{
+ "pnl_positions_checked": 2082,
+ "pnl_positions_skipped": {
+  "missing_raw_tx": 0,
+  "other_token_in_same_tx": 0,
+  "transfers": 135,
+  "capped_signatures": 0
+ },
+ "pnl_abs_diff_sol": {
+  "median": 0.0,
+  "p90": 0.0,
+  "max": 0.004993
+ },
+ "pnl_within_0.001_sol": 0.9971,
+ "pnl_within_0.01_sol": 1.0,
+ "pnl_within_1pct_of_entry": 1.0,
+ "pnl_sum_system_vs_onchain": [
+  0.0153,
+  "system minus on-chain, SOL"
+ ],
+ "pnl_worst": [
+  {
+   "wallet": "69BSL1rrKMfQYSGmdi2QRmKvP2ZdEXtqvrJpKNnzJBxn",
+   "mint": "68y4knbjqabqbPKQneF6ZZvtPiiGFZCxNgHcayAYSZPb",
+   "system_pnl": 2.985576,
+   "onchain_delta": 2.980583
+  },
+  {
+   "wallet": "5PZxgSQnbbadoPokb9nKesjGn3cP76LrMWEqnMEqNo5p",
+   "mint": "43Ck6GLTMu7MdyaLrk3tqxRdEw3Wy9U21sSoiZ3JtC4g",
+   "system_pnl": 0.551281,
+   "onchain_delta": 0.547528
+  },
+  {
+   "wallet": "6cvkERoSMBxPwvLT2YrCawZysvuWn91S8Rcw18YwZo1e",
+   "mint": "DUvmZmY1PixJtNSU3BUpAcTQDUuSxLwnNG51oG1tsiSX",
+   "system_pnl": 0.234952,
+   "onchain_delta": 0.233147
+  },
+  {
+   "wallet": "6cvkERoSMBxPwvLT2YrCawZysvuWn91S8Rcw18YwZo1e",
+   "mint": "5gRsQngoVdq4E3Rv2LLNVGnioBiB1M77vG9eQtZZ1RXS",
+   "system_pnl": 0.009306,
+   "onchain_delta": 0.007609
+  },
+  {
+   "wallet": "2j7CjtmoCCewMj3BVSgVr9A6awMaPfcBhZ9YRggRb8EF",
+   "mint": "HXkKTpB6Ad1Azgxqgj7bHuJhNhiAHZNLxurZJ9uCvnKk",
+   "system_pnl": -0.044822,
+   "onchain_delta": -0.046374
+  },
+  {
+   "wallet": "2j7CjtmoCCewMj3BVSgVr9A6awMaPfcBhZ9YRggRb8EF",
+   "mint": "CkEHKXDZwzF3cViqw8UMB9fC13nQ7pSozoe3rSFJPcp7",
+   "system_pnl": 0.957439,
+   "onchain_delta": 0.956407
+  },
+  {
+   "wallet": "3bCAJVAMtHEf8C6voC2pig8yHcWFELnhVV21gDNHF2CP",
+   "mint": "BgeMJDqKqiQnpuX5nUsjzoG9zrczbUEHzXnUsduSez9t",
+   "system_pnl": 0.483742,
+   "onchain_delta": 0.483365
+  },
+  {
+   "wallet": "46bC6QRksajpEkRnvSq2q6ZvSuj6gjmXLXYQdkqKtAzM",
+   "mint": "3XgDVcbKu2dpCmJpTyFaT9wwv8XS7XiaZLHY2KdTUitj",
+   "system_pnl": 0.030333,
+   "onchain_delta": 0.030263
+  }
+ ],
+ "performance_rows_checked": 60,
+ "performance_mismatches": 0,
+ "performance_mismatch_examples": [],
+ "scores_recomputed": 60,
+ "score_abs_diff": {
+  "max": 0.0,
+  "within_0.01": 60
+ }
+}
+==================================================================
+== I-bf-start.txt
+==================================================================
+complete|6
+failed|15
+none|200
+partial|11
+queued|514
+running|4
+
+==================================================================
+== J-run25.txt
+==================================================================
+### window: 2026-11-22 16:25:15 UTC -> 2026-11-22 16:50:15 UTC (25 min, Docker Compose, public RPC)
+--- backfill status at start
+complete|6
+failed|15
+none|200
+partial|11
+queued|514
+running|4
+--- backfill status at end
+complete|7
+failed|15
+none|202
+partial|14
+queued|512
+running|2
+--- wallets whose backfill finished in the window
+    w     |    src    |    st    | sigs | trunc | done_utc 
+----------+-----------+----------+------+-------+----------
+ DqeVuNmy | big_buyer | partial  | 3000 | t     | 16:26
+ 6f4aYGfw | big_buyer | partial  | 3000 | t     | 16:37
+ 4XJo21mm | big_buyer | complete |  772 | f     | 16:41
+ 57fjx2Ax | big_buyer | partial  | 3000 | t     | 16:49
+(4 rows)
+
+--- sync log summary
+      2 'skipped': 'high_frequency'
+      4 {'mode': 'backfill'
+--- services
+SERVICE     STATE     STATUS
+analytics   running   Up 27 minutes (healthy)
+api         running   Up 27 minutes (healthy)
+backup      running   Up 27 minutes
+caddy       running   Up 27 minutes
+discovery   running   Up 27 minutes (unhealthy)
+frontend    running   Up 27 minutes
+postgres    running   Up 27 minutes (healthy)
+prices      running   Up 27 minutes (healthy)
+redis       running   Up 27 minutes (healthy)
+signals     running   Up 27 minutes (healthy)
+stream      running   Up 27 minutes (healthy)
+sync        running   Up 27 minutes (unhealthy)
+verifier    running   Up 27 minutes (healthy)
+  /smart-money-radar-analytics-1 restarts=0 oom=false
+  /smart-money-radar-api-1 restarts=0 oom=false
+  /smart-money-radar-backup-1 restarts=0 oom=false
+  /smart-money-radar-caddy-1 restarts=0 oom=false
+  /smart-money-radar-discovery-1 restarts=0 oom=false
+  /smart-money-radar-frontend-1 restarts=0 oom=false
+  /smart-money-radar-postgres-1 restarts=0 oom=false
+  /smart-money-radar-prices-1 restarts=0 oom=false
+  /smart-money-radar-redis-1 restarts=0 oom=false
+  /smart-money-radar-signals-1 restarts=0 oom=false
+  /smart-money-radar-stream-1 restarts=0 oom=false
+  /smart-money-radar-sync-1 restarts=0 oom=false
+  /smart-money-radar-verifier-1 restarts=0 oom=false
+--- error/traceback lines per service (25 min)
+  stream: 0
+  verifier: 0
+  sync: 0
+  discovery: 0
+  prices: 0
+  analytics: 4
+  signals: 0
+  api: 0
+  frontend: 0
+  caddy: 0
+--- latency (radar latency --minutes 25, run inside the sync container)
+{
+ "window_minutes": 25,
+ "stream_endpoint": "publicnode",
+ "stream_status": "degraded",
+ "stream_last_message_age_s": 846.4,
+ "stream_delay_s": {
+  "n": 12321,
+  "p50": 6.97,
+  "p90": 13.09,
+  "p99": 15.67,
+  "max": 19.09
+ },
+ "verifier_delay_s": {
+  "n": 75,
+  "p50": 8.46,
+  "p90": 15.79,
+  "p99": 615.21,
+  "max": 758.21
+ },
+ "verified_in_window_total": 5037,
+ "kol_alert_delay_s": {
+  "n": 0
+ },
+ "discovery_delay_s": {
+  "n": 2,
+  "p50": 26578.05,
+  "p90": 26578.05,
+  "p99": 26578.05,
+  "max": 26578.05
+ },
+ "wallet_sync_age_s": {
+  "n": 11,
+  "p50": 4310.87,
+  "p90": 5459.83,
+  "p99": 5535.86,
+  "max": 5535.86
+ },
+ "backfill_finished_in_window": 4,
+ "backfill_queue": 514,
+ "price_newest_onchain_bar_age_s": 979.7,
+ "sol_usd_age_s": 2391.8,
+ "rpc": [
+  {
+   "source": "rpc_publicnode",
+   "ok": 5000,
+   "failed": 1,
+   "rate_limited": 1,
+   "mean_latency_ms": 58.0
+  },
+  {
+   "source": "rpc_publicnode",
+   "ok": 769,
+   "failed": 0,
+   "rate_limited": 0,
+   "mean_latency_ms": 54.2
+  },
+  {
+   "source": "rpc_publicnode",
+   "ok": 50,
+   "failed": 0,
+   "rate_limited": 0,
+   "mean_latency_ms": 146.1
+  },
+  {
+   "source": "rpc_publicnode",
+   "ok": 40,
+   "failed": 3,
+   "rate_limited": 0,
+   "mean_latency_ms": 112.3
+  },
+  {
+   "source": "rpc_publicnode",
+   "ok": 1174,
+   "failed": 1,
+   "rate_limited": 0,
+   "mean_latency_ms": 86.3
+  },
+  {
+   "source": "rpc_solana_public",
+   "ok": 58,
+   "failed": 0,
+   "rate_limited": 0,
+   "mean_latency_ms": 1194.5
+  },
+  {
+   "source": "rpc_solana_public",
+   "ok": 24,
+   "failed": 6,
+   "rate_limited": 6,
+   "mean_latency_ms": 939.9
+  },
+  {
+   "source": "rpc_solana_public",
+   "ok": 2006,
+   "failed": 291,
+   "rate_limited": 291,
+   "mean_latency_ms": 184.9
+  },
+  {
+   "source": "rpc_solana_public",
+   "ok": 439,
+   "failed": 38,
+   "rate_limited": 38,
+   "mean_latency_ms": 98.7
+  },
+  {
+   "source": "rpc_solana_public",
+   "ok": 479,
+   "failed": 68,
+   "rate_limited": 68,
+   "mean_latency_ms": 316.1
+  }
+ ]
+}
+
+==================================================================
+== K-run30-after-fix.txt
+==================================================================
+### window: 2026-11-22 16:55:41 UTC, 30 min, Docker Compose, public RPC, image rebuilt with fixes
+--- backfill status at start
+complete|7
+failed|15
+none|202
+partial|15
+queued|512
+running|1
+--- rows at start
+404615
+--- backfill status at end (17:25:41 UTC)
+complete|7
+failed|15
+none|204
+partial|17
+queued|513
+running|1
+--- rows at end
+427414
+--- wallets whose backfill finished in the window
+    w     |    src    |   st    | sigs | trunc | done_utc 
+----------+-----------+---------+------+-------+----------
+ 3ksZnFvV | big_buyer | partial | 3000 | t     | 17:05
+ 51DqG8YW | big_buyer | partial | 3000 | t     | 17:16
+(2 rows)
+
+--- services
+SERVICE     STATE     STATUS
+analytics   running   Up 30 minutes (healthy)
+api         running   Up 30 minutes (healthy)
+backup      running   Up About an hour
+caddy       running   Up About an hour
+discovery   running   Up 30 minutes (healthy)
+frontend    running   Up 27 minutes
+postgres    running   Up About an hour (healthy)
+prices      running   Up 30 minutes (healthy)
+redis       running   Up About an hour (healthy)
+signals     running   Up 30 minutes (healthy)
+stream      running   Up 30 minutes (healthy)
+sync        running   Up 30 minutes (healthy)
+verifier    running   Up 30 minutes (healthy)
+  /smart-money-radar-analytics-1 restarts=0 oom=false
+  /smart-money-radar-api-1 restarts=0 oom=false
+  /smart-money-radar-backup-1 restarts=0 oom=false
+  /smart-money-radar-caddy-1 restarts=0 oom=false
+  /smart-money-radar-discovery-1 restarts=0 oom=false
+  /smart-money-radar-frontend-1 restarts=0 oom=false
+  /smart-money-radar-postgres-1 restarts=0 oom=false
+  /smart-money-radar-prices-1 restarts=0 oom=false
+  /smart-money-radar-redis-1 restarts=0 oom=false
+  /smart-money-radar-signals-1 restarts=0 oom=false
+  /smart-money-radar-stream-1 restarts=0 oom=false
+  /smart-money-radar-sync-1 restarts=0 oom=false
+  /smart-money-radar-verifier-1 restarts=0 oom=false
+--- worker heartbeats (age s, info)
+analytics|120|{"full": false, "cycle": 14, "seconds": 17.2, "wallets": 67}
+discovery|166|{"cycle": 2, "seeded": 0, "big_buyers": 0, "early_buyers": 0, "patient_winners": 0}
+prices|7|{"queue": "price_backfill"}
+signals|0|{"smart_wallets": 0}
+stream|7|{"trades": 109978, "endpoint": "publicnode", "failed_tx": 308915, "recent_gaps": [{"at": 1795368054.5493243, "endpoint": "solana_public", "uptime_s": 26}, {"at"
+sync|18|{"done": 4, "error": 0, "in_flight": [{"wallet": "26g97tpxVK8yrujzpf9yJUhzoQsTtBMR9Qx2eR5mgzXb", "running_s": 511}]}
+verifier|11|{"ok": 187, "error": 0, "failed_tx": 0, "not_found": 0}
+--- error/traceback lines per service (30 min)
+  stream: 0
+  verifier: 0
+  sync: 0
+  discovery: 0
+  prices: 0
+  analytics: 0
+  signals: 0
+  api: 0
+  frontend: 0
+  caddy: 0
+--- stream idle reconnects / connects in window
+  idle watchdog fired: 14
+  connects: 29
+--- latency (radar latency --minutes 30, inside the sync container)
+{
+ "window_minutes": 30,
+ "stream_endpoint": "publicnode",
+ "stream_status": "ok",
+ "stream_last_message_age_s": 3.3,
+ "stream_delay_s": {
+  "n": 17670,
+  "p50": 4.44,
+  "p90": 13.97,
+  "p99": 40.18,
+  "max": 47.67
+ },
+ "verifier_delay_s": {
+  "n": 245,
+  "p50": 6.99,
+  "p90": 21.07,
+  "p99": 1158.35,
+  "max": 1295.35
+ },
+ "verified_in_window_total": 5262,
+ "kol_alert_delay_s": {
+  "n": 4,
+  "p50": 9.38,
+  "p90": 13.15,
+  "p99": 13.15,
+  "max": 13.15
+ },
+ "discovery_delay_s": {
+  "n": 5,
+  "p50": 0.89,
+  "p90": 26703.38,
+  "p99": 26703.38,
+  "max": 26703.38
+ },
+ "wallet_sync_age_s": {
+  "n": 11,
+  "p50": 6438.04,
+  "p90": 7586.99,
+  "p99": 7663.03,
+  "max": 7663.03
+ },
+ "backfill_finished_in_window": 2,
+ "backfill_queue": 514,
+ "price_newest_onchain_bar_age_s": 106.9,
+ "sol_usd_age_s": 46.9,
+ "rpc": [
+  {
+   "source": "rpc_publicnode",
+   "job": "discovery",
+   "ok": 768,
+   "failed": 0,
+   "rate_limited": 0,
+   "mean_latency_ms": 89.8
+  },
+  {
+   "source": "rpc_publicnode",
+   "job": "stream",
+   "ok": 91,
+   "failed": 1,
+   "rate_limited": 0,
+   "mean_latency_ms": 155.9
+  },
+  {
+   "source": "rpc_publicnode",
+   "job": "sync",
+   "ok": 5071,
+   "failed": 0,
+   "rate_limited": 0,
+   "mean_latency_ms": 54.3
+  },
+  {
+   "source": "rpc_publicnode",
+   "job": "verifier",
+   "ok": 118,
+   "failed": 0,
+   "rate_limited": 0,
+   "mean_latency_ms": 221.2
+  },
+  {
+   "source": "rpc_solana_public",
+   "job": "discovery",
+   "ok": 442,
+   "failed": 39,
+   "rate_limited": 39,
+   "mean_latency_ms": 729.4
+  },
+  {
+   "source": "rpc_solana_public",
+   "job": "stream",
+   "ok": 100,
+   "failed": 3,
+   "rate_limited": 3,
+   "mean_latency_ms": 212.1
+  },
+  {
+   "source": "rpc_solana_public",
+   "job": "sync",
+   "ok": 2122,
+   "failed": 290,
+   "rate_limited": 290,
+   "mean_latency_ms": 759.0
+  },
+  {
+   "source": "rpc_solana_public",
+   "job": "verifier",
+   "ok": 69,
+   "failed": 11,
+   "rate_limited": 11,
+   "mean_latency_ms": 290.0
+  }
+ ]
+}
+### end 2026-11-22 17:25:47 UTC
+
+==================================================================
+== Unit tests (2026-11-22 17:27:06 UTC)
+............................                                             [100%]
+87 passed, 13 skipped in 0.38s
