@@ -323,6 +323,7 @@ async def risk_for_token(ctx: Ctx, mint: str) -> dict:
                                             for k, (o, amt, acct) in enumerate(owners)])
         except Exception as e:
             log.debug("holders %s: %s", mint, e)
+    await _holder_structure(ctx, t, i, supply)
     early = await ctx.pool.fetch("""SELECT DISTINCT ON (t.wallet) t.wallet, w.funding_source FROM wallet_transactions t
         LEFT JOIN wallets w ON w.address = t.wallet WHERE t.mint = $1 AND t.tx_type = 'buy'
         ORDER BY t.wallet, t.slot LIMIT 40""", mint)
@@ -352,6 +353,61 @@ async def risk_for_token(ctx: Ctx, mint: str) -> dict:
     return {"level": r.level, "points": r.points}
 
 
+async def holder_snapshot(ctx: Ctx, t, supply: float) -> dict:
+    """Top holders: RPC (Helius) snapshot when recent, else the trade-flow estimate."""
+    from ..analytics.holders import Flow, estimate_holders, flow_metrics
+    excl = {x for x in (t["bonding_curve"], t["amm_pool"]) if x}
+    snap = await ctx.pool.fetch("""SELECT owner AS wallet, amount AS tokens, pct_supply AS pct FROM token_holders
+        WHERE mint = $1 AND NOT is_curve_or_pool AND snapshot_at = (SELECT max(snapshot_at) FROM token_holders
+        WHERE mint = $1 AND snapshot_at > now() - interval '30 minutes') ORDER BY rank""", t["mint"])
+    dec = 10 ** (t["decimals"] or 6)
+    flows = [Flow(r["wallet"], float(r["bought_raw"]) / dec, float(r["sold_raw"]) / dec, float(r["buy_sol"]),
+                  float(r["sell_sol"]), float(r["fees_sol"]), r["n_buys"], r["n_sells"])
+             for r in await ctx.pool.fetch("SELECT * FROM token_wallet_flows WHERE mint = $1", t["mint"])]
+    metrics = flow_metrics(flows) if flows else {}
+    if snap:
+        holders = [{"wallet": r["wallet"], "tokens": float(r["tokens"]), "pct": float(r["pct"] or 0)} for r in snap]
+        source, complete = "rpc_largest_accounts", True
+    else:
+        holders = estimate_holders(flows, supply, exclude=excl)
+        source, complete = "trade_estimate", bool(t["stream_from_creation"])
+    return {"holders": holders, "source": source, "complete": complete, "flow_metrics": metrics}
+
+
+async def _holder_structure(ctx: Ctx, t, i: RiskInputs, supply: float) -> None:
+    from ..analytics.holders import linked_groups, unnatural_volume
+    from .holder_probe import is_fresh, probe_wallets
+    s = await ctx.settings.get()
+    i.holder_alert_pct = float(s["holder_alert_pct"])
+    i.fresh_hours = float(s["fresh_wallet_hours"])
+    hs = await holder_snapshot(ctx, t, supply)
+    m = hs["flow_metrics"]
+    mc = float(t["last_mc_sol"]) if t["last_mc_sol"] else None
+    if m.get("buyers"):
+        i.unnatural_volume, i.unnatural_reasons = unnatural_volume(m, mc)
+        i.fees_sol = m.get("fees_sol")
+        i.volume_to_mc = (m["volume_sol"] / mc) if mc else None
+    if not hs["holders"] or not hs["complete"]:
+        return   # an incomplete estimate is never used to judge concentration
+    top = hs["holders"][:10]
+    i.max_holder_pct = top[0]["pct"]
+    i.max_holder_wallet = top[0]["wallet"]
+    if i.top10_pct is None:
+        i.top10_pct = sum(h["pct"] or 0 for h in top)
+        i.holders_source = hs["source"]
+    ages = await probe_wallets(ctx, [h["wallet"] for h in top])
+    known = [h for h in top if h["wallet"] in ages]
+    if len(known) >= max(3, len(top) // 2):
+        i.fresh_top_holders = sum(1 for h in known if is_fresh(ages[h["wallet"]], i.fresh_hours))
+        funders = {h["wallet"]: ages[h["wallet"]].get("funder") for h in known}
+        fan = {r["funder"]: r["n"] for r in await ctx.pool.fetch(
+            "SELECT funder, count(*) AS n FROM wallet_age WHERE funder = ANY($1::text[]) GROUP BY funder",
+            [f for f in funders.values() if f])}
+        groups = linked_groups(known, funders, funder_children=fan)
+        i.linked_groups = len(groups)
+        i.linked_holders_pct = sum(g["pct"] for g in groups)
+
+
 async def risk_pass(ctx: Ctx) -> None:
     mints = [r["mint"] for r in await ctx.pool.fetch("""SELECT DISTINCT t.mint FROM wallet_transactions t
         JOIN wallets w ON w.address = t.wallet AND w.status = 'smart'
@@ -374,7 +430,8 @@ async def retention_pass(ctx: Ctx, s: dict[str, Any]) -> dict:
                                days)
     b = await ctx.pool.execute("""DELETE FROM raw_transactions r WHERE r.block_time < now() - make_interval(days => $1)
         AND NOT EXISTS (SELECT 1 FROM wallet_transactions t WHERE t.signature = r.signature)""", days)
-    return {"trades_deleted": a, "raw_deleted": b}
+    c = await ctx.pool.execute("DELETE FROM token_wallet_flows WHERE last_ts < now() - make_interval(days => $1)", days)
+    return {"trades_deleted": a, "raw_deleted": b, "flows_deleted": c}
 
 
 async def run_cycle(ctx: Ctx, full: bool) -> dict:

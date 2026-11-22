@@ -150,6 +150,22 @@ volume 5 phút / thanh khoản, wash trading (vòng mua-bán ≤ 60 giây cùng 
 (curve còn hoạt động hoặc có route Jupiter). Dữ liệu thiếu cộng 0,5 điểm (thiếu dữ liệu ≠ an toàn).
 HIGH ≥ 5 điểm hoặc có lỗi nghiêm trọng · MEDIUM 2–4,5 · LOW < 2. **Không bao giờ tuyên bố token an toàn tuyệt đối.**
 
+### Cấu trúc holder và chất lượng dòng tiền (Giai đoạn 2)
+
+* **Nguồn holder:** `getTokenLargestAccounts` (khi có Helius) hoặc **ước tính** = token mua − token bán của từng ví, cộng dồn từ
+  **mọi** lệnh mà stream giải mã (`token_wallet_flows`). Ước tính chỉ được dùng khi stream thấy lệnh tạo token và không bị gián đoạn
+  kể từ đó (`tokens.stream_from_creation`); chuyển token giữa ví không được tính. Bonding curve và pool bị loại.
+* **Một ví nắm > 5% supply** (chỉnh được): fail 2 điểm; > 10%: lỗi nghiêm trọng (3 điểm).
+* **Tuổi ví / nguồn vốn đầu tiên** của top 10 holder: một `getSignaturesForAddress` (≤ 1 000 chữ ký ⇒ thấy toàn bộ lịch sử, tuổi chính xác)
+  và với ví trẻ thì đọc giao dịch đầu tiên để biết ai nạp SOL. Cache 24 giờ. **Ví mới** = hoạt động đầu tiên < 48 giờ (chỉnh được);
+  ≥ 3 ví mới trong top 10: fail 2 điểm, 1–2: cảnh báo 1 điểm.
+* **Holder liên kết**: top holder có cùng ví nạp tiền đầu tiên (ví nạp cho ≥ 20 ví bị coi là sàn và bỏ qua) hoặc được một top holder khác nạp.
+  Nhóm nắm ≥ 10% supply: lỗi nghiêm trọng (như một ví > 10%); nhóm nhỏ hơn: cảnh báo 1 điểm.
+* **Volume không tự nhiên** (heuristic, tối đa 1 điểm): volume ≥ 2× Market Cap **và** ít nhất 2 dấu hiệu: ≥ 60% volume từ ví đã bán hết;
+  ≥ 50% ví mua dùng cùng cỡ lệnh (±3%); vị thế ròng trung vị gần 0.
+* **Phí giao dịch đã tạo** và **Volume/Market Cap**: hiển thị để tham khảo, **không chấm điểm** (ngưỡng của tác giả video chưa được kiểm chứng).
+* Dữ liệu giai đoạn 2 thiếu được ghi "unknown" nhưng **không cộng điểm** (kiểm tra top 10 đã tính điểm cho thiếu dữ liệu holder).
+
 ## 9. Backtest (`radar/analytics/backtest.py`)
 
 Walk-forward: tập Smart Money tại thời điểm t chỉ dùng vị thế **đã đóng trước checkpoint gần nhất ≤ t** (6 giờ) và giá **trước** checkpoint.

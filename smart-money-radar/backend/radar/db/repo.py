@@ -132,8 +132,9 @@ async def upsert_price_bars(conn: asyncpg.Connection, bars: list[dict]) -> None:
     if not bars:
         return
     await conn.executemany("""INSERT INTO token_prices(mint, bucket_start, source, open_sol, high_sol, low_sol,
-            close_sol, high_confirmed_sol, volume_sol, volume_usd, buy_sol, sell_sol, trades, liquidity_sol, market_cap_sol)
-        VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15)
+            close_sol, high_confirmed_sol, volume_sol, volume_usd, buy_sol, sell_sol, trades, liquidity_sol, market_cap_sol,
+            fees_sol)
+        VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16)
         ON CONFLICT (mint, bucket_start, source) DO UPDATE SET
             open_sol = COALESCE(token_prices.open_sol, EXCLUDED.open_sol),
             high_sol = GREATEST(token_prices.high_sol, EXCLUDED.high_sol),
@@ -150,10 +151,30 @@ async def upsert_price_bars(conn: asyncpg.Connection, bars: list[dict]) -> None:
             trades = CASE WHEN EXCLUDED.source = 'onchain_trades'
                 THEN token_prices.trades + EXCLUDED.trades ELSE EXCLUDED.trades END,
             liquidity_sol = COALESCE(EXCLUDED.liquidity_sol, token_prices.liquidity_sol),
-            market_cap_sol = COALESCE(EXCLUDED.market_cap_sol, token_prices.market_cap_sol)""",
+            market_cap_sol = COALESCE(EXCLUDED.market_cap_sol, token_prices.market_cap_sol),
+            fees_sol = CASE WHEN EXCLUDED.source = 'onchain_trades'
+                THEN token_prices.fees_sol + EXCLUDED.fees_sol ELSE EXCLUDED.fees_sol END""",
         [(b["mint"], b["bucket_start"], b["source"], b.get("open"), b.get("high"), b.get("low"), b.get("close"),
           b.get("high_confirmed"), b.get("volume_sol", 0), b.get("volume_usd"), b.get("buy_sol", 0),
-          b.get("sell_sol", 0), b.get("trades", 0), b.get("liquidity_sol"), b.get("mc_sol")) for b in bars])
+          b.get("sell_sol", 0), b.get("trades", 0), b.get("liquidity_sol"), b.get("mc_sol"), b.get("fees_sol", 0.0))
+         for b in bars])
+
+
+async def upsert_flows(conn: asyncpg.Connection, rows: list[tuple]) -> None:
+    """rows: (mint, wallet, bought_raw, sold_raw, buy_sol, sell_sol, fees_sol, n_buys, n_sells, first_ts, last_ts, slot)"""
+    if not rows:
+        return
+    await conn.executemany("""INSERT INTO token_wallet_flows(mint, wallet, bought_raw, sold_raw, buy_sol, sell_sol,
+            fees_sol, n_buys, n_sells, first_ts, last_ts, first_slot) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)
+        ON CONFLICT (mint, wallet) DO UPDATE SET bought_raw = token_wallet_flows.bought_raw + EXCLUDED.bought_raw,
+            sold_raw = token_wallet_flows.sold_raw + EXCLUDED.sold_raw,
+            buy_sol = token_wallet_flows.buy_sol + EXCLUDED.buy_sol,
+            sell_sol = token_wallet_flows.sell_sol + EXCLUDED.sell_sol,
+            fees_sol = token_wallet_flows.fees_sol + EXCLUDED.fees_sol,
+            n_buys = token_wallet_flows.n_buys + EXCLUDED.n_buys, n_sells = token_wallet_flows.n_sells + EXCLUDED.n_sells,
+            first_ts = LEAST(token_wallet_flows.first_ts, EXCLUDED.first_ts),
+            last_ts = GREATEST(token_wallet_flows.last_ts, EXCLUDED.last_ts),
+            first_slot = LEAST(token_wallet_flows.first_slot, EXCLUDED.first_slot)""", rows)
 
 
 async def update_token_market(conn: asyncpg.Connection, rows: list[tuple]) -> None:

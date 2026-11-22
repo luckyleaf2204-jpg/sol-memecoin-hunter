@@ -9,9 +9,11 @@ const CHECK_LABEL: Record<string, string> = {
   dev_holding: "Dev wallet nắm giữ", top10_concentration: "Top 10 holders", common_funding: "Ví mua sớm cùng nguồn funding",
   bundle_buying: "Bundle buying", liquidity: "Thanh khoản", volume_anomaly: "Volume bất thường", wash_trading: "Wash trading",
   dev_selling: "Dev đang bán", mint_authority: "Mint authority", freeze_authority: "Freeze authority", sellable: "Có thể bán",
+  single_holder: "Một ví nắm > 5% supply", linked_holders: "Top holder có liên kết (cùng nguồn vốn)",
+  fresh_wallets: "Ví mới tạo trong top holder", unnatural_volume: "Volume không tự nhiên", fees_generated: "Phí giao dịch đã tạo",
 };
 const STATUS_STYLE: Record<string, string> = {
-  ok: "text-emerald-600", warn: "text-amber-600", fail: "text-rose-600", unknown: "text-slate-400",
+  ok: "text-emerald-600", warn: "text-amber-600", fail: "text-rose-600", unknown: "text-slate-400", info: "text-slate-500",
 };
 
 export default function TokenPage({ params }: { params: { mint: string } }) {
@@ -73,6 +75,45 @@ export default function TokenPage({ params }: { params: { mint: string } }) {
           </>
         )}
       </Card>
+
+      <Card title={`Phân bổ holder ${data.holder_estimate.source === "trade_estimate" ? "(ước tính từ lệnh mua/bán)" : "(RPC)"}`}>
+        {!data.holder_estimate.complete && data.holder_estimate.source === "trade_estimate" ? (
+          <Empty>Hệ thống không theo dõi token này liên tục từ lúc tạo nên không ước tính phân bổ (tránh số liệu thiếu). Thêm HELIUS_API_KEY để đọc holder trực tiếp.</Empty>
+        ) : data.holder_estimate.rows.length === 0 ? <Empty>Chưa có dữ liệu.</Empty> : (
+          <>
+            <ul className="space-y-1 text-xs">
+              {data.holder_estimate.rows.slice(0, 15).map((h: any) => (
+                <li key={h.wallet} className="flex flex-wrap items-center justify-between gap-2">
+                  <span className="flex flex-wrap items-center gap-1">
+                    <Link href={`/wallets/${h.wallet}`} className="font-mono text-brand dark:text-teal-300">{h.wallet.slice(0, 6)}…{h.wallet.slice(-4)}</Link>
+                    {h.is_creator && <Pill className="bg-slate-200 dark:bg-slate-700">creator</Pill>}
+                    {h.over_limit && <Pill className="bg-rose-100 text-rose-800">&gt; 5%</Pill>}
+                    {h.fresh && <Pill className="bg-amber-100 text-amber-800">ví mới</Pill>}
+                    {h.linked && <Pill className="bg-violet-100 text-violet-800">cùng nguồn vốn</Pill>}
+                  </span>
+                  <span className="tabular-nums">{num(h.pct, 2)}% · mua {sol(h.buy_sol, 2)}</span>
+                </li>
+              ))}
+            </ul>
+            <p className="mt-2 text-[11px] text-slate-500">Ước tính = token mua − token bán của từng ví (không tính token chuyển giữa ví); bonding curve và pool được loại trừ.</p>
+          </>
+        )}
+      </Card>
+
+      {data.flow_metrics?.traders > 0 && (
+        <Card title="Chất lượng dòng tiền">
+          <div className="grid grid-cols-2 gap-2 text-sm md:grid-cols-4">
+            <div><div className="text-xs text-slate-500">Ví giao dịch</div><b>{num(data.flow_metrics.traders, 0)}</b></div>
+            <div><div className="text-xs text-slate-500">Volume / Market Cap</div><b>{data.fees.volume_to_mc ? `${num(data.fees.volume_to_mc, 1)}x` : "—"}</b></div>
+            <div><div className="text-xs text-slate-500">Phí giao dịch đã tạo</div><b>{sol(data.fees.fees_sol, 2)}</b></div>
+            <div><div className="text-xs text-slate-500">Volume từ ví đã bán hết</div><b>{pct(data.flow_metrics.round_trip_volume_share, 0)}</b></div>
+            <div><div className="text-xs text-slate-500">Cỡ lệnh mua trung vị</div><b>{sol(data.flow_metrics.median_buy_size_sol, 2)}</b></div>
+            <div><div className="text-xs text-slate-500">Ví dùng cùng cỡ lệnh</div><b>{pct(data.flow_metrics.size_uniformity, 0)}</b></div>
+            <div><div className="text-xs text-slate-500">Vị thế ròng trung vị</div><b>{sol(data.flow_metrics.median_net_position_sol, 2)}</b></div>
+            <div><div className="text-xs text-slate-500">Volume / ví</div><b>{sol(data.flow_metrics.volume_per_trader_sol, 2)}</b></div>
+          </div>
+        </Card>
+      )}
 
       {data.signals.length > 0 && (
         <Card title="Tín hiệu Smart Money">

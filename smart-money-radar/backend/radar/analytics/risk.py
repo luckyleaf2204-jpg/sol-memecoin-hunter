@@ -33,6 +33,18 @@ class RiskInputs:
     on_curve: bool | None = None
     sell_route: bool | None = None                # Jupiter quote available
     sell_price_impact: float | None = None
+    # phase 2 — holder structure and flow quality
+    max_holder_pct: float | None = None           # largest single wallet (curve/pool excluded)
+    max_holder_wallet: str | None = None
+    holder_alert_pct: float = 5.0
+    linked_holders_pct: float | None = None       # % of supply held by top holders sharing a funder
+    linked_groups: int | None = None
+    fresh_top_holders: int | None = None          # top-10 holders whose first activity is recent
+    fresh_hours: float = 48
+    unnatural_volume: bool | None = None
+    unnatural_reasons: list | None = None
+    fees_sol: float | None = None
+    volume_to_mc: float | None = None
 
 
 @dataclass
@@ -142,6 +154,52 @@ def assess(i: RiskInputs) -> RiskResult:
         _chk(c, "sellable", "warn", 1, f"sell price impact {i.sell_price_impact:.0%}")
     else:
         _chk(c, "sellable", "ok", 0, "sell route available")
+
+    # ---- phase 2 checks. Missing data here is shown as "unknown" but adds no point: the
+    # top-10 check above already charges for unknown holder data.
+    if i.max_holder_pct is None:
+        _chk(c, "single_holder", "unknown", 0, "holder distribution not available")
+    elif i.max_holder_pct > 2 * i.holder_alert_pct:
+        _chk(c, "single_holder", "fail", 3, f"one wallet holds {i.max_holder_pct:.1f}% of supply "
+                                             f"({(i.max_holder_wallet or '')[:8]}…)", True)
+    elif i.max_holder_pct > i.holder_alert_pct:
+        _chk(c, "single_holder", "fail", 2, f"one wallet holds {i.max_holder_pct:.1f}% of supply "
+                                             f"({(i.max_holder_wallet or '')[:8]}…)")
+    else:
+        _chk(c, "single_holder", "ok", 0, f"largest holder {i.max_holder_pct:.1f}%")
+
+    if i.linked_holders_pct is None:
+        _chk(c, "linked_holders", "unknown", 0, "funders of top holders not known")
+    elif i.linked_holders_pct >= 10:
+        # one owner behind several wallets holding >= 10 % is as bad as one wallet holding > 10 %
+        _chk(c, "linked_holders", "fail", 3, f"{i.linked_groups} group(s) of top holders with a common funder hold "
+                                               f"{i.linked_holders_pct:.1f}%", True)
+    elif (i.linked_groups or 0) > 0:
+        _chk(c, "linked_holders", "warn", 1, f"{i.linked_groups} group(s) of linked top holders "
+                                               f"({i.linked_holders_pct:.1f}%)")
+    else:
+        _chk(c, "linked_holders", "ok", 0, "no top holders sharing a funder")
+
+    if i.fresh_top_holders is None:
+        _chk(c, "fresh_wallets", "unknown", 0, "age of top holders not checked")
+    elif i.fresh_top_holders >= 3:
+        _chk(c, "fresh_wallets", "fail", 2, f"{i.fresh_top_holders} top holders are wallets created < {i.fresh_hours:g} h ago")
+    elif i.fresh_top_holders >= 1:
+        _chk(c, "fresh_wallets", "warn", 1, f"{i.fresh_top_holders} top holder(s) created < {i.fresh_hours:g} h ago")
+    else:
+        _chk(c, "fresh_wallets", "ok", 0, "no newly created wallets among top holders")
+
+    if i.unnatural_volume is None:
+        _chk(c, "unnatural_volume", "unknown", 0, "flow data not available")
+    elif i.unnatural_volume:
+        _chk(c, "unnatural_volume", "warn", 1, "; ".join(i.unnatural_reasons or []) + " (heuristic)")
+    else:
+        _chk(c, "unnatural_volume", "ok", 0, "; ".join(i.unnatural_reasons or []) or "no bot-volume pattern")
+
+    if i.fees_sol is not None:
+        _chk(c, "fees_generated", "info", 0, f"{i.fees_sol:.2f} SOL trading fees generated"
+             + (f", volume = {i.volume_to_mc:.1f}x market cap" if i.volume_to_mc is not None else "")
+             + " (reference only, not scored)")
 
     pts = sum(x["points"] for x in c)
     critical = any(x["critical"] and x["status"] == "fail" for x in c)

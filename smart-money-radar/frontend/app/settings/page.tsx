@@ -14,6 +14,8 @@ const GROUPS: { title: string; fields: F[] }[] = [
     { k: "preferred_positions_max", label: "Số kèo ưu tiên — tối đa", type: "number" },
     { k: "min_closed_positions_official", label: "Số vị thế đóng tối thiểu để vào Top chính thức", type: "number" },
     { k: "signal_min_wallet_score", label: "Điểm tối thiểu của ví được tính vào tín hiệu", type: "number" },
+    { k: "holder_alert_pct", label: "Cảnh báo khi một ví nắm trên (% supply)", type: "number" },
+    { k: "fresh_wallet_hours", label: "Ví mới tạo: hoạt động đầu tiên trong vòng (giờ)", type: "number" },
   ] },
   { title: "Điều kiện cảnh báo (cùng mua)", fields: [
     { k: "signal_window_minutes", label: "Cửa sổ thời gian (phút)", type: "number" },

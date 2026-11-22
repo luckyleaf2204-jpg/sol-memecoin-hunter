@@ -160,3 +160,23 @@ Kết quả bảng kiểm trên dữ liệu thật (kỳ 30 ngày, các ví đã
 | `499jWrZj…`, `8UGcQnU7…`, `E4BMFSG1…` | 54–55 | 42–50% | −2,4 … +21,3 SOL | < 42 | Win Rate < 65% (nhóm bot bundle) |
 
 Chưa ví nào qua đủ bảng kiểm ⇒ Top 10 chính thức đang trống — đúng theo yêu cầu "không xếp ví thiếu năng lực/thiếu dữ liệu".
+
+## 10. Bổ sung Giai đoạn 2 (holder, ví mới, ví liên kết, volume, phí)
+
+| Tính năng | Kiểm thử |
+|---|---|
+| Ước tính holder từ dòng lệnh, loại curve/pool | `test_holder_estimate_nets_buys_and_sells_and_excludes_pool`; integration trên token thật `2iDdpR…pump` (dev `5XCbWZ…` là holder lớn nhất 5–15%) |
+| Holder liên kết qua nguồn vốn, bỏ qua sàn | `test_linked_groups_by_common_funder_and_exchange_ignored`, `test_holder_funding_another_top_holder_is_linked` |
+| Volume không tự nhiên | `test_bot_volume_pattern_is_flagged` (mẫu bot bị gắn cờ, mẫu tự nhiên không) |
+| 4 kiểm tra rủi ro mới, dữ liệu thiếu không cộng điểm | `test_new_risk_checks` |
+
+Chạy trên token thật được stream theo dõi từ lúc tạo (sau ~6 phút: 10 783 dòng ví–token, 639 token, 43 token đủ điều kiện ước tính):
+
+| Token | Phát hiện | Mức |
+|---|---|---|
+| `4DCnbKwbjTaTWfWZyePAh5FYXhTduJChFQeUYsBspump` | một ví nắm 11,2%; 4 ví mua trong slot tạo token (14,9%) | HIGH |
+| `Ga3ZC7Zx6bUqeheWW8vYruMDXYubqAtWQrzd8C7cpump` | 5/10 top holder là ví < 48 giờ; 2 nhóm cùng nguồn vốn (7,9%), các ví mới cùng mua 0,99 SOL | HIGH |
+| `9w7Wy3XUfmy8g6vH45eR7dMXVgVk3CuMjqG5S9z1pump` | một ví nắm 8,9%; 5 ví mới; 86% volume từ ví đã bán hết nhưng chưa đủ dấu hiệu "volume không tự nhiên" | HIGH |
+
+Nhận xét: ví mới tạo xuất hiện rất phổ biến trong top holder token Pump.fun mới, nên nhiều token bị xếp HIGH; ngưỡng có thể chỉnh trong Cài đặt
+(`fresh_wallet_hours`, `holder_alert_pct`). Giới hạn: không có Helius thì token không được theo dõi từ lúc tạo sẽ **không** được ước tính holder.

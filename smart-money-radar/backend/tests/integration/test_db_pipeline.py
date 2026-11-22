@@ -214,3 +214,29 @@ async def test_exit_alert_when_signal_wallets_sell(ctx):
     assert [(a["level"], a["reason"]) for a in alerts] == [("EXIT50", "exit")]
     assert "SMART MONEY EXIT" in alerts[0]["message"] and "50%" in alerts[0]["message"]
     assert sid
+
+
+async def test_holder_estimate_from_real_trades_of_a_token_seen_from_creation(ctx):
+    """Token 2iDdpR…pump: create + bundle buys + completing buys are in the fixtures."""
+    from radar.db import repo
+    from radar.decoder.tx import decode_transaction
+    from radar.services.analytics_runner import holder_snapshot
+    from radar.services.stream import FlowAggregator
+    mint = "2iDdpRNvUywMpcL6aKT75brjm9ehko4z9ss6DnE9pump"
+    agg = FlowAggregator()
+    for sig, tx in fixtures():
+        if tx["meta"]["err"] is None:
+            for t in decode_transaction(tx, sig).trades:
+                if t.mint == mint:
+                    agg.add(t)
+    async with ctx.pool.acquire() as conn:
+        await conn.execute("DELETE FROM token_wallet_flows WHERE mint = $1", mint)
+        await repo.upsert_flows(conn, agg.drain())
+        await conn.execute("UPDATE tokens SET stream_from_creation = true WHERE mint = $1", mint)
+    t = await ctx.pool.fetchrow("SELECT * FROM tokens WHERE mint = $1", mint)
+    hs = await holder_snapshot(ctx, t, 1_000_000_000.0)
+    assert hs["source"] == "trade_estimate" and hs["complete"]
+    top = hs["holders"][0]
+    assert top["wallet"] == "5XCbWZyQT3Hy3i6LUkD2yEoo3mduAEvsnEw3huEPJYwo"   # dev: 3.46 SOL first buy
+    assert 5 < top["pct"] < 15
+    assert hs["flow_metrics"]["buyers"] >= 6 and hs["flow_metrics"]["fees_sol"] > 0

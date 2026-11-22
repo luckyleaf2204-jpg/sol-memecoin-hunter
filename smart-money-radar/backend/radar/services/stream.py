@@ -57,7 +57,7 @@ class BarAggregator:
                                 "source": "onchain_trades", "open": price, "high": price, "low": price,
                                 "close": price, "high_confirmed": None, "volume_sol": 0.0, "buy_sol": 0.0,
                                 "sell_sol": 0.0, "trades": 0, "liquidity_sol": t.liquidity_sol,
-                                "mc_sol": t.market_cap_sol}
+                                "mc_sol": t.market_cap_sol, "fees_sol": 0.0}
         b["high"] = max(b["high"], price)
         b["low"] = min(b["low"], price)
         b["close"] = price
@@ -65,6 +65,7 @@ class BarAggregator:
             b["high_confirmed"] = price if b["high_confirmed"] is None else max(b["high_confirmed"], price)
         b["volume_sol"] += t.sol_amount
         b["buy_sol" if t.tx_type == "buy" else "sell_sol"] += t.sol_amount
+        b["fees_sol"] += t.fee_trading_sol
         b["trades"] += 1
         if t.liquidity_sol is not None:
             b["liquidity_sol"] = t.liquidity_sol
@@ -74,6 +75,35 @@ class BarAggregator:
     def drain(self) -> list[dict]:
         out = list(self.bars.values())
         self.bars.clear()
+        return out
+
+
+class FlowAggregator:
+    """Per (mint, wallet) totals of EVERY trade (also those below the storage threshold)."""
+
+    def __init__(self):
+        self.rows: dict[tuple[str, str], list] = {}
+
+    def add(self, t: TradeRecord) -> None:
+        k = (t.mint, t.wallet)
+        r = self.rows.get(k)
+        ts = dt.datetime.fromtimestamp(t.block_time, UTC)
+        if r is None:
+            r = self.rows[k] = [t.mint, t.wallet, 0, 0, 0.0, 0.0, 0.0, 0, 0, ts, ts, t.slot]
+        if t.tx_type == "buy":
+            r[2] += t.token_amount_raw
+            r[4] += t.sol_amount
+            r[7] += 1
+        else:
+            r[3] += t.token_amount_raw
+            r[5] += t.sol_amount
+            r[8] += 1
+        r[6] += t.fee_trading_sol
+        r[10] = max(r[10], ts)
+
+    def drain(self) -> list[tuple]:
+        out = [tuple(r) for r in self.rows.values()]
+        self.rows.clear()
         return out
 
 
@@ -89,6 +119,8 @@ class StreamService:
     def __init__(self, ctx: Ctx):
         self.ctx = ctx
         self.bars = BarAggregator()
+        self.flows = FlowAggregator()
+        self.reset_completeness = False
         self.market: dict[str, tuple] = {}
         self.pending_trades: list[TradeRecord] = []
         self.pending_creates: list[tuple] = []
@@ -173,6 +205,8 @@ class StreamService:
         for t in out["trades"]:
             self.stats["trades"] += 1
             self.bars.add(t)
+            if t.wallet not in PROTOCOL_TRADERS:
+                self.flows.add(t)
             prog = None
             if t.venue == "pump_curve":
                 rtok = t.extra.get("real_token_reserves")
@@ -200,12 +234,19 @@ class StreamService:
         completes, self.pending_completes = self.pending_completes, []
         migrations, self.pending_migrations = self.pending_migrations, []
         bars = self.bars.drain()
+        flows = self.flows.drain()
         market = list(self.market.values())
         self.market.clear()
         sol_usd = await self.ctx.sol_usd()
         async with self.ctx.pool.acquire() as conn:
+            if self.reset_completeness:
+                # trades were missed during a disconnect: no earlier token is complete any more
+                await conn.execute("UPDATE tokens SET stream_from_creation = false WHERE stream_from_creation")
+                self.reset_completeness = False
             for c, sig, slot in creates:
                 await repo.upsert_created_tokens(conn, [c], sig, slot)
+                await conn.execute("UPDATE tokens SET stream_from_creation = true WHERE mint = $1", c.mint)
+            await repo.upsert_flows(conn, flows)
             if completes:
                 await repo.mark_completes(conn, completes)
             for m, sig in migrations:
@@ -234,6 +275,7 @@ class StreamService:
                 await ws.send(json.dumps({"jsonrpc": "2.0", "id": i + 1, "method": "logsSubscribe",
                                           "params": [{"mentions": [prog]}, {"commitment": "confirmed"}]}))
             self.connected_endpoint = name
+            self.reset_completeness = True
             log.info("stream connected to %s", name)
             async for raw in ws:
                 msg = json.loads(raw)

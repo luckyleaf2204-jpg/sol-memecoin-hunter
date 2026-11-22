@@ -439,8 +439,36 @@ async def token_detail(mint: str):
     sigs = await c.pool.fetch("SELECT * FROM smart_money_signals WHERE mint = $1 ORDER BY detected_at DESC LIMIT 20", m)
     holders = await c.pool.fetch("""SELECT * FROM token_holders WHERE mint = $1 AND snapshot_at =
         (SELECT max(snapshot_at) FROM token_holders WHERE mint = $1) ORDER BY rank""", m)
+    from ..services.analytics_runner import holder_snapshot
+    supply = float(t["total_supply_raw"] or 1e15) / 10 ** (t["decimals"] or 6)
+    hs = await holder_snapshot(c, t, supply)
+    ages = {r["address"]: r for r in await c.pool.fetch(
+        "SELECT * FROM wallet_age WHERE address = ANY($1::text[])", [h["wallet"] for h in hs["holders"]])}
+    st = await c.settings.get()
+    import datetime as _dt
+    for h in hs["holders"]:
+        a = ages.get(h["wallet"])
+        h["is_creator"] = h["wallet"] == t["creator"]
+        h["over_limit"] = (h["pct"] or 0) > float(st["holder_alert_pct"])
+        h["funder"] = a["funder"] if a else None
+        h["first_activity_at"] = a["first_activity_at"] if a else None
+        h["age_known"] = bool(a and a["history_complete"])
+        h["fresh"] = bool(a and a["history_complete"] and a["first_activity_at"] and
+                          (_dt.datetime.now(UTC) - a["first_activity_at"]).total_seconds() < float(st["fresh_wallet_hours"]) * 3600)
+    funder_count: dict[str, int] = {}
+    for h in hs["holders"]:
+        if h["funder"]:
+            funder_count[h["funder"]] = funder_count.get(h["funder"], 0) + 1
+    for h in hs["holders"]:
+        h["linked"] = bool(h["funder"] and funder_count.get(h["funder"], 0) >= 2)
+    fees = await c.pool.fetchrow("""SELECT COALESCE(sum(fees_sol),0) AS fees, COALESCE(sum(volume_sol),0) AS vol
+        FROM token_prices WHERE mint = $1 AND source = 'onchain_trades'""", m)
     return j({"token": dict(t), "risk": dict(risk) if risk else None, "smart_trades": rows(trades), "bars": rows(bars),
               "signals": rows(sigs), "holders": rows(holders),
+              "holder_estimate": {"source": hs["source"], "complete": hs["complete"], "rows": hs["holders"][:20]},
+              "flow_metrics": hs["flow_metrics"],
+              "fees": {"fees_sol": fees["fees"], "volume_sol": fees["vol"],
+                       "volume_to_mc": (float(fees["vol"]) / float(t["last_mc_sol"])) if t["last_mc_sol"] else None},
               "links": {"pumpfun": f"https://pump.fun/coin/{m}", "dexscreener": f"https://dexscreener.com/solana/{m}",
                         "solscan": f"https://solscan.io/token/{m}"}})
 
