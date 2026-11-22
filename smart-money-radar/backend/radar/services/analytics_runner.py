@@ -203,6 +203,7 @@ async def rank_and_status(ctx: Ctx, s: dict[str, Any]) -> None:
         LEFT JOIN smart_money_scores sc ON sc.wallet = w.address AND sc.period_days = $1
         LEFT JOIN wallet_performance p ON p.wallet = w.address AND p.period_days = $1
         WHERE w.status IN ('candidate','tracked','smart')""", period)
+    watched = {r["address"] for r in await ctx.pool.fetch("SELECT address FROM watched_wallets WHERE confirmed")}
     updates = []
     for r in rows:
         if r["backfill_status"] in ("queued", "running", "none"):
@@ -219,6 +220,8 @@ async def rank_and_status(ctx: Ctx, s: dict[str, Any]) -> None:
             new = "tracked"
         else:
             new = "observed"
+        if new == "observed" and r["address"] in watched:
+            new = "tracked"          # watched (KOL) wallets are never dropped from tracking
         if new != r["status"]:
             updates.append((r["address"], new))
     if updates:
@@ -475,6 +478,12 @@ async def run_cycle(ctx: Ctx, full: bool) -> dict:
     if wallets:
         await rank_and_status(ctx, s)
         await ctx.publish("rankings_updated", {"wallets": len(wallets)})
+    if full:
+        try:
+            from .kol import suggest_side_wallets
+            await suggest_side_wallets(ctx)
+        except Exception:
+            log.exception("side-wallet suggestions failed")
     return {"wallets": len(wallets)}
 
 

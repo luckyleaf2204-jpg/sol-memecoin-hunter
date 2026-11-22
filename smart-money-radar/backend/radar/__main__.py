@@ -45,7 +45,32 @@ async def _run_role(role: str) -> None:
 async def _migrate() -> None:
     from .context import create_ctx
     ctx = await create_ctx("migrate", run_migrations=True, pool_size=2)
-    await ctx.close()
+    try:
+        # first install: load the bundled list of public KOL wallets (only while the watchlist is empty)
+        if not await ctx.pool.fetchval("SELECT 1 FROM watched_wallets LIMIT 1"):
+            print("kol seed:", await _kol_import(ctx, str(KOL_SEED)))
+    finally:
+        await ctx.close()
+
+
+KOL_SEED = __import__("pathlib").Path(__file__).parent / "data" / "kol_seed.txt"
+
+
+async def _kol_import(ctx, path: str) -> dict:
+    from .services.kol import add_watched, parse_lines
+    with open(path, encoding="utf-8") as f:
+        entries, errors = parse_lines(f.read())
+    return {"added": await add_watched(ctx, entries), "errors": errors}
+
+
+async def _kol_import_cmd(paths: list[str]) -> None:
+    from .context import create_ctx
+    ctx = await create_ctx("kol-import", run_migrations=True, pool_size=2)
+    try:
+        for p in paths or [str(KOL_SEED)]:
+            print(p, await _kol_import(ctx, p))
+    finally:
+        await ctx.close()
 
 
 async def _seed(mints: list[str]) -> None:
@@ -161,6 +186,8 @@ def main(argv: list[str] | None = None) -> None:
         asyncio.run(_run_role(a.command))
     elif a.command == "seed":
         asyncio.run(_seed(a.args))
+    elif a.command == "kol-import":
+        asyncio.run(_kol_import_cmd(a.args))
     elif a.command == "add-wallet":
         asyncio.run(_add_wallets(a.args))
     elif a.command == "redecode":

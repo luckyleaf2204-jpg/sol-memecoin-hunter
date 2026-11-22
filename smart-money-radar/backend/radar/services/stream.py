@@ -134,6 +134,7 @@ class StreamService:
         self.unknown_pools: set[str] = set()
         self.creation_slot: dict[str, int] = {}
         self.stats = defaultdict(int)
+        self.watched: set[str] = set()
         self.last_msg_at = 0.0
         self.connected_endpoint: str | None = None
         self.gaps: list[dict] = []
@@ -149,6 +150,10 @@ class StreamService:
         # candidates are verified by their own backfill (same transactions): verifying them here
         # too would spend the RPC budget twice
         self.verify_set = {r["address"] for r in rows if r["status"] in ("tracked", "smart")}
+        self.watched = {r["address"] for r in await self.ctx.pool.fetch(
+            "SELECT address FROM watched_wallets WHERE confirmed")}
+        self.tracked |= self.watched
+        self.verify_set |= self.watched
         s = await self.ctx.settings.get()
         self.excluded = set(s.get("excluded_wallets") or [])
         self.store_min = float(s["stream_store_min_sol"])
@@ -263,7 +268,8 @@ class StreamService:
                 await self.ctx.redis.xadd(S_SMART_TRADES, {"p": json.dumps({
                     "signature": t.signature, "event_key": t.event_key, "wallet": t.wallet, "mint": t.mint,
                     "tx_type": t.tx_type, "sol": t.sol_amount, "ts": t.block_time, "verification": t.verification_status,
-                    "smart": t.wallet in self.smart})}, maxlen=100_000, approximate=True)
+                    "smart": t.wallet in self.smart, "watched": t.wallet in self.watched})},
+                    maxlen=100_000, approximate=True)
         if len(self.creation_slot) > 50_000:
             self.creation_slot = dict(list(self.creation_slot.items())[-20_000:])
 

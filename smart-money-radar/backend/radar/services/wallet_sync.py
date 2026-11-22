@@ -59,7 +59,9 @@ async def sync_wallet(ctx: Ctx, wallet: str, mode: str, pools: PoolCache, tracke
         mode = "backfill"
     now = int(time.time())
     cutoff = now - int(s["backfill_days"]) * 86400
-    if mode == "backfill" and s.get("skip_high_frequency_wallets", True) and w["discovery_source"] != "manual":
+    watched = await ctx.pool.fetchval("SELECT 1 FROM watched_wallets WHERE address = $1 AND confirmed", wallet)
+    if mode == "backfill" and s.get("skip_high_frequency_wallets", True) and not watched \
+            and w["discovery_source"] not in ("manual", "watchlist"):
         # one cheap call: 1000 newest signatures spanning < 1 day means >= 1000 tx/day (bot-like)
         probe = await ctx.rpc.get_signatures_for_address(wallet, limit=1000)
         if len(probe) == 1000 and probe[-1].get("blockTime") and \
@@ -172,7 +174,7 @@ async def scheduler(ctx: Ctx) -> None:
                 WHERE status IN ('candidate','tracked','smart') AND NOT is_excluded
                   AND (backfill_status IN ('queued','none','failed')
                        OR last_synced_at IS NULL OR last_synced_at < now() - make_interval(mins => $1::int))
-                ORDER BY (status = 'smart') DESC, (discovery_source = 'manual') DESC,
+                ORDER BY (status = 'smart') DESC, (discovery_source IN ('manual', 'watchlist')) DESC,
                          (discovery_source = 'patient_winner' AND backfill_status = 'queued') DESC,
                          COALESCE(sc.score, 0) DESC, (discovery_source IN ('early_buyer','seed')) DESC,
                          COALESCE((discovery_detail->>'tokens_7d')::int, jsonb_array_length(

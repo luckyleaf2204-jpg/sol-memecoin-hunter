@@ -39,6 +39,11 @@ DEFAULTS: dict[str, Any] = {
     "copy_cost_pct": 0.03,               # follower round-trip fees + slippage (3 %)
     "min_copy_win_rate": 0.6,
     "min_copy_positions": 5,             # positions with price data needed to judge copyability
+    # watched wallets (KOL / callers)
+    "kol_alert_enabled": True,           # alert the first buy of every watched wallet in a token
+    "kol_alert_min_sol": 0.3,
+    "kol_alert_max_age_seconds": 300,    # never alert trades older than this (history, re-checks)
+    "kol_exit_alert_enabled": True,      # alert when it has sold >= 50 % / 90 % of that token
     # co-buy signal
     "signal_window_minutes": 5,
     "signal_min_position_sol": 2.0,
@@ -118,6 +123,10 @@ SPEC: dict[str, Spec] = {
     "copy_cost_pct": Spec((int, float), 0, 0.5),
     "min_copy_win_rate": Spec((int, float), 0, 1),
     "min_copy_positions": Spec(int, 1, 1000),
+    "kol_alert_enabled": Spec(bool),
+    "kol_alert_min_sol": Spec((int, float), 0, 1000),
+    "kol_alert_max_age_seconds": Spec((int, float), 10, 3600),
+    "kol_exit_alert_enabled": Spec(bool),
     "signal_window_minutes": Spec((int, float), 0.5, 120),
     "signal_min_position_sol": Spec((int, float), 0, 1000),
     "signal_watch_min_wallets": Spec(int, 2, 100),

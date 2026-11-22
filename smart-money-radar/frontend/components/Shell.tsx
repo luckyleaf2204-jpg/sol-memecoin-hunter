@@ -5,11 +5,12 @@ import { ReactNode, useEffect, useState } from "react";
 import { api, useApi } from "@/lib/api";
 
 const NAV = [
-  { href: "/", label: "Tổng quan", icon: "◎" },
-  { href: "/wallets", label: "Top Wallets", icon: "★" },
-  { href: "/radar", label: "Token Radar", icon: "◉" },
-  { href: "/alerts", label: "Cảnh báo", icon: "!" },
-  { href: "/settings", label: "Cài đặt", icon: "⚙" },
+  { href: "/", label: "Tổng quan", short: "Tổng quan", icon: "◎" },
+  { href: "/wallets", label: "Top Wallets", short: "Top ví", icon: "★" },
+  { href: "/kol", label: "Ví KOL", short: "Ví KOL", icon: "♛" },
+  { href: "/radar", label: "Token Radar", short: "Radar", icon: "◉" },
+  { href: "/alerts", label: "Cảnh báo", short: "Cảnh báo", icon: "!" },
+  { href: "/settings", label: "Cài đặt", short: "Cài đặt", icon: "⚙" },
 ];
 
 function useTheme() {
@@ -73,12 +74,12 @@ export default function Shell({ children }: { children: ReactNode }) {
 
       <main className="mx-auto w-full max-w-7xl flex-1 px-3 pb-28 pt-3 md:px-6 md:pb-10 md:pt-6">{children}</main>
 
-      <nav className="fixed inset-x-0 bottom-0 z-30 grid grid-cols-5 border-t border-slate-200 bg-white/95 pb-[env(safe-area-inset-bottom)] backdrop-blur md:hidden dark:border-slate-800 dark:bg-slate-900/95">
+      <nav className="fixed inset-x-0 bottom-0 z-30 grid grid-cols-6 border-t border-slate-200 bg-white/95 pb-[env(safe-area-inset-bottom)] backdrop-blur md:hidden dark:border-slate-800 dark:bg-slate-900/95">
         {NAV.map((n) => (
           <Link key={n.href} href={n.href} className={`relative flex flex-col items-center py-2 text-[10px] ${active(n.href) ? "text-brand dark:text-teal-300" : "text-slate-500"}`}>
             <span className="text-lg leading-5">{n.icon}</span>
-            {n.label}
-            {n.href === "/alerts" && badge > 0 && <span className="absolute right-4 top-1 rounded-full bg-rose-600 px-1 text-[9px] text-white">{badge}</span>}
+            <span className="whitespace-nowrap">{n.short}</span>
+            {n.href === "/alerts" && badge > 0 && <span className="absolute right-2 top-1 rounded-full bg-rose-600 px-1 text-[9px] text-white">{badge}</span>}
           </Link>
         ))}
       </nav>

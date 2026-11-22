@@ -25,6 +25,11 @@ const GROUPS: { title: string; fields: F[] }[] = [
     { k: "min_copy_positions", label: "Số vị thế có giá tối thiểu để đánh giá copy", type: "number" },
     { k: "copy_cost_pct", label: "Phí + trượt giá của bạn (cả mua và bán)", type: "number", pct: true },
   ] },
+  { title: "Ví KOL / người gọi kèo", fields: [
+    { k: "kol_alert_enabled", label: "Cảnh báo ngay khi ví KOL mua token mới", type: "bool" },
+    { k: "kol_alert_min_sol", label: "Chỉ báo lệnh mua từ (SOL)", type: "number" },
+    { k: "kol_exit_alert_enabled", label: "Cảnh báo khi ví KOL bán ≥ 50% / ≥ 90%", type: "bool" },
+  ] },
   { title: "Điều kiện cảnh báo (cùng mua)", fields: [
     { k: "signal_window_minutes", label: "Cửa sổ thời gian (phút)", type: "number" },
     { k: "signal_min_position_sol", label: "Vốn tối thiểu mỗi vị thế (SOL)", type: "number" },

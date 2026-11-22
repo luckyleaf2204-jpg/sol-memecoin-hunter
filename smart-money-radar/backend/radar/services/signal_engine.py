@@ -20,7 +20,7 @@ from ..analytics.positions import build_positions, group_events
 from ..analytics.signals import LEVEL_RANK, SmartBuy, SmartSell, evaluate, exit_progress
 from ..context import S_SMART_TRADES, Ctx
 from ..db import repo
-from . import telegram
+from . import kol, telegram
 from .analytics_runner import risk_for_token
 
 log = logging.getLogger(__name__)
@@ -231,11 +231,17 @@ async def consumer(ctx: Ctx) -> None:
     last_refresh = time.time()
     pending: dict[str, float] = {}
     exits: dict[str, float] = {}
+    watched = await kol.watched_map(ctx)
     while True:
         msgs = await ctx.consume(S_SMART_TRADES, GROUP, count=200, block_ms=2000)
         ids = []
         for mid, p in msgs:
             ids.append(mid)
+            if p.get("wallet") in watched:
+                try:   # watched (KOL) wallets: alert at once, before any co-buy logic
+                    await kol.handle_trade(ctx, p, s, watched, _deliver)
+                except Exception:
+                    log.exception("watched-wallet alert failed")
             if p.get("wallet") in profiles:
                 pending[p["mint"]] = time.time()
                 if p.get("tx_type") == "sell":
@@ -244,6 +250,7 @@ async def consumer(ctx: Ctx) -> None:
         if time.time() - last_refresh > 30:
             s = await ctx.settings.get()
             profiles = await smart_profiles(ctx, int(s["analysis_period_days"]))
+            watched = await kol.watched_map(ctx)
             last_refresh = time.time()
         for mint in list(pending):
             pending.pop(mint, None)

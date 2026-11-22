@@ -352,6 +352,69 @@ async def add_wallet(body: AddWallet):
     return {"ok": True, "address": a}
 
 
+# ---------------------------------------------------------------- watched wallets (KOL)
+class WatchAdd(BaseModel):
+    lines: str
+    kind: str = "kol"
+
+
+@app.get("/api/watchlist", dependencies=[Auth])
+async def watchlist():
+    rs = await ctx().pool.fetch("""SELECT ww.*, w.backfill_status, p.win_rate, p.closed_qualifying, p.realized_pnl_sol,
+            (p.metrics->'copy'->'60'->>'win_rate')::float AS copy_win_rate, p.metrics->'behavior'->>'label' AS behavior,
+            (SELECT max(block_time) FROM wallet_transactions t WHERE t.wallet = ww.address AND t.tx_type = 'buy') AS last_buy_at,
+            (SELECT count(DISTINCT mint) FROM wallet_transactions t WHERE t.wallet = ww.address AND t.tx_type = 'buy'
+                AND t.block_time > now() - interval '7 days') AS tokens_7d
+        FROM watched_wallets ww LEFT JOIN wallets w ON w.address = ww.address
+        LEFT JOIN wallet_performance p ON p.wallet = ww.address AND p.period_days = 30
+        ORDER BY ww.confirmed DESC, ww.kind, ww.label""")
+    return {"rows": rows(rs)}
+
+
+@app.post("/api/watchlist", dependencies=[Auth])
+async def watchlist_add(body: WatchAdd):
+    from ..services.kol import add_watched, parse_lines
+    if body.kind not in ("kol", "custom"):
+        raise HTTPException(400, "kind must be kol or custom")
+    entries, errors = parse_lines(body.lines[:200_000])
+    if len(entries) > 2000:
+        raise HTTPException(400, "at most 2000 wallets per request")
+    n = await add_watched(ctx(), entries, body.kind)
+    for e in entries[:200]:
+        await ctx().enqueue(Q_WALLET_SYNC, {"wallet": e["address"], "mode": "backfill"}, dedupe_key=e["address"])
+    return {"added": n, "errors": errors}
+
+
+@app.post("/api/watchlist/{address}/confirm", dependencies=[Auth])
+async def watchlist_confirm(address: str):
+    a = _addr(address)
+    async with ctx().pool.acquire() as conn:
+        n = await conn.execute("UPDATE watched_wallets SET confirmed = true WHERE address = $1", a)
+        if n.endswith(" 0"):
+            raise HTTPException(404, "not in watchlist")
+        from ..services.kol import _track
+        await _track(conn, a)
+    return {"ok": True}
+
+
+@app.delete("/api/watchlist/{address}", dependencies=[Auth])
+async def watchlist_delete(address: str):
+    a = _addr(address)
+    await ctx().pool.execute("DELETE FROM watched_wallets WHERE address = $1", a)
+    return {"ok": True}
+
+
+@app.get("/api/watchlist/feed", dependencies=[Auth])
+async def watchlist_feed(limit: int = 100):
+    rs = await ctx().pool.fetch("""SELECT t.signature, t.wallet, t.mint, t.tx_type, t.sol_amount, t.block_time,
+            t.market_cap_sol, t.verification_status, ww.label, ww.x_handle, ww.kind, k.name, k.symbol, k.created_at
+        FROM wallet_transactions t JOIN watched_wallets ww ON ww.address = t.wallet AND ww.confirmed
+        LEFT JOIN tokens k ON k.mint = t.mint
+        WHERE t.tx_type IN ('buy','sell') AND t.block_time > now() - interval '3 days'
+        ORDER BY t.block_time DESC LIMIT $1""", max(1, min(limit, 500)))
+    return {"rows": rows(rs)}
+
+
 class Exclude(BaseModel):
     excluded: bool
     reason: str | None = None
