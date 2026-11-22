@@ -1,0 +1,75 @@
+### 2026-11-22 15:36:25 UTC backend pytest (unit + integration with PostgreSQL/Redis)
+..........sss........................................................... [ 74%]
+.........................                                                [100%]
+94 passed, 3 skipped in 2.84s
+
+### 2026-11-22 15:36:29 UTC frontend: npm run typecheck
+> tsc --noEmit
+
+exit=0
+
+### 2026-11-22 15:36:30 UTC frontend: npm run build
+ ✓ Compiled successfully
+Route (app)                              Size     First Load JS
+┌ ○ /                                    13.1 kB         216 kB
+├ ○ /_not-found                          876 B          88.3 kB
+├ ○ /alerts                              5.04 kB         100 kB
+├ ○ /backtest                            5.19 kB         104 kB
+├ ○ /health                              3.91 kB         103 kB
+├ ○ /kol                                 6.16 kB         101 kB
+├ ○ /live                                2.96 kB         102 kB
+├ ○ /login                               2.72 kB        90.1 kB
+├ ○ /radar                               6.15 kB         101 kB
+├ ○ /settings                            7.09 kB         102 kB
+├ ƒ /tokens/[mint]                       11.4 kB         206 kB
+├ ○ /wallets                             6.89 kB         106 kB
+└ ƒ /wallets/[address]                   10.3 kB         209 kB
+○  (Static)   prerendered as static content
+ƒ  (Dynamic)  server-rendered on demand
+
+### 2026-11-22 15:44:18 UTC API smoke test (local, through the API port)
+GET /api/health (public)             -> 200
+GET /api/overview without login -> 401 (expect 401)
+GET /api/flow without login -> 401 (expect 401)
+GET /api/trades/recent without login -> 401 (expect 401)
+GET /api/system/backfill without login -> 401 (expect 401)
+GET /api/wallets/top without login -> 401 (expect 401)
+GET /api/watchlist without login -> 401 (expect 401)
+POST /api/auth/login wrong password  -> 401 (expect 401)
+POST /api/auth/login right password  -> 200
+  cookie flags: set-cookie: smr_session=<redacted>; HttpOnly; Max-Age=1209600; Path=/; SameSite=lax
+GET /api/overview                              -> 200 727B 0.566399s
+GET /api/flow?hours=24&scope=tracked           -> 200 2649B 0.999733s
+GET /api/flow?hours=24&scope=smart             -> 200 99B 0.028452s
+GET /api/trades/recent?scope=kol&limit=5       -> 200 3183B 0.092454s
+GET /api/radar?hours=24&scope=tracked&limit=5  -> 200 3787B 0.651881s
+GET /api/wallets/top?official=false&limit=5    -> 200 5948B 0.024246s
+GET /api/wallets/candidates                    -> 200 46631B 0.014437s
+GET /api/watchlist                             -> 200 7818B 0.559448s
+GET /api/watchlist/feed                        -> 200 47352B 0.383854s
+GET /api/system/status                         -> 200 14846B 0.271195s
+GET /api/system/backfill                       -> 200 5614B 0.011266s
+GET /api/backtest/runs                         -> 200 779B 0.003973s
+GET /api/alerts                                -> 200 12087B 0.010606s
+GET /api/settings                              -> 200 4000B 0.001660s
+trading_enabled in /api/settings: False
+PUT trading_enabled=true -> 422 (expect 400: cannot be enabled)
+secret values returned by /api/settings? 0 matches (expect 0)
+POST /api/auth/logout -> 200; then GET /api/overview -> 401 (expect 401)
+
+### 2026-11-22 15:44:23 UTC secrets scan
+frontend build output containing HELIUS / TELEGRAM / SESSION_SECRET / DATABASE_URL: 3 files (expect 0)
+tracked .env files in git: 0 (expect 0)
+api-key=/bot-token patterns in git history diff of this sprint: 0 (expect 0)
+  -> the 3 files contain only the variable NAMES in help text (e.g. "Thêm HELIUS_API_KEY để đọc holder"); files containing a secret VALUE (test password / session secret): 0
+  -> PUT trading_enabled=true answered 422 (request rejected by validation; trading stays disabled)
+
+### 2026-11-22 15:44:39 UTC docker compose config validation
+env file /home/user/sol-memecoin-hunter/smart-money-radar/.env not found: stat /home/user/sol-memecoin-hunter/smart-money-radar/.env: no such file or directory
+env file /home/user/sol-memecoin-hunter/smart-money-radar/.env not found: stat /home/user/sol-memecoin-hunter/smart-money-radar/.env: no such file or directory
+postgres redis migrate api frontend caddy cloudflared worker backup 
+docker daemon: 
+(re-run with a temporary dummy .env, deleted afterwards)
+docker-compose.yml: valid
+docker-compose.windows.yml: valid
+docker daemon in this sandbox after the machine restart: Cannot connect to the Docker daemon at unix:///var/run/docker.sock. Is the docker daemon running?
