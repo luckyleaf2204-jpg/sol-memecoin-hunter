@@ -107,8 +107,11 @@ class Position:
 
     @property
     def net_entry_cost(self) -> float:
-        """Entry cost of the tokens that were sold or are still held (excludes cost moved out)."""
-        return self.buy_sol - self.transferred_out_cost
+        """Entry cost of the tokens that were sold or are still held (excludes cost moved out).
+        Below one lamport it is float residue of a position whose tokens were all transferred out
+        (e.g. 2.951111108 - 2.951111108 = 4e-16); treated as zero so ROI is "n/a", not 1e14."""
+        c = self.buy_sol - self.transferred_out_cost
+        return 0.0 if abs(c) < 1e-9 else c
 
     @property
     def realized_pnl_sol(self) -> float:

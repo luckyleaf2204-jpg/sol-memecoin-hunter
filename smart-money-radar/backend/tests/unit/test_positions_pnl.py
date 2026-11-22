@@ -72,6 +72,16 @@ def test_transfer_out_moves_cost_instead_of_realising_a_loss():
     assert "transfer_out" in p.flags
 
 
+def test_all_tokens_transferred_out_leaves_no_entry_cost_and_no_roi():
+    # 14 equal transfers leave 8.9e-16 SOL of float residue in the entry cost; before the guard
+    # ROI became -fees/residue = -1e11 and overflowed wallet_positions.roi (seen live 22/11/2026)
+    evs = [ev(0, "buy", 2.951111108, 1e7, 0.0001)] + [ev(i + 1, "transfer_out", 0, 1e7 / 14) for i in range(14)]
+    p = build_positions(W, M, evs)[0][0]
+    assert p.status == "closed"
+    assert p.net_entry_cost == 0.0
+    assert p.roi is None and p.realized_multiple is None
+
+
 def test_sell_without_known_buy_is_an_orphan_not_a_profit():
     ps, orph = build_positions(W, M, [ev(1, "sell", 5.0, 1000)])
     assert ps == [] and len(orph) == 1

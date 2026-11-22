@@ -73,7 +73,11 @@ function SystemBox() {
   const wsAge = ws?.updated_at ? (Date.now() - new Date(ws.updated_at).getTime()) / 1000 : undefined;
   const state = (age: number | undefined) => (age == null ? "Unknown" : age < 180 ? "Online" : age < 900 ? "Delayed" : "Error");
   // Windows / single-process mode reports one heartbeat "all" for every role
-  const rows: { label: string; s: string }[] = beats.has("all")
+  // the mode whose heartbeat is newest is the one running; a leftover "all" row from an earlier
+  // single-process run must not show as an error once the per-role containers are up (and vice versa)
+  const roleAges = WORKERS.map(([k]) => beats.get(k)).filter((x): x is number => x != null);
+  const singleMode = beats.has("all") && (!roleAges.length || (beats.get("all") as number) < Math.min(...roleAges));
+  const rows: { label: string; s: string }[] = singleMode
     ? [{ label: "Workers (1 tiến trình)", s: state(beats.get("all")) }, { label: "Stream on-chain", s: !ws ? "Unknown" : ws.status === "ok" ? state(wsAge) : (wsAge ?? 1e9) > 900 ? "Error" : "Delayed" }]
     : [...WORKERS.map(([k, label]) => ({ label, s: state(beats.get(k)) }))];
   rows.push({ label: "API · Database", s: st.error ? "Error" : st.data ? "Online" : "Unknown" });

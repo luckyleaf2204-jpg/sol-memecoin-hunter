@@ -115,6 +115,13 @@ def decode_pool_account(data_b64: str) -> tuple[str, str] | None:
     return b58encode(d[43:75]), b58encode(d[75:107])
 
 
+STREAM_IDLE_SECONDS = 45
+
+
+class StreamIdle(Exception):
+    """Websocket open but no message within STREAM_IDLE_SECONDS."""
+
+
 class StreamService:
     def __init__(self, ctx: Ctx):
         self.ctx = ctx
@@ -297,7 +304,18 @@ class StreamService:
             self.connected_endpoint = name
             self.reset_completeness = True
             log.info("stream connected to %s", name)
-            async for raw in ws:
+            connected_at = time.time()
+            while True:
+                # watchdog: pump.fun logs arrive several times a second; a socket that is open but
+                # silent (seen on publicnode: 14 min without a message, no close frame) is dropped
+                # and the next endpoint is tried
+                try:
+                    raw = await asyncio.wait_for(ws.recv(), timeout=STREAM_IDLE_SECONDS)
+                except asyncio.TimeoutError:
+                    self.stats["idle_reconnects"] += 1
+                    log.warning("stream %s silent for %ss after %ss connected; reconnecting",
+                                name, STREAM_IDLE_SECONDS, round(time.time() - connected_at))
+                    raise StreamIdle(name) from None
                 msg = json.loads(raw)
                 params = msg.get("params")
                 if not params:

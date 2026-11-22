@@ -8,7 +8,7 @@
               mostly waiting for the wallet's own second trade, not processing delay
   wallet sync age of the last incremental sync of tracked wallets  (last_synced_at)
   backfill    wallets finished per hour in the window               (backfill_to)
-  prices      age of the newest on-chain price bar, SOL/USD         (token_prices, api_sync_status)
+  prices      age of the newest on-chain price bar, SOL/USD minute  (token_prices, sol_usd_prices)
   rpc         per-endpoint request count, errors, 429s, mean latency (api_sync_status rpc_*)
 
 The stream endpoint name (e.g. "helius" or "solana_public") is printed so a report says which
@@ -68,11 +68,13 @@ async def run(minutes: int = 30, out: str | None = None) -> dict:
         r["backfill_queue"] = await p.fetchval("SELECT count(*) FROM wallets WHERE backfill_status IN ('queued','running')")
         bar = await p.fetchval("SELECT extract(epoch FROM now() - max(bucket_start)) FROM token_prices WHERE source = 'onchain_trades'")
         r["price_newest_onchain_bar_age_s"] = round(float(bar), 1) if bar is not None else None
-        jup = await p.fetchval("SELECT extract(epoch FROM now() - updated_at) FROM api_sync_status WHERE source = 'jupiter'")
+        # newest stored SOL/USD minute (api_sync_status has one row per job, an old 'all' row from a
+        # single-process run would otherwise be read as a stale price)
+        jup = await p.fetchval("SELECT extract(epoch FROM now() - max(ts)) FROM sol_usd_prices")
         r["sol_usd_age_s"] = round(float(jup), 1) if jup is not None else None
-        r["rpc"] = [{"source": x["source"], "ok": x["requests_ok"], "failed": x["requests_failed"],
+        r["rpc"] = [{"source": x["source"], "job": x["job"], "ok": x["requests_ok"], "failed": x["requests_failed"],
                      "rate_limited": x["rate_limited"], "mean_latency_ms": round(float((x["details"] or {}).get("latency_ms") or 0), 1)}
-                    for x in await p.fetch("SELECT * FROM api_sync_status WHERE source LIKE 'rpc_%' ORDER BY source")]
+                    for x in await p.fetch("SELECT * FROM api_sync_status WHERE source LIKE 'rpc_%' AND updated_at > now() - interval '1 hour' ORDER BY source, job")]
         if out:
             with open(out, "w", encoding="utf-8") as f:
                 json.dump(r, f, indent=1, default=str)

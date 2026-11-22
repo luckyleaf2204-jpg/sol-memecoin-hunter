@@ -39,11 +39,16 @@ export default function Health() {
                 <thead><tr><th>Thành phần</th><th>Trạng thái</th><th>Lần cuối</th><th>Chi tiết</th></tr></thead>
                 <tbody>
                   {(s.workers || []).map((w: any) => {
-                    const age = (Date.now() - new Date(w.last_beat).getTime()) / 1000;
+                    const ageOf = (x: any) => (Date.now() - new Date(x.last_beat).getTime()) / 1000;
+                    const age = ageOf(w);
+                    // a stale row of the other run mode (single-process "all" vs one container per role)
+                    const others = (s.workers || []).filter((x: any) => (w.worker === "all") !== (x.worker === "all"));
+                    const unused = age >= 180 && others.some((x: any) => ageOf(x) < age);
+                    const label = unused ? "Không dùng" : age < 180 ? "Online" : age < 900 ? "Delayed" : "Error";
                     return (
                       <tr key={"w" + w.worker}>
                         <td className="font-semibold">Worker: {w.worker === "all" ? "all (mọi vai trò, 1 tiến trình)" : w.worker}</td>
-                        <td><span className={`t-pill ${age < 180 ? "t-buy" : age < 900 ? "t-warn" : "t-sell"}`}>{age < 180 ? "Online" : age < 900 ? "Delayed" : "Error"}</span></td>
+                        <td><span className={`t-pill ${unused ? "t-faint" : age < 180 ? "t-buy" : age < 900 ? "t-warn" : "t-sell"}`} title={unused ? "Nhịp cũ của chế độ chạy khác, hệ thống đang chạy theo chế độ còn lại" : undefined}>{label}</span></td>
                         <td className="t-muted">{ago(w.last_beat)}</td>
                         <td className="t-faint max-w-[340px] truncate text-[11px]">khởi động {ago(w.started_at)}</td>
                       </tr>

@@ -221,10 +221,25 @@ async def worker(ctx: Ctx, concurrency: int = 2) -> None:
     await pools.load(ctx.pool)
     sem = asyncio.Semaphore(concurrency)
     counts = {"done": 0, "error": 0}
+    in_flight: dict[str, float] = {}   # wallet -> start time, shown in the heartbeat
+
+    async def beat() -> None:
+        # one backfill of a 3000-signature wallet takes ~10 min on public RPC; beat every minute so
+        # the container health check sees a live worker, and expose what it is working on (a stuck
+        # wallet shows as a growing running_s instead of a silent worker)
+        while True:
+            try:
+                info = dict(counts, in_flight=[{"wallet": w, "running_s": round(time.time() - t0)}
+                                               for w, t0 in in_flight.items()])
+                await repo.heartbeat(ctx.pool, ctx.worker, ctx.started_at, info)
+            except Exception:
+                log.exception("sync heartbeat failed")
+            await asyncio.sleep(60)
 
     async def handle(mid, p):
         async with sem:
             wallet = p["wallet"]
+            in_flight[wallet] = time.time()
             try:
                 tracked = {r["address"] for r in await ctx.pool.fetch(
                     "SELECT address FROM wallets WHERE status IN ('candidate','tracked','smart')")}
@@ -237,15 +252,16 @@ async def worker(ctx: Ctx, concurrency: int = 2) -> None:
                 await ctx.pool.execute("UPDATE wallets SET backfill_status = CASE WHEN backfill_status = 'running' "
                                        "THEN 'failed' ELSE backfill_status END, backfill_error = $2 WHERE address = $1",
                                        wallet, str(e)[:300])
+            in_flight.pop(wallet, None)
             await ctx.ack(Q_WALLET_SYNC, GROUP, [mid])
             await ctx.redis.delete(f"dd:{Q_WALLET_SYNC}:{wallet}")
 
+    beat_task = asyncio.create_task(beat())  # noqa: F841  (kept referenced so it is not collected)
     while True:
         msgs = await ctx.consume(Q_WALLET_SYNC, GROUP, count=concurrency)
         if msgs:
             await asyncio.gather(*(handle(mid, p) for mid, p in msgs))
             await pools.load(ctx.pool)
-        await repo.heartbeat(ctx.pool, ctx.worker, ctx.started_at, counts)
 
 
 async def main(ctx: Ctx) -> None:
