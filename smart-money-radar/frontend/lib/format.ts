@@ -72,3 +72,13 @@ export function short(a: string | null | undefined, n = 4): string {
   if (!a) return "—";
   return a.length <= 2 * n + 1 ? a : `${a.slice(0, n)}…${a.slice(-n)}`;
 }
+
+/** Compact number for KPI tiles: 414.274 -> "414,3K", 1.250.000 -> "1,25M" (vi-VN separators). */
+export function compact(x: number | null | undefined, digits = 1): string {
+  if (x === null || x === undefined || Number.isNaN(Number(x))) return "—";
+  const v = Number(x), a = Math.abs(v);
+  if (a >= 1e9) return `${num(v / 1e9, 2)}B`;
+  if (a >= 1e6) return `${num(v / 1e6, 2)}M`;
+  if (a >= 1e4) return `${num(v / 1e3, digits)}K`;
+  return num(v, a >= 100 ? 0 : digits);
+}

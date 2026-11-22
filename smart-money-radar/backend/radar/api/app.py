@@ -156,7 +156,11 @@ async def overview(period: int = 30):
     stream = await c.pool.fetchrow("SELECT status, details, updated_at FROM api_sync_status WHERE source='solana_ws'")
     obs = await c.pool.fetchrow("""SELECT count(*) AS trades, count(DISTINCT wallet) AS wallets FROM wallet_transactions
         WHERE block_time > now() - interval '24 hours'""")
-    return j({"wallets": dict(w), "official_ranked": official, "smart_buy_sol_24h": flow["buy"],
+    extra = await c.pool.fetchrow("""SELECT (SELECT count(*) FROM watched_wallets WHERE confirmed) AS kol_wallets,
+            (SELECT count(*) FROM alerts WHERE created_at > now() - interval '24 hours') AS alerts_24h,
+            (SELECT max(block_time) FROM wallet_transactions) AS last_trade_at,
+            (SELECT max(ingested_at) FROM wallet_transactions) AS last_ingested_at""")
+    return j({"wallets": dict(w), "official_ranked": official, **dict(extra), "smart_buy_sol_24h": flow["buy"],
               "smart_sell_sol_24h": flow["sell"], "smart_tokens_24h": flow["tokens"], "tokens_accumulating": accum,
               "unseen_alerts": unseen, "strongest_signals": rows(sigs), "stream": dict(stream) if stream else None,
               "observed_24h": dict(obs), "sol_usd": await c.sol_usd(), "trading_enabled": False})
@@ -435,12 +439,101 @@ async def exclude_wallet(address: str, body: Exclude):
 
 
 # ---------------------------------------------------------------- token radar
+def _scope_sql(scope: str, alias: str = "w") -> str:
+    """SQL condition selecting the wallet group of a scope (only fixed strings, never user text)."""
+    if scope == "tracked":
+        return (f"({alias}.status IN ('candidate','tracked','smart') OR EXISTS (SELECT 1 FROM watched_wallets ww "
+                f"WHERE ww.address = {alias}.address AND ww.confirmed))")
+    if scope == "kol":
+        return f"EXISTS (SELECT 1 FROM watched_wallets ww WHERE ww.address = {alias}.address AND ww.confirmed)"
+    if scope == "all":
+        return "TRUE"
+    return f"{alias}.status = 'smart'"
+
+
+@app.get("/api/flow", dependencies=[Auth])
+async def flow(hours: int = 24, scope: str = "smart"):
+    """Hourly buy / sell SOL of a wallet group (on-chain trades stored by the system)."""
+    hours = max(1, min(hours, 168))
+    rs = await ctx().pool.fetch(f"""SELECT date_trunc('hour', t.block_time) AS h,
+            COALESCE(sum(t.sol_amount) FILTER (WHERE t.tx_type = 'buy'), 0) AS buy,
+            COALESCE(sum(t.sol_amount) FILTER (WHERE t.tx_type = 'sell'), 0) AS sell,
+            count(*) AS trades, count(DISTINCT t.wallet) AS wallets
+        FROM wallet_transactions t JOIN wallets w ON w.address = t.wallet AND {_scope_sql(scope)}
+        WHERE t.block_time > now() - make_interval(hours => $1) AND t.tx_type IN ('buy','sell')
+        GROUP BY 1 ORDER BY 1""", hours)
+    tot = await ctx().pool.fetchrow(f"""SELECT count(DISTINCT t.mint) AS tokens, count(DISTINCT t.wallet) AS wallets
+        FROM wallet_transactions t JOIN wallets w ON w.address = t.wallet AND {_scope_sql(scope)}
+        WHERE t.block_time > now() - make_interval(hours => $1) AND t.tx_type IN ('buy','sell')""", hours)
+    buy = sum(float(r["buy"]) for r in rs)
+    sell = sum(float(r["sell"]) for r in rs)
+    return j({"hours": hours, "scope": scope, "buy_sol": buy, "sell_sol": sell, "tokens": tot["tokens"],
+              "wallets": tot["wallets"], "trades": sum(r["trades"] for r in rs), "points": rows(rs)})
+
+
+@app.get("/api/trades/recent", dependencies=[Auth])
+async def recent_trades(limit: int = 50, scope: str = "tracked", side: str | None = None, min_sol: float = 0.0,
+                        mint: str | None = None, wallet: str | None = None):
+    """Latest decoded pump.fun / PumpSwap trades stored by the system, newest first, with the
+    delay between the on-chain block time and the time the system stored it."""
+    args: list[Any] = [max(1, min(limit, 300)), float(min_sol)]
+    cond = ["t.tx_type IN ('buy','sell')", "t.sol_amount >= $2", "t.block_time > now() - interval '3 days'"]
+    if side in ("buy", "sell"):
+        args.append(side)
+        cond.append(f"t.tx_type = ${len(args)}")
+    if mint:
+        args.append(_addr(mint))
+        cond.append(f"t.mint = ${len(args)}")
+    if wallet:
+        args.append(_addr(wallet))
+        cond.append(f"t.wallet = ${len(args)}")
+    rs = await ctx().pool.fetch(f"""SELECT t.signature, t.wallet, t.mint, t.tx_type, t.sol_amount, t.token_amount,
+            t.effective_price_sol, t.market_cap_sol, t.block_time, t.ingested_at, t.source, t.venue,
+            t.verification_status, extract(epoch FROM t.ingested_at - t.block_time) AS delay_s,
+            w.status AS wallet_status, ww.label AS kol_label, k.name, k.symbol
+        FROM wallet_transactions t JOIN wallets w ON w.address = t.wallet AND {_scope_sql(scope)}
+        LEFT JOIN watched_wallets ww ON ww.address = t.wallet AND ww.confirmed
+        LEFT JOIN tokens k ON k.mint = t.mint
+        WHERE {' AND '.join(cond)} ORDER BY t.block_time DESC LIMIT $1""", *args)
+    return {"scope": scope, "sol_usd": await ctx().sol_usd(), "rows": rows(rs)}
+
+
+@app.get("/api/system/backfill", dependencies=[Auth])
+async def backfill_status():
+    """What the history backfill covers: ONLY wallets the system tracks (candidates, tracked,
+    smart, watched), each for `backfill_days` and at most `backfill_max_signatures` signatures."""
+    c = ctx()
+    s = await c.settings.get()
+    by = await c.pool.fetch("""SELECT backfill_status, count(*) AS n, count(*) FILTER (WHERE backfill_truncated) AS truncated,
+            COALESCE(sum(backfill_sigs_seen), 0) AS signatures, COALESCE(sum(backfill_sigs_fetched), 0) AS fetched
+        FROM wallets WHERE status IN ('candidate','tracked','smart') OR backfill_status <> 'none'
+        GROUP BY 1 ORDER BY 1""")
+    running = await c.pool.fetch("""SELECT address, discovery_source, backfill_sigs_seen, last_synced_at, updated_at
+        FROM wallets WHERE backfill_status = 'running' ORDER BY updated_at DESC LIMIT 20""")
+    failed = await c.pool.fetch("""SELECT address, discovery_source, updated_at, backfill_error AS error
+        FROM wallets WHERE backfill_status = 'failed' ORDER BY updated_at DESC LIMIT 20""")
+    recent = await c.pool.fetch("""SELECT address, backfill_status, backfill_from, backfill_sigs_seen, backfill_truncated,
+            last_synced_at FROM wallets WHERE last_synced_at IS NOT NULL ORDER BY last_synced_at DESC LIMIT 20""")
+    q = None
+    try:
+        q = await c.redis.xlen(Q_WALLET_SYNC)
+    except Exception:
+        pass
+    fails = await c.pool.fetchval("SELECT count(*) FROM failed_transactions")
+    return j({"scope": "tracked wallets only (not the whole pump.fun history)",
+              "backfill_days": s["backfill_days"], "max_signatures_per_wallet": s["backfill_max_signatures"],
+              "by_status": rows(by), "running": rows(running), "failed": rows(failed), "recent": rows(recent),
+              "queue_length": q, "failed_transactions": fails})
+
+
 @app.get("/api/radar", dependencies=[Auth])
-async def radar(hours: int = 24, limit: int = 100):
+async def radar(hours: int = 24, limit: int = 100, scope: str = "smart"):
+    """Tokens traded by a wallet group: scope=smart (official Smart Money, default), tracked (every
+    wallet the system tracks: candidates, tracked, smart, watched KOL) or kol (watched wallets)."""
     hours = max(1, min(hours, 168))
     c = ctx()
-    rs = await c.pool.fetch("""WITH sm AS (
-            SELECT t.* FROM wallet_transactions t JOIN wallets w ON w.address = t.wallet AND w.status = 'smart'
+    rs = await c.pool.fetch(f"""WITH sm AS (
+            SELECT t.* FROM wallet_transactions t JOIN wallets w ON w.address = t.wallet AND {_scope_sql(scope)}
             WHERE t.block_time > now() - make_interval(hours => $1) AND t.tx_type IN ('buy','sell'))
         SELECT sm.mint, count(DISTINCT sm.wallet) FILTER (WHERE tx_type='buy') AS smart_buyers,
             count(DISTINCT w2.cluster_id) FILTER (WHERE tx_type='buy') AS independent_buyers,
@@ -471,8 +564,13 @@ async def radar(hours: int = 24, limit: int = 100):
         ch = chg.get(r["mint"]) or {}
         nowp = ch.get("now") or (t["last_price_sol"] if t else None)
 
-        def pct(old):
-            return (float(nowp) / float(old) - 1) if (nowp and old) else None
+        last_trade = t["last_trade_at"].timestamp() if t and t["last_trade_at"] else None
+
+        def pct(old, horizon_s=3600):
+            # no trade inside the horizon: the "change" would compare a price with itself
+            if not (nowp and old) or last_trade is None or time.time() - last_trade > horizon_s:
+                return None
+            return float(nowp) / float(old) - 1
         net = float(r["smart_buy_sol"]) - float(r["smart_sell_sol"])
         gross = float(r["smart_buy_sol"]) + float(r["smart_sell_sol"])
         rk = risk.get(r["mint"])
@@ -488,12 +586,12 @@ async def radar(hours: int = 24, limit: int = 100):
             "smart_buy_sol": r["smart_buy_sol"], "smart_sell_sol": r["smart_sell_sol"], "net_flow_sol": net,
             "flow": flow_label(net, gross), "first_smart_entry": r["first_smart_entry"],
             "last_smart_trade": r["last_smart_trade"], "current_price_sol": nowp,
-            "price_change_5m": pct(ch.get("m5")), "price_change_15m": pct(ch.get("m15")), "price_change_1h": pct(ch.get("h1")),
+            "price_change_5m": pct(ch.get("m5"), 300), "price_change_15m": pct(ch.get("m15"), 900), "price_change_1h": pct(ch.get("h1"), 3600),
             "token_age_seconds": (time.time() - t["created_at"].timestamp()) if t and t["created_at"] else None,
             "curve_progress": t["curve_progress"] if t else None, "migrated": bool(t and t["migrated_at"]),
             "risk_level": rk["risk_level"] if rk else None, "signal_level": sig[r["mint"]]["level"] if r["mint"] in sig else None,
             "all_verified": r["all_verified"]}))
-    return {"hours": hours, "rows": out}
+    return {"hours": hours, "scope": scope, "rows": out}
 
 
 @app.get("/api/tokens/{mint}", dependencies=[Auth])
@@ -659,6 +757,23 @@ async def backtest_latest():
     res = dict(r["results"])
     res.pop("rows", None)
     return j({"run": {"id": r["id"], "created_at": r["created_at"], "params": r["params"], "results": res}})
+
+
+@app.get("/api/backtest/runs", dependencies=[Auth])
+async def backtest_runs(limit: int = 20):
+    """Backtests that were actually run (stored by `radar backtest`); summary per split only."""
+    rs = await ctx().pool.fetch("SELECT id, created_at, params, results FROM backtest_runs ORDER BY id DESC LIMIT $1",
+                                max(1, min(limit, 100)))
+    out = []
+    for r in rs:
+        res = dict(r["results"] or {})
+        sel = res.get("selected") or {}
+        meta = (r["params"] or {}).get("meta") or {}
+        out.append({"id": r["id"], "created_at": r["created_at"], "selected_params": res.get("selected_params"),
+                    "splits": {k: {"signals": v.get("signals"), "traded": v.get("tradable")}
+                               for k, v in sel.items() if isinstance(v, dict)},
+                    "summary": {k: meta.get(k) for k in ("wallets", "trades", "tokens", "tokens_with_bars") if k in meta}})
+    return j({"runs": out})
 
 
 # ---------------------------------------------------------------- websocket

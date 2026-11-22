@@ -69,6 +69,15 @@ export function useLiveEvents(fn: Listener) {
   }, []);
 }
 
+// ---- page-wide refresh + "last updated" (shown in the top bar) ----
+let lastUpdated = 0;
+export function getLastUpdated() {
+  return lastUpdated;
+}
+export function refreshAll() {
+  if (typeof window !== "undefined") window.dispatchEvent(new Event("radar:refresh"));
+}
+
 /** Fetch + periodic refresh + refresh on live events (signals, alerts, rankings). */
 export function useApi<T = any>(path: string | null, refreshMs = 30000, liveTypes: string[] = []) {
   const [data, setData] = useState<T | null>(null);
@@ -80,6 +89,8 @@ export function useApi<T = any>(path: string | null, refreshMs = 30000, liveType
       const d = await api<T>(path);
       setData(d);
       setError(null);
+      lastUpdated = Date.now();
+      if (typeof window !== "undefined") window.dispatchEvent(new Event("radar:updated"));
     } catch (e: any) {
       if (e?.status !== 401) setError(e?.message || "error");
     } finally {
@@ -93,6 +104,11 @@ export function useApi<T = any>(path: string | null, refreshMs = 30000, liveType
     const t = setInterval(load, refreshMs);
     return () => clearInterval(t);
   }, [load, refreshMs]);
+  useEffect(() => {
+    const h = () => load();
+    window.addEventListener("radar:refresh", h);
+    return () => window.removeEventListener("radar:refresh", h);
+  }, [load]);
   useLiveEvents((ev) => {
     if (liveTypes.includes(ev.type)) load();
   });

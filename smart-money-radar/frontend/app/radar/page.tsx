@@ -14,17 +14,23 @@ const FLOW_STYLE: Record<string, string> = {
 
 export default function Radar() {
   const [hours, setHours] = useState<number>(24);
-  const { data, error, loading } = useApi<any>(`/api/radar?hours=${hours}`, 15000, ["signal"]);
+  const ov = useApi<any>("/api/overview", 60000);
+  const [scopeSel, setScope] = useState<string | null>(null);
+  const scope = scopeSel ?? (ov.data ? (ov.data.wallets.smart > 0 ? "smart" : "tracked") : null);
+  const { data, error, loading } = useApi<any>(scope ? `/api/radar?hours=${hours}&scope=${scope}` : null, 15000, ["signal"]);
   const rows = data?.rows || [];
   return (
     <div className="space-y-4">
       <div className="flex flex-wrap items-center justify-between gap-2">
         <h1 className="text-xl font-bold">Token Radar</h1>
-        <Segmented value={hours} onChange={setHours} options={[{ v: 1, label: "1 giờ" }, { v: 6, label: "6 giờ" }, { v: 24, label: "24 giờ" }, { v: 72, label: "3 ngày" }]} />
+        <div className="flex flex-wrap gap-2">
+          <Segmented value={scope || "smart"} onChange={setScope} options={[{ v: "smart", label: "Smart Money" }, { v: "tracked", label: "Đang theo dõi" }, { v: "kol", label: "KOL" }]} />
+          <Segmented value={hours} onChange={setHours} options={[{ v: 1, label: "1 giờ" }, { v: 6, label: "6 giờ" }, { v: 24, label: "24 giờ" }, { v: 72, label: "3 ngày" }]} />
+        </div>
       </div>
-      <p className="text-xs text-slate-500">Token đang được ví Smart Money giao dịch. Net Smart Money Flow = tổng SOL mua − tổng SOL bán của ví Smart Money; xét cả quy mô, không chỉ số ví.</p>
+      <p className="text-xs text-slate-500">Token đang được nhóm ví đã chọn giao dịch ({scope === "tracked" ? "ví đang theo dõi — gồm ứng viên chưa xác minh, chưa phải Smart Money" : scope === "kol" ? "ví KOL trong danh sách theo dõi" : "ví đạt chuẩn Smart Money"}). Net Flow = tổng SOL mua − tổng SOL bán của nhóm ví đó; xét cả quy mô, không chỉ số ví.</p>
       {loading && !data ? <Loading /> : error ? <ErrorBox msg={error} /> : rows.length === 0 ? (
-        <Card><Empty>Chưa có token nào được ví Smart Money giao dịch trong khoảng thời gian này.</Empty></Card>
+        <Card><Empty>{scope === "smart" ? `Chưa có token nào được ví Smart Money giao dịch trong khoảng thời gian này${ov.data?.wallets?.smart === 0 ? " (hiện chưa có ví nào đạt chuẩn Smart Money — chọn \"Đang theo dõi\" để xem ví ứng viên)" : ""}.` : "Nhóm ví này chưa giao dịch token nào trong khoảng thời gian đã chọn."}</Empty></Card>
       ) : (
         <>
           <div className="space-y-3 md:hidden">
