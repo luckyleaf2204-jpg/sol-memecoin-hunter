@@ -165,3 +165,19 @@ def test_multi_hop_through_a_non_sol_curve_is_one_sol_trade():
     assert t.mint == "CkXfLpvTYLiWhytNRLsGyxuVsQ9gH8fPbHf2HH3Ypump"
     assert t.sol_amount == pytest.approx(0.372544205, abs=1e-9)
     assert t.verification_status == "verified" and t.reconciliation_residual_sol == 0
+
+
+def test_usdc_quoted_curve_bought_through_router_is_valued_in_sol():
+    """Real tx (22/11/2026): KOL wallet Xanse paid SOL, a router (FlashX) swapped it to USDC on
+    Raydium CLMM and bought a USDC-quoted pump.fun curve (buy_exact_quote_in). The curve event
+    has no SOL amount; the trade is valued by the wallet's own SOL change and stays partial."""
+    import json, pathlib
+    from radar.decoder.tx import decode_transaction
+    tx = json.loads((pathlib.Path(__file__).parent.parent / "fixtures/nonsol/usdc_curve_router_buy.json").read_text())
+    d = decode_transaction(tx)
+    assert len(d.trades) == 1
+    t = d.trades[0]
+    assert t.wallet == "B9K2wTQcRDLRLhMKFyRh2hPqHrr6VKiCC9yNGpkMUXrh" and t.tx_type == "buy"
+    assert t.mint == "GGo31zd8piSnzHe5hJqeFMk18rJpaHZzc4NJwVUspump"
+    assert t.venue == "pump_curve_nonsol" and t.verification_status == "partially_verified"
+    assert 1.49 < t.sol_amount < 1.504          # wallet paid 1.5035 SOL incl. 0.00007 network fee

@@ -135,6 +135,8 @@ class StreamService:
         self.creation_slot: dict[str, int] = {}
         self.stats = defaultdict(int)
         self.watched: set[str] = set()
+        self.pending_verify: list[tuple[str, bool]] = []
+        self._pool_cache = None
         self.last_msg_at = 0.0
         self.connected_endpoint: str | None = None
         self.gaps: list[dict] = []
@@ -198,6 +200,12 @@ class StreamService:
         sig = value.get("signature")
         logs = value.get("logs") or []
         out = records_from_logs(sig, slot, logs, self.resolve_pool)
+        users = out.get("nonsol_users", [])
+        if any(u in self.tracked for u in users):
+            # a tracked / watched wallet traded a non-SOL quoted curve (e.g. USDC via a router):
+            # the logs carry no SOL amount, so the full transaction is needed. Watched (KOL)
+            # wallets skip the verification queue so their alert is not delayed.
+            self.pending_verify.append((sig, any(u in self.watched for u in users)))
         if out["truncated"]:
             self.stats["truncated_logs"] += 1
         for c in out["creates"]:
@@ -235,6 +243,12 @@ class StreamService:
 
     async def flush(self) -> None:
         trades, self.pending_trades = self.pending_trades, []
+        for sig, fast in self.pending_verify:
+            if fast:
+                asyncio.create_task(self._fast_verify(sig))
+            else:
+                await self.ctx.enqueue(Q_VERIFY, {"signature": sig, "reason": "nonsol_tracked"}, dedupe_key=sig)
+        self.pending_verify = []
         creates, self.pending_creates = self.pending_creates, []
         completes, self.pending_completes = self.pending_completes, []
         migrations, self.pending_migrations = self.pending_migrations, []
@@ -313,6 +327,23 @@ class StreamService:
                     backoff = 1.0
                 await asyncio.sleep(backoff)
                 backoff = min(backoff * 2, 60)
+
+    async def _fast_verify(self, sig: str) -> None:
+        from .txproc import PoolCache
+        from .verifier import verify_one
+        if self._pool_cache is None:
+            self._pool_cache = PoolCache()
+            await self._pool_cache.load(self.ctx.pool)
+        for attempt in range(6):          # the node may not serve a just-confirmed tx yet
+            try:
+                res = await verify_one(self.ctx, sig, self._pool_cache, self.tracked, self.store_min)
+            except Exception as e:
+                log.warning("fast verify %s: %s", sig, e)
+                res = "error"
+            if res not in ("not_found", "error"):
+                return
+            await asyncio.sleep(0.5 * (attempt + 1))
+        await self.ctx.enqueue(Q_VERIFY, {"signature": sig, "reason": "nonsol_tracked"}, dedupe_key=sig)
 
     async def run_flusher(self) -> None:
         n = 0

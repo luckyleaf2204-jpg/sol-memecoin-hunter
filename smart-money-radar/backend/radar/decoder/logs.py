@@ -145,6 +145,7 @@ def records_from_logs(signature: str, slot: int, logs: list[str], pool_resolver=
                 out["trades"].append(trade_record_from_curve_event(signature, slot, ordinal, ev))
             else:
                 out["multi_hop"] = True  # non-SOL quoted curve: only the verifier can value it
+                out.setdefault("nonsol_users", []).append(ev.user)
             ordinal += 1
         elif isinstance(ev, AmmSwapEvent):
             mints = pool_resolver(ev.pool) if pool_resolver else None

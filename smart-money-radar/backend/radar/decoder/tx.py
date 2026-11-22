@@ -222,7 +222,7 @@ def decode_transaction(tx: dict, signature: str | None = None,
     for (src, dst, lamports, under_swap, _kind) in raw_sol:
         dec.sol_transfers.append(SolTransfer(src, dst, lamports, under_swap))
     if nonsol:
-        _collapse_multi_hop(dec, nonsol, book)
+        _collapse_multi_hop(dec, nonsol, book, lam_delta)
 
     if dec.block_time is None and dec.trades:
         dec.block_time = dec.trades[0].block_time
@@ -240,20 +240,54 @@ def decode_transaction(tx: dict, signature: str | None = None,
         _reconcile(dec, lam_delta, book, raw_sol, created_owner, temp_token_owner)
     finally:
         _signers_cache.pop(dec.signature, None)
+    for t in dec.trades:
+        if t.venue == "pump_curve_nonsol":   # valued from the wallet balance, never fully verified
+            t.verification_status = PARTIAL
+            t.verification_note = ("non-SOL quoted curve (e.g. USDC) bought/sold through a router: SOL amount "
+                                   "= the wallet's own SOL balance change in this transaction")
     _token_transfers(dec, book, raw_tok)
     return dec
 
 
-def _collapse_multi_hop(dec: DecodedTx, nonsol: list[TradeRecord], book: _TokenBook) -> None:
+def _wallet_sol_value(a: TradeRecord, dec: DecodedTx, book: _TokenBook, lam_delta: dict[str, int]) -> float | None:
+    """SOL the wallet itself paid (buy) / received (sell) in this tx, when the ONLY token it
+    gained or lost is `a.mint` (the quote token, e.g. USDC, only passed through a router).
+    ΔW includes its token accounts, so rent of a newly created account nets out."""
+    w = a.wallet
+    others = {v["mint"] for v in book.acc.values() if v["owner"] == w and v["mint"] not in (a.mint, WSOL_MINT)}
+    if any(abs(book.delta(w, m)) > 1 for m in others):
+        return None
+    d_w = lam_delta.get(w, 0) + sum(lam_delta.get(k, 0) for k in book.owned_by(w))
+    if w == dec.fee_payer:
+        d_w += dec.fee_lamports
+    sol = (-d_w if a.tx_type == "buy" else d_w) / LAMPORTS
+    return sol if sol > 0 else None
+
+
+def _collapse_multi_hop(dec: DecodedTx, nonsol: list[TradeRecord], book: _TokenBook,
+                        lam_delta: dict[str, int] | None = None) -> None:
     """Token A traded against token B on a B-quoted curve, and B traded against SOL in the
     same tx while the wallet's B balance did not change (B only passed through): record ONE
-    trade of A whose SOL amount is the SOL leg. Otherwise the A leg is dropped (no SOL value)."""
+    trade of A whose SOL amount is the SOL leg. Without such a leg (B bought elsewhere, e.g. a
+    router swapped SOL -> USDC on another DEX), A is valued by the wallet's own SOL balance
+    change when A is the only token it gained/lost; otherwise A is dropped (no SOL value)."""
     for a in nonsol:
         legs = [t for t in dec.trades if t.wallet == a.wallet and t.mint != a.mint
                 and abs(book.delta(a.wallet, t.mint)) <= 1
                 and ((a.tx_type == "sell" and t.tx_type == "sell") or (a.tx_type == "buy" and t.tx_type == "buy"))]
         if len(legs) != 1:
-            dec.notes.append(f"{a.mint}: traded on a non-SOL quoted curve; no single SOL leg found, not counted")
+            sol = _wallet_sol_value(a, dec, book, lam_delta or {}) if not legs else None
+            if sol is None:
+                dec.notes.append(f"{a.mint}: traded on a non-SOL quoted curve; no single SOL leg found, not counted")
+                continue
+            a.sol_amount = sol
+            a.effective_price_sol = (sol / a.token_amount) if a.token_amount else None
+            a.price_sol = a.effective_price_sol
+            a.market_cap_sol = (a.price_sol * 1e9) if a.price_sol else None
+            a.liquidity_sol = None
+            a.venue = "pump_curve_nonsol"
+            dec.trades.append(a)
+            dec.notes.append(f"{a.mint}: non-SOL quoted curve, valued by the wallet's SOL balance change")
             continue
         leg = legs[0]
         dec.trades.remove(leg)
