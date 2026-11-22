@@ -118,6 +118,24 @@ async def _recompute() -> None:
         await ctx.close()
 
 
+async def _healthcheck() -> int:
+    """Container healthcheck for worker roles: healthy when this role wrote a heartbeat in the
+    last 5 minutes. The role is read from the container's main process (PID 1) command line."""
+    import asyncpg
+    try:
+        with open("/proc/1/cmdline", "rb") as f:
+            role = f.read().split(b"\0")[-2].decode() if f else ""
+    except OSError:
+        role = ""
+    conn = await asyncpg.connect(os.environ["DATABASE_URL"], timeout=5)
+    try:
+        ok = await conn.fetchval("SELECT count(*) FROM worker_heartbeats WHERE worker = $1 "
+                                 "AND last_beat > now() - interval '5 minutes'", role)
+    finally:
+        await conn.close()
+    return 0 if ok else 1
+
+
 def main(argv: list[str] | None = None) -> None:
     ap = argparse.ArgumentParser(prog="radar")
     ap.add_argument("command")
@@ -135,6 +153,8 @@ def main(argv: list[str] | None = None) -> None:
         import uvicorn
         uvicorn.run("radar.api.app:app", host=a.host, port=a.port, proxy_headers=True, forwarded_allow_ips="*",
                     log_level="info", access_log=False)
+    elif a.command == "healthcheck":
+        sys.exit(asyncio.run(_healthcheck()))
     elif a.command == "migrate":
         asyncio.run(_migrate())
     elif a.command in ROLES or a.command == "all":

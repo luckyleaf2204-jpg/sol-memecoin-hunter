@@ -46,13 +46,15 @@ docker compose run --rm api python -m radar crosscheck --n 25 --out /tmp/crossch
 ## Backup & khôi phục
 
 ```bash
-ls -lh backups/                                     # radar-YYYYMMDD-HHMM.dump
-# khôi phục vào database đang chạy (dừng worker trước)
-docker compose stop stream verifier sync discovery prices analytics signals api
-docker compose exec -T postgres pg_restore -U radar -d radar --clean --if-exists < backups/radar-20261122-1930.dump
+ls -lh backups/                                              # radar-YYYYMMDD-HHMMSS.dump
+docker compose exec -T backup sh /backup.sh now              # sao lưu ngay
+# khôi phục (tự xử lý timescaledb_pre_restore / post_restore cho bảng hypertable)
+docker compose stop stream verifier sync discovery prices analytics signals api frontend caddy
+docker compose exec -T backup sh /restore.sh radar-20261122-193000.dump
 docker compose up -d
 ```
-Nên chép thư mục `backups/` sang nơi khác (rclone/S3) định kỳ.
+Nên chép thư mục `backups/` sang nơi khác (rclone/S3) định kỳ. Trên Windows dùng `windows\backup-now.bat` và
+`windows\restore.bat` (xem [windows.md](windows.md)).
 
 ## Cập nhật phiên bản
 

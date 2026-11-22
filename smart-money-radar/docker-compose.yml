@@ -19,6 +19,12 @@ x-backend: &backend
   logging: &logging
     driver: json-file
     options: { max-size: "20m", max-file: "5" }
+  healthcheck:   # workers: a heartbeat in the last 5 minutes (the api service overrides this)
+    test: ["CMD", "python", "-m", "radar", "healthcheck"]
+    interval: 60s
+    timeout: 15s
+    start_period: 120s
+    retries: 3
 
 services:
   postgres:
@@ -97,7 +103,7 @@ services:
     logging: *logging
 
   backup:
-    image: postgres:16.4-alpine
+    image: timescale/timescaledb:2.17.2-pg16   # same image as the database: pg_dump/pg_restore 16
     restart: unless-stopped
     environment:
       PGPASSWORD: ${POSTGRES_PASSWORD}
@@ -107,6 +113,7 @@ services:
       BACKUP_AT_UTC: ${BACKUP_AT_UTC:-19:30}
     volumes:
       - ./deploy/backup/backup.sh:/backup.sh:ro
+      - ./deploy/backup/restore.sh:/restore.sh:ro
       - ./backups:/backups
     entrypoint: ["/bin/sh", "/backup.sh"]
     depends_on:

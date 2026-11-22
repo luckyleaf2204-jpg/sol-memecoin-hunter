@@ -1,0 +1,17 @@
+# Local (Windows PC) mode: plain HTTP on the machine itself, no domain, no certificate.
+# The compose file publishes this only on 127.0.0.1 unless LOCAL_BIND is changed.
+:80 {
+	encode zstd gzip
+	header {
+		X-Content-Type-Options nosniff
+		X-Frame-Options DENY
+		Referrer-Policy same-origin
+		-Server
+	}
+	handle /api/* {
+		reverse_proxy api:8000
+	}
+	handle {
+		reverse_proxy frontend:3000
+	}
+}

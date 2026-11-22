@@ -8,6 +8,7 @@ xuống vốn từ 2 SOL/vị thế, mua trước khi token tăng 2x–10x và c
 
 | Tài liệu | Nội dung |
 |---|---|
+| [docs/windows.md](docs/windows.md) | **Chạy trên máy tính Windows 10/11 bằng Docker Desktop (không cần VPS)** |
 | [docs/install.md](docs/install.md) | Cài đặt trên VPS (Docker, HTTPS, tên miền) và chạy thử trên máy |
 | [docs/operations.md](docs/operations.md) | Vận hành 24/7: dịch vụ, log, giám sát, backup/khôi phục, cập nhật, xử lý sự cố |
 | [docs/telegram-setup.md](docs/telegram-setup.md) | Tạo bot Telegram, lấy chat id, kiểm tra gửi cảnh báo |
@@ -52,6 +53,11 @@ Mỗi khối là một tiến trình/container riêng (`python -m radar <role>`)
 | `backend/migrations/` | SQL migration có version |
 | `frontend/` | Dashboard Next.js + TypeScript + Tailwind + Recharts (ưu tiên iPhone/Safari, Dark Mode) |
 | `deploy/` | Caddy (HTTPS tự động), script backup |
+
+## Chạy trên máy tính Windows (không cần VPS)
+
+Cài Docker Desktop → tải mã nguồn → bấm đúp `windows\setup.bat` → `windows\start.bat` → mở http://localhost:8080.
+Chi tiết từng bước: [docs/windows.md](docs/windows.md).
 
 ## Chạy nhanh (VPS có Docker)
 
