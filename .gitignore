@@ -33,3 +33,7 @@ venv/
 .claude/
 .DS_Store
 Thumbs.db
+
+# bundled public KOL wallet list (not runtime data)
+!smart-money-radar/backend/radar/data/
+!smart-money-radar/backend/radar/data/kol_seed.txt

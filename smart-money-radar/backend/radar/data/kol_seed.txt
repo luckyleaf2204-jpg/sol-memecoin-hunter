@@ -1,0 +1,28 @@
+# Ví KOL nạp sẵn lần đầu (chỉ khi danh sách theo dõi đang trống). Mỗi dòng: địa_chỉ Tên [@X]
+# Nguồn công khai, tra ngày 22/11/2026; chủ ví là nhãn của bên thứ ba, KHÔNG phải xác nhận của chính KOL.
+# Tất cả địa chỉ đã được kiểm tra tồn tại và có giao dịch trên Solana mainnet.
+# kolexplorer.com/kol/cented + bộ dữ liệu Hugging Face masonmarker/solana-memecoin-kols
+CyaE1VxvBrahnPWkqm5VsdCvyS2QmNht2UFrKJHga54o Cented
+# kolexplorer.com/kol/cupsey + uwuu.ai/blog/cupsey-solana-trader
+2fg5QD1eD7rzNNCsvnhmXFm5hqNgwTTG8p7kQ6f3rx6f Cupsey
+# danh sách Alpha Club; khớp địa chỉ rút gọn DNfu…eBHm trên Kolscan
+DNfuF1L62WWyW3pNakVkyGGFzVVhj4Yr52jSmdTyeBHm Gake
+# uwuu.ai (1 nguồn)
+DuQabFqdC9eeBULVa7TTdZYxe8vK8ct5DZr4Xcf7docy Orangie (1 nguồn)
+# GMGN/Kolscan/Axiom gắn nhãn Ansem; Ansem phủ nhận trên X ngày 16/06/2026
+AVAZvHLR2PcWpDf8BXY4rVxNHYRBytycHkcB5z5QNXYm Ansem? (bị chính Ansem phủ nhận) @blknoiz06
+# uwuu.ai/trader/<địa chỉ> (nhãn KOL của uwuu.ai)
+DjM7Tu7whh6P3pGVBfDzwXAx2zaw51GJWrJE3PwtuN7s LUKEY
+Bi4rd5FH5bYEN8scZ7wevxNZyNmKHdaBcvewdPFxYdLt theo
+B9K2wTQcRDLRLhMKFyRh2hPqHrr6VKiCC9yNGpkMUXrh Xanse
+99xnE2zEFi8YhmKDaikc1EvH6ELTQJppnqUwMzmpLXrs Coler
+9yYya3F5EJoLnBNKW6z4bZvyQytMXzDcpU5D6yYr4jqL Loopierr
+CXnf4Tt7qFz3KZNwn3Yve5MKaRyxGoAy2eDX3QT8e99m trav
+GJA1HEbxGnqBhBifH9uQauzXSB53to5rhDrzmKxhSU65 Latuche
+G6fUXjMKPJzCY1rveAE6Qm7wy5U3vZgKDJmN1VPAdiZC clukz
+CATk62cYqDFXTh3rsRbS1ibCyzBeovc2KXpXEaxEg3nB Coasty
+FRbUNvGxYNC1eFngpn7AD3f14aKKTJVC6zSMtvj2dyCS Henn
+2X4H5Y9C4Fy6Pf3wpq8Q4gMvLcWvfrrwDv2bdR8AAwQv Orange
+ETU3GyrUsv6UztQJxHgsBX2UoJFmq79WJe3JyDpAqGMz MACXBT
+sAdNbe1cKNMDqDsa4npB3TfL62T14uAo2MsUQfLvzLT Ethan Prosper
+9FNz4MjPUmnJqTf6yEDbL1D4SsHVh7uA8zRHhR5K138r Danny
