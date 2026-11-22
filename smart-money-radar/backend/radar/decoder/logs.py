@@ -162,4 +162,13 @@ def records_from_logs(signature: str, slot: int, logs: list[str], pool_resolver=
             out["completes"].append(ev)
         elif isinstance(ev, PumpMigrationEvent):
             out["migrations"].append(ev)
+    hop_users = set(out.get("nonsol_users", []))
+    if hop_users:
+        # A wallet that traded a curve quoted in another token (B) in this tx: its SOL trades of
+        # other tokens here are almost always the B leg of the route (SOL -> B -> token). They are
+        # left to the full-transaction decoder, which merges them into ONE trade of the real token,
+        # so the stream never reports the route token as what the wallet bought.
+        keep = [t for t in out["trades"] if t.wallet not in hop_users]
+        out["hop_legs_dropped"] = len(out["trades"]) - len(keep)
+        out["trades"] = keep
     return out

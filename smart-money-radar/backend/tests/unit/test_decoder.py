@@ -181,3 +181,20 @@ def test_usdc_quoted_curve_bought_through_router_is_valued_in_sol():
     assert t.mint == "GGo31zd8piSnzHe5hJqeFMk18rJpaHZzc4NJwVUspump"
     assert t.venue == "pump_curve_nonsol" and t.verification_status == "partially_verified"
     assert 1.49 < t.sol_amount < 1.504          # wallet paid 1.5035 SOL incl. 0.00007 network fee
+
+
+def test_route_leg_of_token_quoted_curve_is_not_reported_by_the_stream():
+    """Real tx (22/11/2026): KOL wallet trav bought token Ad2y… on a curve quoted in token 7SL2…
+    (NIO); the router first bought 7SL2… with 1.036 SOL on PumpSwap. From logs alone the stream
+    must not report '7SL2… bought for 1.036 SOL'; the full decoder records the real token."""
+    import json, pathlib
+    from radar.decoder.logs import records_from_logs
+    from radar.decoder.tx import decode_transaction
+    tx = json.loads((pathlib.Path(__file__).parent.parent / "fixtures/nonsol/token_quoted_curve_hop_buy.json").read_text())
+    pools = {"B4Wmjc6PvjCtU3qSVS3eTT9Mr4M5V5jBkRQctWANTc71":
+             ("7SL2VnfYsChvog5oQY9Nmtqu1wceaMiQzWoqoLQpump", "So11111111111111111111111111111111111111112")}
+    out = records_from_logs("x", tx["slot"], tx["meta"]["logMessages"], pools.get)
+    assert out["trades"] == [] and out["hop_legs_dropped"] == 1
+    assert out["nonsol_users"] == ["CXnf4Tt7qFz3KZNwn3Yve5MKaRyxGoAy2eDX3QT8e99m"]
+    d = decode_transaction(tx, pool_resolver=pools.get)
+    assert [(t.mint[:6], t.tx_type, round(t.sol_amount, 3)) for t in d.trades] == [("Ad2yCH", "buy", 1.036)]
