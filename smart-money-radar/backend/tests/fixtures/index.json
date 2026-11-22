@@ -1,0 +1,100 @@
+{
+ "2EoViTuJVbfjZ96dYuLproDfcf9BNtLoiFauVhGPpKDsZhhTR1JBYwJTYkPNXn7FM6YUkxCXj6WdYnsj6QAiKjgB": [
+  "curve_buy_2sol"
+ ],
+ "2ufYuNfcTK9qdcBCNE8P1VCEK4uae83soih2Doz311teU3fhXXppMzx28LEv2YeRunywusSYSVHHAic2rpKtUbQg": [
+  "curve_buy"
+ ],
+ "34BovBZKodHHP9LKSXsA4VGrXyCWVuKuqQYqLFyastbi5SnExDLnQxDPmHnufzDTDn7LE54ajN1dBB75CDr7Fm1m": [
+  "create"
+ ],
+ "3AYipcX6GLuGd2jtrHXEGuixj3D7pmRtQetXD854rhuVCJPVKTjTcwkkcsAPPhM5uQdEpsz9soRciXCBH7mEJCEN": [
+  "curve_buy_2sol"
+ ],
+ "3BTHZb2uYKY2cC3b3dkmGTRWsRHEJCXnok2SFgDbJYhBmPV1FWPciHUAi2q571cRiWyuNDm3osG5oRa3u29abNeS": [
+  "curve_sell"
+ ],
+ "3HTXGrV4Gj32CeZ6shFEHRrWJsdDaa1hFyPbrjZSYCAJVzhp94uH617VD7Dgxd6ikRU2ssixbLwgu9d9tmmNZK68": [
+  "amm_buy"
+ ],
+ "3WcEqbRgD9XH5dEHSs1h7XtnZytySoSpaddkSPkJoUgMM7RVENQCo5CF9UZ4igo6FKgXdSKNcwhgyCDTGDVDHj9J": [
+  "amm_sell"
+ ],
+ "3XBMkXjcJQ84ank5Lqedht4itYmP1h53LRb5bmrNTkGuxGpWoY7sd79dRoLwiunt4Agtteapcb8CNTnBi6838qT7": [
+  "curve_buy"
+ ],
+ "3huhHLkGxAAxTJgMH2tgRCkg1dfjesoQ5ZSrAt2baDDN3V64dAAe3MYfcHNvYAuQN6rv2wVvuxfTCRnBHTFtHeT3": [
+  "complete"
+ ],
+ "3jURyCY77JxYx79ADU9TivUyA3BF7eAYZv6gqcH82RJynP71dtVBsxHd9vbxcFNU3BhF59XurMgHS7ZiA6DWgve6": [
+  "curve_buy_2sol"
+ ],
+ "3jvKmpxnzJg3xxkpQWbw7EbS7VWpWHLS4Ay1sBBts5ta4veceL4eotjM2AEH2c2yAHpb9EX5PTXa6Fi9GuQ1Xn5v": [
+  "curve_buy"
+ ],
+ "3rVFqzVD2vMs7rSemGBw4xLDVLV7pfqXVNnmGmjuN6rCG8zwKetTxPBh6gKorMpyT9WgGuw78n6XY1u16gFmQA7L": [
+  "migration"
+ ],
+ "4JBvvCfkrqpn1cD2rtsWvtWcZUm3ME4BJvfEqs9Gew2ZiD6H1p3PPZBBXbkeyRGzRfqGRoiAX3P2Eeo4wkRr5HLF": [
+  "create"
+ ],
+ "4LD1rH8c3yg3YYxXKM76UwkUV2H18Q5EzbUFVfHbVdrBq91sW75cWk2pdfTdAEt1tCYYZaTRVR4RZes8xJXJkSQ9": [
+  "curve_sell"
+ ],
+ "4NJBzvmctp5y6bpPzcxK5HMhfM3TSnqhMYrMDpFYvS3jJebyyVEHNKAmCpfHMzPurRda1pYDhinCNxvQTZ8XTMJM": [
+  "curve_sell"
+ ],
+ "4eNT8cMvdY8pxpSuWoGo8VJjehAFnjfdtSCu1jy8uveNp2zhndNQQcbpTphFWh16eEBiSgmYWt6P8pBuDyrCcYkg": [
+  "curve_sell_2sol"
+ ],
+ "4qLwxNu9LPRQDTpsTJPrbau2uAfRvDuXXkz2qHXW4noT7p65hCUNjNWE87VrRakoA1DpxFih1QcSDSqt5abY26fZ": [
+  "failed"
+ ],
+ "4z7h5KtVY59muVe2uwQp3Rp3MaSwofcrmnssVBbkfsnUeNUr4XXAdo6DeoENc9LAYmm3GTEPcVhrNb1XXhgor9Xy": [
+  "amm_buy"
+ ],
+ "51Vn8gchp71sXJe7oD2G99bNJ3WEabWWBPFTgT7RQzJVWUwi1tWGFaVUq3eH6qbHECeZYXxqGstyWEANCSnYsHAd": [
+  "curve_sell"
+ ],
+ "58uva935RnzAu5mNJ42JJDvikm5cBt6xVLaBva9c5UKj6RTb2U7D63gRXGi2XFge8kZkzYzjLYMWYCeKw2jetcdj": [
+  "create"
+ ],
+ "5SGwv9V9cfmQdEu6GmJg4QCG4x1wj5GzxeHoB6S5W5n1Ysgt3T2Ls2ttijuGdnTwHfMdKbd5JsfYYrukSk75emuD": [
+  "amm_buy",
+  "multi_trade",
+  "amm_sell"
+ ],
+ "5WXfCwXVpacWWXVcwqTqgwJNUCs8UTBi7TnnZo9WbqEV2pBzL2jyaffGiRcNHPJdUeMmm6ebgdfrc8hErQ6rxoVv": [
+  "curve_buy"
+ ],
+ "5gvAYuFytbaUZLBmd9HQUEGaBoDCjKa26wiPeYUDzeGLhVY5BSJoTMMisFp98i591bfy9kPKqwu4D917YXuvyuPo": [
+  "multi_trade"
+ ],
+ "5qBk9noaGgex53DjZdTn5QzCLWGPL7WxGe9mdwM33bPa23gq8L3g7caG9vFpJfKmNgmJBRrHzcPtB8mWsGpuq6ic": [
+  "amm_buy"
+ ],
+ "5vdFdVqegnnUem6yuiUeMDRBfnBK3ttVSjw9vFSoKbGghT6HMfZuFhwKYyqosuCXBq4P22UeP2w9RPTQfAXEo9gQ": [
+  "failed"
+ ],
+ "5w9SQKomvuKJa9qcptKGqAQiTHi75mGd56FKqndtioBoNNt3B9ptWUwEawUrruEA1qHdFtfCRuKUtSpi2VWeLeNr": [
+  "curve_buy"
+ ],
+ "64VDbk7JEKiEwSayCmDaCyWMYBGxWRiCmbsCLLDeZFdBxXJrcCcmtN8cMAiF9u79jqETxuNJEjnaHSBvjjW38JyS": [
+  "amm_sell"
+ ],
+ "65WSWHQFYs18rbsg69H43P66mUoH1Tm22y3f8mNemYWgKHGcNb3uYiVVQ7Z4koNxZTHpjvzqJqjVKwXQikNtmFxq": [
+  "curve_sell"
+ ],
+ "6acaFRzsnbcGHkMdzk2zMyDTfnNYMECpK1G9nm4PhJjX65y5KCdkTd5fqqtRk172TxKRALu2t7U5uWk4D5qYd1Y": [
+  "curve_sell_2sol"
+ ],
+ "Bkyr3DzX9wvgbvu7jaL8ZvJyXU1qUSVukBXuVhLe5x1H9QWeF8jCPrd9wZ5MReX7TNeePJsfQ8wWc2ijqU2rvqP": [
+  "amm_sell"
+ ],
+ "UNhL3fanBkb4wGa3XpjeNjyvT34xKEETJ2GB1hqRMJLweu1rh1TEHY9R3JmNwTt1XaQoMvftgyg9rQELMWRbpXo": [
+  "curve_buy_2sol"
+ ],
+ "ZQqKdDSakZ62GaaNo6uozn7UWtjyECa97efz4ouPsMU8Jbz8ZJh8YtTVQPcEXMpXhRtFPY28hfWH8tMWkGnESmG": [
+  "failed"
+ ]
+}
