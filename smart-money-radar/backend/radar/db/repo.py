@@ -60,7 +60,9 @@ async def upsert_verified(conn: asyncpg.Connection, signature: str, trades: list
     async with conn.transaction():
         keep = list(all_keys) if all_keys is not None else [r[1] for r in rows]
         # remove stream rows of this tx that the full decode does not confirm
-        await conn.execute("DELETE FROM wallet_transactions WHERE signature = $1 AND source <> 'rpc_tx' "
+        # remove rows of this tx (stream rows or an older decoder version) that the current
+        # full decode does not produce any more
+        await conn.execute("DELETE FROM wallet_transactions WHERE signature = $1 "
                            "AND NOT (event_key = ANY($2::text[]))", signature, keep)
         if rows:
             await conn.executemany(_INSERT + f" ON CONFLICT (signature, event_key) DO UPDATE SET {_UPDATE_SET}", rows)

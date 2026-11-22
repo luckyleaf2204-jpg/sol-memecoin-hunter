@@ -171,7 +171,11 @@ async def scheduler(ctx: Ctx) -> None:
                 WHERE status IN ('candidate','tracked','smart') AND NOT is_excluded
                   AND (backfill_status IN ('queued','none','failed')
                        OR last_synced_at IS NULL OR last_synced_at < now() - make_interval(mins => $1::int))
-                ORDER BY (status = 'smart') DESC, (backfill_status = 'queued') DESC, last_synced_at NULLS FIRST
+                ORDER BY (status = 'smart') DESC, (discovery_source IN ('manual','early_buyer','seed')) DESC,
+                         COALESCE((discovery_detail->>'tokens_7d')::int, jsonb_array_length(
+                             CASE WHEN jsonb_typeof(discovery_detail->'tokens') = 'array' THEN discovery_detail->'tokens'
+                             ELSE '[]'::jsonb END)) DESC,
+                         (backfill_status = 'queued') DESC, last_synced_at NULLS FIRST
                 LIMIT 200""", int(s["wallet_sync_interval_minutes"]))
             for r in rows:
                 mode = "backfill" if r["backfill_status"] in ("queued", "none", "failed") else "sync"

@@ -232,6 +232,8 @@ def decode_transaction(tx: dict, signature: str | None = None,
             t.block_time = int(dec.block_time)
         t.fee_payer = fee_payer
         t.extra["user_is_signer"] = t.wallet in signers
+        if t.wallet not in signers:
+            _attribute_router_trade(t, signers, book)
 
     _signers_cache[dec.signature] = signers
     try:
@@ -266,6 +268,24 @@ def _collapse_multi_hop(dec: DecodedTx, nonsol: list[TradeRecord], book: _TokenB
         a.extra["hop_event_key"] = leg.event_key
         dec.trades.append(a)
     dec.trades.sort(key=lambda t: int(t.event_key.split(":")[1]))
+
+
+def _attribute_router_trade(t: TradeRecord, signers: set[str], book: _TokenBook) -> None:
+    """The event user is a router / PDA that did not sign. If exactly one signer's token balance
+    moved by the event amount in the trade's direction, that signer is the real trader."""
+    want = t.token_amount_raw if t.tx_type == "buy" else -t.token_amount_raw
+    if want == 0:
+        return
+    cands = []
+    for sgn in signers:
+        got = book.delta(sgn, t.mint)
+        if got != 0 and (got > 0) == (want > 0) and abs(got - want) <= max(1, abs(want) // 100):
+            cands.append(sgn)
+    if len(cands) == 1:
+        t.extra["router_account"] = t.wallet
+        t.wallet = cands[0]
+        t.extra["user_is_signer"] = True
+        t.extra["attributed_to_signer"] = True
 
 
 def _signers(tx: dict, keys: list[str]) -> set[str]:
@@ -380,6 +400,8 @@ def _reconcile(dec: DecodedTx, lam_delta: dict[str, int], book: _TokenBook,
         note = "; ".join(notes) if notes else "balances reconciled with on-chain events"
         if len(recs) > 1:
             note += f"; {len(recs)} trades by this wallet in one tx (costs on {first.event_key})"
+        if any(r.extra.get("attributed_to_signer") for r in recs):
+            note += "; executed through a router account, attributed to the signing wallet"
         for r in recs:
             r.source = "rpc_tx"
             r.verification_status = status
