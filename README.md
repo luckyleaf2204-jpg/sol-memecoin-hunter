@@ -1,5 +1,10 @@
 # SOL MEMECOIN HUNTER — Memecoin Potential Intelligence Engine (V2)
 
+> **Mới: [SMART MONEY RADAR](smart-money-radar/README.md)** — hệ thống web (FastAPI + Next.js + PostgreSQL + Redis, Docker)
+> tìm và theo dõi Smart Money Wallets trên Pump.fun bằng dữ liệu on-chain đã đối soát, cảnh báo Telegram, chạy 24/7 trên VPS.
+> Độc lập với ứng dụng desktop bên dưới.
+
+
 **Tài liệu kỹ thuật đầy đủ (architecture, schema, nguồn dữ liệu, công thức score / risk / early signal,
 luật kiểm tra dữ liệu, luật sự kiện, API, test): [docs/INTELLIGENCE_ENGINE.md](docs/INTELLIGENCE_ENGINE.md)**
 
