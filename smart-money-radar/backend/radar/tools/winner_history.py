@@ -240,7 +240,7 @@ def _load(path: str):
 
 async def run(days: int = 14, max_credits: int = 77_760, out: str | None = None, max_pages_per_token: int = 150,
               data_dir: str = "/app/winner_data", already_spent: int = 0, verify_reserve: int = 15_000,
-              group: int = 10) -> dict:
+              group: int = 10, prefilter_fdv: float = 100_000.0) -> dict:
     """Staged and resumable; every stage writes its inputs and results under data_dir:
       graduations.json        listing (signature, slot, time, mint, pool) - paid once
       ranking.json            free winner test + priority of every graduation
@@ -277,6 +277,38 @@ async def run(days: int = 14, max_credits: int = 77_760, out: str | None = None,
             progress(stage="listing", graduations=len(grads), credits_before=u0, credits_after=await budget.used())
         rep["graduations"] = len(grads)
 
+        # 2a. free snapshot of every graduated token (GeckoTerminal, 30 tokens per call): current
+        # market cap and PumpSwap pool. Tokens worth less than `prefilter_fdv` today are not tested
+        # further (a winner that held its gains is still worth something; bias noted in the report).
+        spath = os.path.join(data_dir, "snapshot.json")
+        snap = _load(spath) or {}
+        todo = [g["mint"] for g in grads if g["mint"] not in snap]
+        for i in range(0, len(todo), 30):
+            chunk = todo[i:i + 30]
+            try:
+                d = await ctx.http.request_json("geckoterminal", "GET",
+                                                "https://api.geckoterminal.com/api/v2/networks/solana/tokens/multi/" + ",".join(chunk),
+                                                params={"include": "top_pools"}, cache_ttl=3600)
+            except Exception:
+                await asyncio.sleep(15)
+                continue
+            dexpool = {x["id"]: ((x.get("relationships") or {}).get("dex") or {}).get("data", {}).get("id")
+                       for x in (d or {}).get("included") or []}
+            for x in (d or {}).get("data") or []:
+                a = x.get("attributes") or {}
+                pools = [p["id"] for p in ((x.get("relationships") or {}).get("top_pools") or {}).get("data") or []]
+                pump = next((p for p in pools if dexpool.get(p) == "pumpswap"), None)
+                snap[a.get("address")] = {"fdv_usd": float(a.get("fdv_usd") or 0),
+                                          "pool": pump.replace("solana_", "") if pump else None}
+            for m in chunk:
+                snap.setdefault(m, {"fdv_usd": 0.0, "pool": None, "missing": True})
+            if (i // 30) % 20 == 0:
+                _dump(spath, snap)
+            await asyncio.sleep(2.1)
+        _dump(spath, snap)
+        rep["snapshot"] = {"tokens": len(snap), "pass_prefilter": sum(1 for v in snap.values() if v["fdv_usd"] >= prefilter_fdv),
+                           "prefilter_fdv_usd": prefilter_fdv}
+
         # 2. free winner test + ranking (GeckoTerminal; earlier evaluations reused)
         rpath = os.path.join(data_dir, "ranking.json")
         ranking = _load(rpath) or {}
@@ -285,6 +317,12 @@ async def run(days: int = 14, max_credits: int = 77_760, out: str | None = None,
         for g in grads:
             if g["mint"] in ranking:
                 continue
+            sn = snap.get(g["mint"]) or {}
+            if sn.get("fdv_usd", 0) < prefilter_fdv:
+                ranking[g["mint"]] = {**g, "winner": False, "reason": "prefilter_current_fdv_below",
+                                      "current_fdv_usd": sn.get("fdv_usd", 0)}
+                continue
+            g = {**g, "pool": g.get("pool") or sn.get("pool")}
             d = prior.get(g["mint"])
             if d and "peak_mc_usd" in d and "hold_ratio" in d:
                 w = {k: d.get(k) for k in ("graduation_mc_usd", "peak_mc_usd", "peak_hour", "mc_1h_after_peak_usd",
