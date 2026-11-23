@@ -35,6 +35,34 @@ GT = "https://api.geckoterminal.com/api/v2/networks/solana/pools/{pool}/ohlcv/ho
 SUPPLY = 1_000_000_000
 
 
+WSOL = "So11111111111111111111111111111111111111112"
+
+
+def graduation_from_tx(tx: dict) -> dict | None:
+    """Migration transaction -> {mint, pool, migration_sig}. Migration transactions are large and
+    Solana truncates their logs (20 of 21 checked on 23/11/2026), so the migration event is
+    usually missing: the transaction is recognised by its 'Instruction: Migrate' / 'MigrateV2' log
+    line (near the top, never truncated) and the mint is the non-WSOL token with the largest
+    balance in the transaction (the curve's tokens moved into the pool; 32 of 33 checked).
+    The pool comes from the event when present, else from GeckoTerminal later."""
+    meta = tx.get("meta") or {}
+    logs = meta.get("logMessages") or []
+    if not any(l.endswith("Instruction: Migrate") or l.endswith("Instruction: MigrateV2") for l in logs):
+        return None
+    sig = tx["transaction"]["signatures"][0]
+    rec = records_from_logs(sig, tx.get("slot") or 0, logs)
+    if rec["migrations"]:
+        m = rec["migrations"][0]
+        return {"mint": m.mint, "pool": m.pool, "migration_sig": sig}
+    bal: dict[str, float] = {}
+    for b in meta.get("postTokenBalances") or []:
+        if b.get("mint") and b["mint"] != WSOL:
+            bal[b["mint"]] = bal.get(b["mint"], 0.0) + float((b.get("uiTokenAmount") or {}).get("uiAmount") or 0)
+    if not bal:
+        return None
+    return {"mint": max(bal, key=bal.get), "pool": None, "migration_sig": sig}
+
+
 async def list_graduations(ctx, since: int, budget) -> list[dict]:
     out, token = [], None
     while True:
@@ -48,17 +76,34 @@ async def list_graduations(ctx, since: int, budget) -> list[dict]:
                 break
             if (tx.get("meta") or {}).get("err") is not None:
                 continue
-            sig = tx["transaction"]["signatures"][0]
-            rec = records_from_logs(sig, tx.get("slot") or 0, (tx.get("meta") or {}).get("logMessages") or [])
-            for m in rec["migrations"]:
-                out.append({"mint": m.mint, "pool": m.pool, "graduated_at": bt, "migration_sig": sig,
-                            "migration_sol": m.sol_amount / 1e9})
+            g = graduation_from_tx(tx)
+            if g:
+                out.append({**g, "graduated_at": bt})
         if stop or not token or len(page) < 100:
             return out
 
 
+async def find_pool(ctx, mint: str) -> str | None:
+    """PumpSwap pool of a mint from GeckoTerminal (free)."""
+    try:
+        d = await ctx.http.request_json("geckoterminal", "GET",
+                                        f"https://api.geckoterminal.com/api/v2/networks/solana/tokens/{mint}/pools",
+                                        cache_ttl=3600)
+    except Exception:
+        return None
+    for x in (d or {}).get("data") or []:
+        if ((x.get("relationships") or {}).get("dex") or {}).get("data", {}).get("id") == "pumpswap":
+            return (x.get("attributes") or {}).get("address")
+    return None
+
+
 async def winner_test(ctx, g: dict, s: dict, sol_usd: float) -> dict:
     """Hourly closes of the pool since graduation (free API, 30 calls/min)."""
+    if not g.get("pool"):
+        g["pool"] = await find_pool(ctx, g["mint"])
+        await asyncio.sleep(2.1)
+        if not g["pool"]:
+            return {"winner": False, "reason": "pool_not_found"}
     for attempt in range(4):
         try:
             d = await ctx.http.request_json("geckoterminal", "GET", GT.format(pool=g["pool"]),
@@ -110,6 +155,12 @@ async def curve_trades(ctx, mint: str, until: int, budget, max_pages: int) -> tu
             for c in rec["creates"]:
                 if c.mint == mint and meta["created_slot"] is None:
                     meta.update(created_slot=tx.get("slot"), creator=c.creator or c.user, created_at=bt)
+            if meta["created_slot"] is None and pages == 1 and not trades:
+                # the creation transaction is the mint's first; if its logs were truncated the create
+                # event is missing: its slot and fee payer (the launcher) are used instead
+                keys = (tx.get("transaction") or {}).get("message", {}).get("accountKeys") or []
+                payer = keys[0].get("pubkey") if keys and isinstance(keys[0], dict) else (keys[0] if keys else None)
+                meta.update(created_slot=tx.get("slot"), creator=payer, created_at=bt, creation_from="first_tx")
             for t in rec["trades"]:
                 if t.mint == mint:
                     trades.append({"wallet": t.wallet, "slot": t.slot, "bt": t.block_time or bt, "tx_type": t.tx_type,
