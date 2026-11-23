@@ -53,9 +53,14 @@ async def zone_window(ctx, pool: str, graduated_at: int, lo: float, hi: float, m
             "minutes": round(((end or candles[-1][0] + 900) - start) / 60)}
 
 
-async def count_window(ctx, pool: str, start: int, end: int, budget) -> dict:
+async def count_window(ctx, pool: str, start: int, end: int, budget, max_calls: int = 5) -> dict:
+    """Count with a hard cap: after `max_calls` (50 credits) the pool is marked too big to read.
+    (23/11/2026: without a cap, counting 17 pools cost 28,150 credits because bot-flooded pools
+    carry 4,000-20,000 transactions per minute and the scan starts at the pool's creation.)"""
     n, token, calls = 0, None, 0
     while True:
+        if calls >= max_calls:
+            return {"signatures": n, "count_calls": calls, "capped": True}
         await budget()
         page, token = await ctx.rpc.get_transactions_for_address(pool, pagination_token=token, limit=1000,
                                                                  full=False, sort="asc")
@@ -131,11 +136,12 @@ async def run(stage: str, max_credits: int, already_spent: int = 0, data_dir: st
             except RuntimeError as ex:
                 rep["stopped"] = str(ex)
                 break
-            est[m]["read_cost_estimate"] = 10 * ((est[m]["signatures"] + 99) // 100)
+            est[m]["read_cost_estimate"] = None if est[m].get("capped") else 10 * ((est[m]["signatures"] + 99) // 100)
             est[m]["credits_for_count"] = await budget_obj.used() - u0
             _dump(epath, est)
         rep["estimate"] = {"tokens": len(est), "signatures": sum(e["signatures"] for e in est.values()),
-                           "read_cost_estimate": sum(e["read_cost_estimate"] for e in est.values()),
+                           "read_cost_estimate": sum(e["read_cost_estimate"] or 0 for e in est.values()),
+                           "too_big_to_read": [m for m, e in est.items() if e.get("read_cost_estimate") is None],
                            "credits_used_so_far": await budget_obj.used()}
         if stage == "estimate":
             return rep
@@ -144,7 +150,8 @@ async def run(stage: str, max_credits: int, already_spent: int = 0, data_dir: st
         sol_usd = await ctx.sol_usd() or 0.0
         rdir = os.path.join(base, "trades")
         buyers_all: dict = _load(os.path.join(base, "zone_buyers.json")) or {}
-        for m, e in sorted(est.items(), key=lambda kv: kv[1]["read_cost_estimate"]):
+        for m, e in sorted(((m, e) for m, e in est.items() if e.get("read_cost_estimate") is not None),
+                           key=lambda kv: kv[1]["read_cost_estimate"]):
             if os.path.exists(os.path.join(rdir, f"{m}.json.gz")):
                 continue
             if await budget_obj.used() + e["read_cost_estimate"] > max_credits:

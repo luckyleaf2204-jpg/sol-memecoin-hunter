@@ -188,3 +188,24 @@ def test_pumpswap_zone_window_from_15_minute_closes():
             return {"data": {"attributes": {"ohlcv_list": [[0, 0, 0, 0, 5e-4, 1], [900, 0, 0, 0, 6e-4, 1]]}}}
     C.http = H2()
     assert asyncio.run(pz.zone_window(C(), "P", 0, 100_000, 300_000))["reason"] == "never_in_zone"
+
+
+def test_signature_count_stops_at_the_cap():
+    import asyncio
+    from radar.tools import pumpswap_zone as pz
+
+    class Rpc:
+        calls = 0
+
+        async def get_transactions_for_address(self, *a, **k):
+            Rpc.calls += 1
+            return [{"blockTime": 100}] * 1000, "next"
+
+    class C:
+        rpc = Rpc()
+
+    async def budget():
+        return None
+
+    r = asyncio.run(pz.count_window(C(), "P", 0, 10**9, budget, max_calls=3))
+    assert r["capped"] and r["count_calls"] == 3 and Rpc.calls == 3
