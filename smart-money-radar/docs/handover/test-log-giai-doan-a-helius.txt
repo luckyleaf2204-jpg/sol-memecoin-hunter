@@ -1,0 +1,152 @@
+### Phase A window start 2026-11-23 02:48:33 UTC, 30 min, Helius key from environment variable, HELIUS_RPS=40, sync container STOPPED
+--- rows: trades / verified / token_holders / tokens / token_prices(onchain)
+437592|51137|0|16282|111518
+--- backfill status
+complete|7
+failed|16
+none|205
+partial|18
+queued|518
+
+### end 2026-11-23 03:18:33 UTC
+--- rows: trades / verified / token_holders / tokens / token_prices(onchain)
+481367|51409|0|18031|124772
+--- backfill status
+complete|7
+failed|16
+none|205
+partial|18
+queued|519
+--- services
+SERVICE     STATE     STATUS
+analytics   running   Up 31 minutes (healthy)
+api         running   Up 31 minutes (healthy)
+backup      running   Up 32 minutes
+caddy       running   Up 32 minutes
+discovery   running   Up 31 minutes (healthy)
+frontend    running   Up 32 minutes
+migrate     exited    Exited (0) 10 hours ago
+postgres    running   Up 32 minutes (healthy)
+prices      running   Up 31 minutes (healthy)
+redis       running   Up 32 minutes (healthy)
+signals     running   Up 31 minutes (healthy)
+stream      running   Up 31 minutes (healthy)
+sync        exited    Exited (137) About an hour ago
+verifier    running   Up 31 minutes (healthy)
+  /smart-money-radar-analytics-1 restarts=0 oom=false
+  /smart-money-radar-api-1 restarts=0 oom=false
+  /smart-money-radar-backup-1 restarts=0 oom=false
+  /smart-money-radar-caddy-1 restarts=0 oom=false
+  /smart-money-radar-discovery-1 restarts=0 oom=false
+  /smart-money-radar-frontend-1 restarts=0 oom=false
+  /smart-money-radar-postgres-1 restarts=0 oom=false
+  /smart-money-radar-prices-1 restarts=0 oom=false
+  /smart-money-radar-redis-1 restarts=0 oom=false
+  /smart-money-radar-signals-1 restarts=0 oom=false
+  /smart-money-radar-stream-1 restarts=0 oom=false
+  /smart-money-radar-verifier-1 restarts=0 oom=false
+--- heartbeats (age s)
+analytics|65
+discovery|57
+prices|15
+signals|1
+stream|7
+verifier|37
+--- RPC / WS usage per endpoint since workers started (requests_ok, failed, 429, mean latency ms)
+   source   |    job    | status |  ok  | failed | r429 |  ms   |   upd    
+------------+-----------+--------+------+--------+------+-------+----------
+ rpc_helius | discovery | ok     | 1214 |      0 |    0 |  51.0 | 03:18:25
+ rpc_helius | stream    | ok     |  584 |      0 |    0 | 114.4 | 03:18:24
+ rpc_helius | verifier  | ok     |  261 |      0 |    0 | 175.0 | 03:18:24
+(3 rows)
+
+--- stream status
+ok|helius|0.2||315397
+--- stream connects / disconnects / idle watchdog in window
+--- error/traceback lines per service
+  stream: 0
+  verifier: 0
+  discovery: 0
+  prices: 0
+  analytics: 0
+  signals: 0
+  api: 0
+--- warnings mentioning helius
+--- latency (radar latency --minutes 30, inside the verifier container)
+{
+ "window_minutes": 30,
+ "stream_endpoint": "helius",
+ "stream_status": "ok",
+ "stream_last_message_age_s": 0.2,
+ "stream_delay_s": {
+  "n": 43488,
+  "p50": 2.18,
+  "p90": 3.11,
+  "p99": 3.62,
+  "max": 4.11
+ },
+ "verifier_delay_s": {
+  "n": 275,
+  "p50": 2.0,
+  "p90": 2.98,
+  "p99": 3.55,
+  "max": 3.79
+ },
+ "verified_in_window_total": 362,
+ "kol_alert_delay_s": {
+  "n": 4,
+  "p50": 1.93,
+  "p90": 2.5,
+  "p99": 2.5,
+  "max": 2.5
+ },
+ "discovery_delay_s": {
+  "n": 1,
+  "p50": 632.59,
+  "p90": 632.59,
+  "p99": 632.59,
+  "max": 632.59
+ },
+ "wallet_sync_age_s": {
+  "n": 11,
+  "p50": 42008.49,
+  "p90": 43157.44,
+  "p99": 43233.48,
+  "max": 43233.48
+ },
+ "backfill_finished_in_window": 0,
+ "backfill_queue": 519,
+ "price_newest_onchain_bar_age_s": 37.4,
+ "sol_usd_age_s": 37.4,
+ "rpc": [
+  {
+   "source": "rpc_helius",
+   "job": "discovery",
+   "ok": 1214,
+   "failed": 0,
+   "rate_limited": 0,
+   "mean_latency_ms": 51.0
+  },
+  {
+   "source": "rpc_helius",
+   "job": "stream",
+   "ok": 584,
+   "failed": 0,
+   "rate_limited": 0,
+   "mean_latency_ms": 114.4
+  },
+  {
+   "source": "rpc_helius",
+   "job": "verifier",
+   "ok": 261,
+   "failed": 0,
+   "rate_limited": 0,
+   "mean_latency_ms": 175.0
+  }
+ ]
+}
+--- secret leak check (counts only)
+  key in container logs: 0
+  key in api_sync_status: 0
+  files containing key (repo + run dir): 0
+### done 03:18:38 UTC
