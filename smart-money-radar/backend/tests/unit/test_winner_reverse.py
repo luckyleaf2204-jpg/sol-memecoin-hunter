@@ -24,6 +24,7 @@ def tr(mint, sol, mc, wallet="W1", bt=None, sig="s", slot=2000):
 def svc():
     s = StreamService(ctx=None)
     s.capture_mc, s.capture_min, s.capture_hours, s.buffer_minutes = 150.0, 0.05, 24.0, 120.0
+    s.creation_slot["M"] = CREATED_SLOT          # M was launched while the stream listened
     return s
 
 
@@ -43,6 +44,12 @@ def test_mispriced_market_cap_never_starts_a_capture():
     s = svc()
     s._maybe_start_capture(tr("M", 0.5, 800_000_000.0))
     assert "M" not in s.capture_until
+
+
+def test_established_tokens_are_never_captured():
+    s = svc()
+    s._maybe_start_capture(tr("OLD", 5.0, 9_000.0))       # not launched while the stream listened
+    assert "OLD" not in s.capture_until
 
 
 def test_buffer_drops_trades_older_than_the_window():

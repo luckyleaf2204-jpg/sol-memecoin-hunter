@@ -165,6 +165,7 @@ class StreamService:
         self.capture_hours = 24.0
         self.buffer_minutes = 120.0
         self.buffer_max_total = 1_500_000
+        self._recent_loaded = False
 
     # ---- helpers ----------------------------------------------------------------------
     async def refresh_sets(self) -> None:
@@ -188,6 +189,11 @@ class StreamService:
         self.capture_min = float(s["winner_capture_min_sol"])
         self.capture_hours = float(s["winner_capture_hours"])
         self.buffer_minutes = float(s["winner_buffer_minutes"])
+        if not self._recent_loaded:   # after a restart: launches of the last 6 h count as recent
+            for r in await self.ctx.pool.fetch("""SELECT mint, created_slot FROM tokens WHERE created_slot IS NOT NULL
+                    AND created_at > now() - interval '6 hours'"""):
+                self.creation_slot.setdefault(r["mint"], int(r["created_slot"]))
+            self._recent_loaded = True
         if not self.capture_until:   # survive a restart: tokens already under full capture
             now = time.time()
             for m, until in (await self.ctx.redis.hgetall(K_WINNER_CAPTURE) or {}).items():
@@ -299,6 +305,10 @@ class StreamService:
         mc = t.market_cap_sol
         # pump tokens have a 1e9 supply: an MC above 1e6 SOL is a mispriced (non-SOL quoted) row
         if mc is None or mc < self.capture_mc or mc > 1_000_000 or t.mint in self.capture_until:
+            return
+        # only tokens created while the stream listened (recent launches): established tokens have
+        # no early buyers to find and would flood the table with arbitrage trades
+        if t.mint not in self.creation_slot:
             return
         until = time.time() + self.capture_hours * 3600
         self.capture_until[t.mint] = until
