@@ -1,0 +1,81 @@
+### Batch 2 start 2026-11-23T05:06:22Z (data collection only; backfill_wallets_per_day 50 -> 100, same priority order, gTFA, cap 150000/day)
+--- counters before: total=45049 sync=40896 verifier=511 discovery=3642
+--- rows before: 594769
+settings: {'backfill_wallets_per_day': 100, 'helius_daily_credit_cap': 150000, 'helius_tx_history': True, 'trading_enabled': False}
+05:08:25 new_admitted=50 pending=37 total=47756 sync=43581 verifier=543 discovery=3642
+05:10:25 new_admitted=50 pending=22 total=50566 sync=46365 verifier=559 discovery=3642
+05:12:26 new_admitted=50 pending=0 total=53729 sync=49528 verifier=559 discovery=3642
+
+### Batch 2 end 2026-11-23 05:12:26 UTC
+--- counters after: total=53729 sync=49528 verifier=559 discovery=3642
+--- credits used during batch 2 (internal counter): total +8678 sync +8632
+--- outcome of the 50 new wallets
+  status   | backfill_status | method | bot  | count 
+-----------+-----------------+--------+------+-------
+ observed  | none            | -      | true |    17
+ observed  | partial         | gtfa   |      |    16
+ candidate | complete        | gtfa   |      |     4
+ tracked   | partial         | gtfa   | true |     4
+ candidate | partial         | gtfa   |      |     3
+ tracked   | partial         | gtfa   |      |     3
+ observed  | complete        | gtfa   |      |     2
+ tracked   | complete        | gtfa   |      |     1
+(8 rows)
+
+--- totals of the backfilled ones
+ wallets | complete | partial | sigs  |  txs  | missing | failed_onchain | trades | verified | credits_est 
+---------+----------+---------+-------+-------+---------+----------------+--------+----------+-------------
+      33 |        7 |      26 | 85392 | 74631 |       0 |          10761 |  61013 |    57886 |        8613
+(1 row)
+
+--- per wallet
+    w     |    st    | sigs | miss | trades | vshare | cr  
+----------+----------+------+------+--------+--------+-----
+ 2bRoascf | partial  | 3000 |    0 |   1244 | 0.4695 | 301
+ EtZWfmdy | partial  | 3000 |    0 |    929 | 0.4693 | 301
+ 4SvBbmkD | partial  | 3000 |    0 |   2577 | 0.9981 | 301
+ 5TYcXEyx | partial  | 3000 |    0 |   2743 | 0.9996 | 301
+ G2oZrd1k | partial  | 3000 |    0 |   1537 | 0.0065 | 301
+ 7CRxMwhn | partial  | 3000 |    0 |   2711 | 1.0    | 301
+ DcTQjBVa | partial  | 3000 |    0 |   2230 | 0.9834 | 301
+ 5fpZap79 | partial  | 3000 |    0 |   2734 | 0.9989 | 301
+ 2v1RQr54 | partial  | 3000 |    0 |   2746 | 0.9985 | 301
+ 2qETWwbH | partial  | 3000 |    0 |   2735 | 1.0    | 301
+ EXLV38wL | partial  | 3000 |    0 |   2743 | 1.0    | 301
+ 2tghzouC | partial  | 3000 |    0 |   2742 | 1.0    | 301
+ 5XD7tN74 | partial  | 3000 |    0 |   2743 | 0.9996 | 301
+ 43EHkFN9 | partial  | 3000 |    0 |   2743 | 0.9996 | 301
+ ENskGQev | partial  | 3000 |    0 |    253 | 0.9407 | 301
+ 4Z8bT3cR | partial  | 3000 |    0 |   2738 | 0.9989 | 301
+ 8274EUKE | partial  | 3000 |    0 |   1198 | 0.7838 | 301
+ 4RUtEsqu | partial  | 3000 |    0 |   2742 | 0.9996 | 301
+ 6f83v9ED | partial  | 3000 |    0 |   2725 | 0.9996 | 301
+ 2MgR4ipw | partial  | 3000 |    0 |   2744 | 0.9989 | 301
+ 3agHhDH1 | partial  | 3000 |    0 |   2739 | 0.9996 | 301
+ 6EiDsccy | partial  | 3000 |    0 |   2681 | 0.9993 | 301
+ nogZ6727 | partial  | 3000 |    0 |    204 | 1.0    | 301
+ 8YcbyX92 | partial  | 3000 |    0 |     19 | 1.0    | 301
+ 26S5eNUK | partial  | 3000 |    0 |   2726 | 0.9996 | 301
+ 5gQb1QFJ | partial  | 3000 |    0 |   2730 | 1.0    | 301
+ 6GQWbMEC | complete | 1764 |    0 |   1090 | 1.0    | 181
+ Gcn3NuPF | complete | 1602 |    0 |    988 | 1.0    | 171
+ 8whR2Fm1 | complete | 1534 |    0 |   1123 | 1.0    | 161
+ VwjohQMj | complete | 1480 |    0 |    873 | 1.0    | 151
+ 56A6Mekf | complete |  718 |    0 |     94 | 0.8298 |  81
+ 4oN6EAEw | complete |  249 |    0 |    152 | 0.5658 |  31
+ 7Kt8MvUa | complete |   45 |    0 |     37 | 0.2703 |  11
+(33 rows)
+
+--- backfill runs per wallet in sync log since 2026-11-23T05:06:22Z (must all be 1)
+  wallets: 33 1
+--- batch-1 wallets backfilled again since 2026-11-23T05:06:22Z (must be 0): 0
+--- sync log summary since 2026-11-23T05:06:22Z
+     33 'mode': 'backfill', 'method': 'gtfa'
+      1 'mode': 'sync', 'method': 'rpc'
+     17 'skipped': 'high_frequency'
+  ERROR lines: 0
+--- verify-pnl for batch-2 wallets (verified positions; information only)
+{"batch_wallets": 33, "pnl_positions_checked": 3258, "pnl_within_0.001_sol": 0.9926, "pnl_within_0.01_sol": 1.0, "pnl_abs_diff_sol": {"median": 0.0, "p90": 0.0, "max": 0.005544}, "performance_mismatches": 0, "score_abs_diff": {"max": 0.0, "within_0.01": 33}}
+token check ok 3234 not_netting_to_zero 24
+--- key leak: logs 0 files 0
+### done 05:15:54
