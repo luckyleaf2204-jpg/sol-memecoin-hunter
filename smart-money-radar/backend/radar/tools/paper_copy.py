@@ -165,10 +165,14 @@ def market_events(tx: dict, mint_hint: str | None = None) -> list[dict]:
                 continue
             fee = (ev.lp_fee + ev.protocol_fee + ev.coin_creator_fee) / ev.quote_amount
             b0, q0 = ev.pool_base_reserves / 1e6, ev.pool_quote_reserves / 1e9
+            # verified on chain 23/11/2026: the event reserves are BEFORE the swap (39/39 consecutive
+            # pairs: base reserves of trade k+1 = base reserves of trade k -/+ its base amount);
+            # the LP fee stays in the pool, protocol and creator fees leave it
+            lp = ev.lp_fee / 1e9
             if ev.side == "buy":
-                b1, q1 = b0 - ev.base_amount / 1e6, q0 + ev.quote_amount / 1e9
+                b1, q1 = b0 - ev.base_amount / 1e6, q0 + ev.quote_amount / 1e9 + lp
             else:
-                b1, q1 = b0 + ev.base_amount / 1e6, q0 - ev.quote_amount / 1e9
+                b1, q1 = b0 + ev.base_amount / 1e6, q0 - ev.quote_amount / 1e9 + lp
             out.append({"venue": "pumpswap", "market": ev.pool, "mint": mint_hint, "user": ev.user, "side": ev.side,
                         "sol": ev.quote_amount / 1e9, "tok": ev.base_amount / 1e6, "x": q1, "y": b1, "x_pre": q0, "y_pre": b0,
                         "fee": fee, "i": i})
@@ -284,10 +288,22 @@ def positions_from(trades: list[dict]) -> list[dict]:
 
 
 # ------------------------------------------------------------------ market side
+def anchor_sig(rpc: PublicRPC, slot: int) -> str | None:
+    """A signature of the first produced block at or after `slot` (used as the 'before' bound, so the
+    market's signatures are read only inside the window, whatever the market's activity)."""
+    for sl in range(slot, slot + 8):
+        b = rpc.call("getBlock", [sl, {"transactionDetails": "signatures", "rewards": False,
+                                       "maxSupportedTransactionVersion": 1, "commitment": "confirmed"}])
+        if b and b.get("signatures"):
+            return b["signatures"][0]
+    return None
+
+
 def market_window(rpc: PublicRPC, market: str, after_sig: str, after_slot: int, before_sig: str | None,
                   mint: str, cache: dict) -> dict:
     """Market states after `after_sig` for `window_slots` slots: [(slot, order, state)]."""
-    sigs, before, pages, complete = [], before_sig, 0, False
+    sigs, pages, complete = [], 0, False
+    before = anchor_sig(rpc, after_slot + SIM["window_slots"] + 1) or before_sig
     while pages < SIM["max_sig_pages"]:
         page = rpc.sigs(market, before=before, until=after_sig)
         pages += 1
@@ -387,7 +403,7 @@ def simulate_position(p: dict, windows: dict) -> dict:
             if t["venue"] != first["venue"]:
                 exit_ok = False
                 r["exit_note"] = "ví bán ở sàn khác (token đã chuyển sàn): thoát theo trạng thái gần nhất"
-            if wx is None:
+            if wx is None or (not wx["states"] and not wx["complete"]):
                 exit_ok = False
                 sx = t["state"]
             else:
@@ -459,7 +475,7 @@ def check_pumpswap_reserves(windows: dict) -> dict:
                 prev = None
                 continue
             if prev is not None:
-                if abs(s["x_pre"] - prev["x"]) <= 1e-6 * max(1, prev["x"]) + 1e-9:
+                if abs(s["y_pre"] - prev["y"]) <= 1e-6 * max(1, prev["y"]) + 1e-6:
                     ok += 1
                 else:
                     bad += 1
