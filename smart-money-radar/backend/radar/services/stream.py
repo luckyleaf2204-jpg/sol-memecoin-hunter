@@ -7,6 +7,9 @@ decoded locally (radar.decoder.logs). For each trade we:
   * update the token's last price / market cap / liquidity / curve progress,
   * store the trade when the wallet is tracked, the trade is >= stream_store_min_sol, or it
     happened in the token's creation slot (bundle analysis),
+  * winner capture: smaller trades (>= winner_capture_min_sol) are buffered per token; when a
+    token reaches winner_capture_mc_sol its buffer is written and its trades are kept for
+    winner_capture_hours, so every early buyer of a rising token is on record,
   * for tracked / smart wallets: queue full verification (getTransaction) and push the trade
     to the signal engine.
 Failed transactions (err != null) are ignored here: they move no funds.
@@ -21,12 +24,12 @@ import datetime as dt
 import json
 import logging
 import time
-from collections import defaultdict
+from collections import defaultdict, deque
 from typing import Any
 
 import websockets
 
-from ..context import K_DIRTY_WALLETS, Q_VERIFY, S_SMART_TRADES, Ctx
+from ..context import K_DIRTY_WALLETS, K_WINNER_CAPTURE, Q_VERIFY, S_SMART_TRADES, Ctx
 from ..db import repo
 from ..decoder.logs import records_from_logs
 from ..decoder.models import TradeRecord
@@ -149,6 +152,19 @@ class StreamService:
         self.gaps: list[dict] = []
         self.store_min = 1.0
         self.discovery_min = 2.0
+        # winner capture (research phase 1): trades the store rule drops are buffered per token for
+        # `winner_buffer_minutes`; once a token reaches `winner_capture_mc_sol` its buffered trades are
+        # written and every further trade >= `winner_capture_min_sol` is kept for `winner_capture_hours`,
+        # so all early buyers of a rising token (not only >= 1 SOL) can be analysed later.
+        self.buffer: dict[str, deque] = {}
+        self.buffer_last: dict[str, float] = {}
+        self.capture_until: dict[str, float] = {}
+        self.new_captures: dict[str, float] = {}
+        self.capture_mc = 150.0
+        self.capture_min = 0.05
+        self.capture_hours = 24.0
+        self.buffer_minutes = 120.0
+        self.buffer_max_total = 1_500_000
 
     # ---- helpers ----------------------------------------------------------------------
     async def refresh_sets(self) -> None:
@@ -168,6 +184,16 @@ class StreamService:
         self.store_min = float(s["stream_store_min_sol"])
         self.discovery_min = float(s["discovery_min_buy_sol"])
         self.bars.min_trade = float(s["peak_min_trade_sol"])
+        self.capture_mc = float(s["winner_capture_mc_sol"])
+        self.capture_min = float(s["winner_capture_min_sol"])
+        self.capture_hours = float(s["winner_capture_hours"])
+        self.buffer_minutes = float(s["winner_buffer_minutes"])
+        if not self.capture_until:   # survive a restart: tokens already under full capture
+            now = time.time()
+            for m, until in (await self.ctx.redis.hgetall(K_WINNER_CAPTURE) or {}).items():
+                m = m.decode() if isinstance(m, bytes) else m
+                if float(until) > now:
+                    self.capture_until[m] = float(until)
         if not self.pools:
             for r in await self.ctx.pool.fetch("SELECT pool, base_mint, quote_mint FROM amm_pools"):
                 self.pools[r["pool"]] = (r["base_mint"], r["quote_mint"])
@@ -243,13 +269,74 @@ class StreamService:
                 # PumpSwap is dominated by arbitrage / wash bots: keep only sizeable buys of
                 # untracked wallets (enough for discovery); price bars still use every trade
                 keep = t.tx_type == "buy" and t.sol_amount >= self.discovery_min
+            if not (tracked or keep):
+                keep = self._capture(t)
             if tracked or keep:
                 self.pending_trades.append(t)
                 if tracked:
                     self.stats["tracked_trades"] += 1
+            self._maybe_start_capture(t)
+
+    def _capture(self, t: TradeRecord) -> bool:
+        """True when the trade belongs to a token under full capture; otherwise buffer it."""
+        if t.sol_amount < self.capture_min:
+            return False
+        until = self.capture_until.get(t.mint)
+        if until is not None:
+            if until > t.block_time:
+                self.stats["captured_trades"] += 1
+                return True
+            self.capture_until.pop(t.mint, None)
+            return False
+        q = self.buffer.get(t.mint)
+        if q is None:
+            q = self.buffer[t.mint] = deque(maxlen=5000)
+        q.append(t)
+        self.buffer_last[t.mint] = time.time()
+        return False
+
+    def _maybe_start_capture(self, t: TradeRecord) -> None:
+        mc = t.market_cap_sol
+        # pump tokens have a 1e9 supply: an MC above 1e6 SOL is a mispriced (non-SOL quoted) row
+        if mc is None or mc < self.capture_mc or mc > 1_000_000 or t.mint in self.capture_until:
+            return
+        until = time.time() + self.capture_hours * 3600
+        self.capture_until[t.mint] = until
+        self.new_captures[t.mint] = until
+        buffered = self.buffer.pop(t.mint, None) or ()
+        self.buffer_last.pop(t.mint, None)
+        self.pending_trades.extend(buffered)
+        self.stats["captured_tokens"] += 1
+        self.stats["buffer_flushed_trades"] += len(buffered)
+
+    def prune_buffer(self) -> None:
+        """Drop buffered trades older than the window, tokens quiet for 20 min, and the oldest
+        tokens beyond the memory cap."""
+        now = time.time()
+        horizon = now - self.buffer_minutes * 60
+        for m in list(self.buffer):
+            q = self.buffer[m]
+            while q and q[0].block_time < horizon:
+                q.popleft()
+            if not q or self.buffer_last.get(m, 0) < now - 1200:
+                self.buffer.pop(m, None)
+                self.buffer_last.pop(m, None)
+        total = sum(len(q) for q in self.buffer.values())
+        if total > self.buffer_max_total:
+            for m in sorted(self.buffer, key=lambda k: self.buffer_last.get(k, 0)):
+                total -= len(self.buffer.pop(m))
+                self.buffer_last.pop(m, None)
+                if total <= self.buffer_max_total * 0.8:
+                    break
+        self.stats["buffer_tokens"] = len(self.buffer)
+        self.stats["buffer_trades"] = sum(len(q) for q in self.buffer.values())
+        self.stats["capture_tokens_active"] = len(self.capture_until)
 
     async def flush(self) -> None:
         trades, self.pending_trades = self.pending_trades, []
+        if self.new_captures:
+            caps, self.new_captures = self.new_captures, {}
+            await self.ctx.redis.hset(K_WINNER_CAPTURE, mapping={m: str(u) for m, u in caps.items()})
         for sig, fast in self.pending_verify:
             if fast:
                 asyncio.create_task(self._fast_verify(sig))
@@ -370,6 +457,7 @@ class StreamService:
             try:
                 if n % 15 == 0:
                     await self.refresh_sets()
+                    self.prune_buffer()
                 if self.unknown_pools:
                     await self.resolve_unknown_pools()
                 await self.flush()

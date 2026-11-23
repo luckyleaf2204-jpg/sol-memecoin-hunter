@@ -79,6 +79,7 @@ services:
   prices:      { <<: *backend, command: ["python", "-m", "radar", "prices"] }
   analytics:   { <<: *backend, command: ["python", "-m", "radar", "analytics"] }
   signals:     { <<: *backend, command: ["python", "-m", "radar", "signals"] }
+  winners:     { <<: *backend, command: ["python", "-m", "radar", "winners"] }   # winner-reverse discovery, database only
 
   frontend:
     build: ./frontend

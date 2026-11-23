@@ -24,15 +24,16 @@ import sys
 
 log = logging.getLogger("radar")
 
-ROLES = ("stream", "verifier", "sync", "discovery", "prices", "analytics", "signals")
+ROLES = ("stream", "verifier", "sync", "discovery", "prices", "analytics", "signals", "winners")
 
 
 async def _run_role(role: str) -> None:
     from .context import create_ctx
     from .services import (analytics_runner, discovery, health, prices, signal_engine, stream, verifier,
-                           wallet_sync)
+                           wallet_sync, winner_reverse)
     mains = {"stream": stream.main, "verifier": verifier.main, "sync": wallet_sync.main, "discovery": discovery.main,
-             "prices": prices.main, "analytics": analytics_runner.main, "signals": signal_engine.main}
+             "prices": prices.main, "analytics": analytics_runner.main, "signals": signal_engine.main,
+             "winners": winner_reverse.main}
     roles = list(ROLES) if role == "all" else [role]
     ctx = await create_ctx(role, run_migrations=True, pool_size=4 + 3 * len(roles))
     log.info("starting roles %s (trading disabled: read-only analytics)", roles)

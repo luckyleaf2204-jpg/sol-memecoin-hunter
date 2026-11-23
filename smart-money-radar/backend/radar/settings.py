@@ -82,6 +82,21 @@ DEFAULTS: dict[str, Any] = {
     "helius_tx_history": False,           # backfill via getTransactionsForAddress (Helius only)
     "helius_daily_credit_cap": 150000,    # backfill pauses when today's Helius credits (all workers) reach this
     "backfill_wallets_per_day": 50,       # new backfills started per UTC day, highest priority first
+    # winner reverse (research phases 1-2, 23/11/2026): full capture of rising tokens and early buyers
+    "winner_capture_mc_sol": 150.0,       # a token at this market cap gets all its trades stored
+    "winner_capture_min_sol": 0.05,       # ... trades below this are dust and never stored
+    "winner_capture_hours": 24.0,         # ... for this long after it crossed the market cap
+    "winner_buffer_minutes": 120.0,       # stream keeps dropped trades this long in memory
+    "winner_reverse_enabled": True,
+    "winner_min_peak_mc_sol": 400.0,      # winner: peak market cap (robust p95) at least this
+    "winner_min_multiple": 5.0,           # ... at least this multiple of the first 10 minutes
+    "winner_hold_fraction": 0.3,          # ... still >= 30 % of the peak one hour after the peak
+    "winner_eval_after_hours": 6.0,       # evaluate a token once it is this old (exits happened)
+    "winner_early_mc_fraction": 0.3,      # early buyer: first buy at <= 30 % of the peak market cap
+    "winner_min_buy_sol": 0.2,            # early buyer: at least this much SOL in
+    "winner_min_tokens": 3,               # candidate: profitable early buyer of >= 3 different winners
+    "winner_lookback_days": 14,
+    "winner_max_trades_per_day": 100,     # candidate: not a high-frequency bot
     "stream_store_min_sol": 1.0,
     "stream_retention_days": 7,
     # backtest
@@ -165,6 +180,20 @@ SPEC: dict[str, Spec] = {
     "helius_tx_history": Spec(bool),
     "helius_daily_credit_cap": Spec(int, 1000, 10_000_000),
     "backfill_wallets_per_day": Spec(int, 0, 100000),
+    "winner_capture_mc_sol": Spec((int, float), 10, 100000),
+    "winner_capture_min_sol": Spec((int, float), 0, 10),
+    "winner_capture_hours": Spec((int, float), 1, 168),
+    "winner_buffer_minutes": Spec((int, float), 10, 360),
+    "winner_reverse_enabled": Spec(bool),
+    "winner_min_peak_mc_sol": Spec((int, float), 10, 1_000_000),
+    "winner_min_multiple": Spec((int, float), 1.5, 1000),
+    "winner_hold_fraction": Spec((int, float), 0, 1),
+    "winner_eval_after_hours": Spec((int, float), 1, 72),
+    "winner_early_mc_fraction": Spec((int, float), 0.01, 1),
+    "winner_min_buy_sol": Spec((int, float), 0, 100),
+    "winner_min_tokens": Spec(int, 1, 50),
+    "winner_lookback_days": Spec(int, 1, 60),
+    "winner_max_trades_per_day": Spec((int, float), 1, 100000),
     "stream_store_min_sol": Spec((int, float), 0, 1000),
     "stream_retention_days": Spec(int, 1, 365),
     "backtest_slippage_bps": Spec((int, float), 0, 5000),

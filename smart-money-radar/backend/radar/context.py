@@ -26,6 +26,7 @@ log = logging.getLogger(__name__)
 EVENTS_CHANNEL = "radar:events"
 Q_VERIFY = "q:verify"
 Q_WALLET_SYNC = "q:wallet_sync"
+K_WINNER_CAPTURE = "winner:capture"   # hash mint -> unix time until which every trade is stored
 Q_PRICE_BACKFILL = "q:price_backfill"
 S_SMART_TRADES = "ev:smart_trades"
 K_TRACKED = "set:tracked_wallets"
