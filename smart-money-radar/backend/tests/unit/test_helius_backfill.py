@@ -106,3 +106,11 @@ def test_token_balance_after_close_reads_the_wallets_own_account():
         {"owner": W, "mint": M, "uiTokenAmount": {"uiAmount": 0.25}}]}}
     assert wallet_token_after(t, W, M) == 0.25
     assert wallet_token_after({"meta": {"postTokenBalances": []}}, W, M) == 0.0
+
+
+def test_stale_backfill_message_for_a_wallet_already_backfilled_becomes_an_incremental_sync():
+    import inspect
+    src = inspect.getsource(ws.sync_wallet)
+    # the guard must run before the backfill gate and before any RPC call
+    assert src.index('elif mode == "backfill" and w["backfill_status"] in ("complete", "partial")') < \
+        src.index("reason = await backfill_gate(")

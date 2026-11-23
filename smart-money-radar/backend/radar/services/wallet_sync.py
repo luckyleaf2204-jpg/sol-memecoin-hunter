@@ -114,6 +114,10 @@ async def sync_wallet(ctx: Ctx, wallet: str, mode: str, pools: PoolCache, tracke
         return {"skipped": True}
     if mode == "sync" and w["backfill_status"] not in ("complete", "partial"):
         mode = "backfill"
+    elif mode == "backfill" and w["backfill_status"] in ("complete", "partial"):
+        # a queued message can outlive the backfill it asked for (duplicate messages in the queue);
+        # the history is already read, so only fetch what is new (seen 23/11/2026: 6 backfills per wallet)
+        mode = "sync"
     now = int(time.time())
     cutoff = now - int(s["backfill_days"]) * 86400
     probe_calls = 0
