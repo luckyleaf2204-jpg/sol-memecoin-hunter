@@ -32,6 +32,7 @@ import websockets
 from ..context import K_DIRTY_WALLETS, K_WINNER_CAPTURE, Q_VERIFY, S_SMART_TRADES, Ctx
 from ..db import repo
 from ..decoder.logs import records_from_logs
+from ..decoder.migration import graduation_from_tx, is_migration_log
 from ..decoder.models import TradeRecord
 from ..solana.base58 import b58encode
 from ..solana.constants import PUMP_AMM_PROGRAM, PUMP_INITIAL_REAL_TOKEN, PUMP_PROGRAM
@@ -166,6 +167,7 @@ class StreamService:
         self.buffer_minutes = 120.0
         self.buffer_max_total = 1_500_000
         self._recent_loaded = False
+        self.pending_migration_fetch: list[str] = []
 
     # ---- helpers ----------------------------------------------------------------------
     async def refresh_sets(self) -> None:
@@ -254,6 +256,13 @@ class StreamService:
         for m in out["migrations"]:
             self.pools[m.pool] = (m.mint, "So11111111111111111111111111111111111111112")
             self.pending_migrations.append((m, sig))
+        if not out["migrations"] and is_migration_log(logs):
+            # graduation whose logs were truncated (the migration event is at the end): the full
+            # transaction is read (public RPC) to find the mint; ~80 % of graduations on 23/11/2026
+            self.pending_migration_fetch.append(sig)
+            self.stats["migrations_truncated"] += 1
+        elif out["migrations"]:
+            self.stats["migrations_from_event"] += len(out["migrations"])
         for t in out["trades"]:
             self.stats["trades"] += 1
             self.bars.add(t)
@@ -342,8 +351,30 @@ class StreamService:
         self.stats["buffer_trades"] = sum(len(q) for q in self.buffer.values())
         self.stats["capture_tokens_active"] = len(self.capture_until)
 
+    async def _resolve_truncated_migration(self, sig: str) -> None:
+        for attempt in range(5):        # the node may not serve a just-confirmed transaction yet
+            try:
+                tx = await self.ctx.rpc.get_transaction(sig)
+            except Exception as e:
+                log.warning("migration %s: %s", sig, type(e).__name__)
+                tx = None
+            if tx:
+                g = graduation_from_tx(tx)
+                if g:
+                    async with self.ctx.pool.acquire() as conn:
+                        await repo.mark_migration_fallback(conn, g["mint"], tx.get("blockTime"), sig, g["pool"])
+                    self.stats["migrations_from_full_tx"] += 1
+                else:
+                    self.stats["migrations_not_resolved"] += 1
+                return
+            await asyncio.sleep(2 * (attempt + 1))
+        self.stats["migrations_not_resolved"] += 1
+
     async def flush(self) -> None:
         trades, self.pending_trades = self.pending_trades, []
+        for sig in self.pending_migration_fetch:
+            asyncio.create_task(self._resolve_truncated_migration(sig))
+        self.pending_migration_fetch = []
         if self.new_captures:
             caps, self.new_captures = self.new_captures, {}
             await self.ctx.redis.hset(K_WINNER_CAPTURE, mapping={m: str(u) for m, u in caps.items()})

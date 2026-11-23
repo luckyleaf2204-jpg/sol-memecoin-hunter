@@ -123,6 +123,20 @@ async def mark_migrations(conn: asyncpg.Connection, migrations: list, signature:
         await upsert_pool(conn, m.pool, m.mint, "So11111111111111111111111111111111111111112", "migration_event")
 
 
+async def mark_migration_fallback(conn: asyncpg.Connection, mint: str, block_time: int | None, signature: str,
+                                  pool: str | None) -> None:
+    """Graduation found from the full transaction (logs truncated, no event): never clears a
+    known pool, never moves an earlier migration time."""
+    await conn.execute("""INSERT INTO tokens(mint, curve_complete, migrated_at, migration_signature, amm_pool)
+        VALUES ($1, true, $2, $3, $4) ON CONFLICT (mint) DO UPDATE SET curve_complete = true,
+        migrated_at = COALESCE(tokens.migrated_at, EXCLUDED.migrated_at),
+        migration_signature = COALESCE(tokens.migration_signature, EXCLUDED.migration_signature),
+        amm_pool = COALESCE(EXCLUDED.amm_pool, tokens.amm_pool), updated_at = now()""",
+                       mint, ts(block_time), signature, pool)
+    if pool:
+        await upsert_pool(conn, pool, mint, "So11111111111111111111111111111111111111112", "migration_full_tx")
+
+
 async def upsert_pool(conn: asyncpg.Connection, pool: str, base: str, quote: str, source: str) -> None:
     await conn.execute("""INSERT INTO amm_pools(pool, base_mint, quote_mint, source) VALUES ($1,$2,$3,$4)
         ON CONFLICT (pool) DO NOTHING""", pool, base, quote, source)
