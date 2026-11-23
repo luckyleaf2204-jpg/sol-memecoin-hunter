@@ -41,7 +41,16 @@ def wallet_delta_lamports(tx: dict, wallet: str) -> tuple[int, set[str]]:
     return d, {m for m, v in moved.items() if v != 0}
 
 
-async def run(out: str | None = None) -> dict:
+def wallet_token_after(tx: dict, wallet: str, mint: str) -> float:
+    """The wallet's balance of `mint` after this transaction (UI units), 0 when it has no account."""
+    for b in (tx.get("meta") or {}).get("postTokenBalances") or []:
+        if b.get("owner") == wallet and b.get("mint") == mint:
+            return float((b.get("uiTokenAmount") or {}).get("uiAmount") or 0)
+    return 0.0
+
+
+async def run(out: str | None = None, since: str | None = None) -> dict:
+    """since: ISO time; only wallets whose backfill finished at/after it (one backfill batch)."""
     from ..analytics.performance import Performance
     from ..analytics.scoring import score_wallet
     ctx = await create_ctx("verify-pnl", pool_size=2)
@@ -49,10 +58,20 @@ async def run(out: str | None = None) -> dict:
     try:
         p = ctx.pool
         wsol = "So11111111111111111111111111111111111111112"
-        pos = await p.fetch("""SELECT p.wallet, p.mint, p.cycle_no, p.realized_pnl_sol, p.buy_sol, p.signatures, p.flags, p.n_buys, p.n_sells
+        scope = "(w.backfill_status IN ('complete','partial') OR w.last_synced_at IS NOT NULL)"
+        args: list = []
+        if since:
+            import datetime as _dt
+            scope = "w.backfill_status IN ('complete','partial') AND w.backfill_to >= $1"
+            args = [_dt.datetime.fromisoformat(since.replace("Z", "+00:00"))]
+            rep["batch_wallets"] = await p.fetchval(f"SELECT count(*) FROM wallets w WHERE {scope}", *args)
+        pos = await p.fetch(f"""SELECT p.wallet, p.mint, p.cycle_no, p.realized_pnl_sol, p.buy_sol, p.signatures, p.flags,
+                p.n_buys, p.n_sells, p.tokens_bought
             FROM wallet_positions p JOIN wallets w ON w.address = p.wallet
-            WHERE (w.backfill_status IN ('complete','partial') OR w.last_synced_at IS NOT NULL)
-              AND p.status = 'closed' AND p.verification = 'verified'""")
+            WHERE {scope} AND p.status = 'closed' AND p.verification = 'verified'""", *args)
+        dust = float((await ctx.settings.get()).get("dust_fraction") or 0.01)
+        tok_ok = tok_bad = 0
+        tok_bad_ex = []
         checked, skipped, diffs, rel = 0, {"missing_raw_tx": 0, "other_token_in_same_tx": 0, "transfers": 0, "capped_signatures": 0}, [], []
         worst = []
         for r in pos:
@@ -79,6 +98,15 @@ async def run(out: str | None = None) -> dict:
             if bad:
                 skipped["other_token_in_same_tx"] += 1
                 continue
+            # token side: after the position's last transaction the wallet holds at most dust of the mint
+            last = max((raws[x] for x in sigs), key=lambda t: (t.get("slot") or 0))
+            left = wallet_token_after(last, r["wallet"], r["mint"])
+            if left <= dust * max(float(r["tokens_bought"] or 0), 1e-12):
+                tok_ok += 1
+            else:
+                tok_bad += 1
+                tok_bad_ex.append({"wallet": r["wallet"], "mint": r["mint"], "tokens_left": left,
+                                   "tokens_bought": float(r["tokens_bought"] or 0)})
             onchain = total / 1e9
             sys_pnl = float(r["realized_pnl_sol"])
             diff = sys_pnl - onchain
@@ -89,6 +117,7 @@ async def run(out: str | None = None) -> dict:
         worst.sort(reverse=True)
         ad = sorted(abs(x) for x in diffs)
         rep["pnl_positions_checked"] = checked
+        rep["token_balance_after_close"] = {"ok": tok_ok, "not_closed_on_chain": tok_bad, "examples": tok_bad_ex[:5]}
         rep["pnl_positions_skipped"] = skipped
         if checked:
             rep["pnl_abs_diff_sol"] = {"median": round(statistics.median(ad), 6), "p90": round(ad[int(0.9 * (len(ad) - 1))], 6),
@@ -108,7 +137,7 @@ async def run(out: str | None = None) -> dict:
                 (SELECT COALESCE(sum(realized_pnl_sol), 0) FROM wallet_positions x WHERE x.wallet = wp.wallet AND x.qualifying
                    AND x.status IN ('closed','written_off') AND COALESCE(x.first_buy_at, x.opened_at) >= now() - interval '30 days') AS pnl_q
             FROM wallet_performance wp JOIN wallets w ON w.address = wp.wallet
-            WHERE wp.period_days = 30 AND (w.backfill_status IN ('complete','partial') OR w.last_synced_at IS NOT NULL)""")
+            WHERE wp.period_days = 30 AND {scope}""".replace("{scope}", scope), *args)
         mism = []
         for r in perf:
             wr = (r["wins_q"] / r["closed_q"]) if r["closed_q"] else None
@@ -126,7 +155,7 @@ async def run(out: str | None = None) -> dict:
         s = await ctx.settings.get()
         rows = await p.fetch("""SELECT sc.wallet, sc.score, sc.components, wp.* FROM smart_money_scores sc
             JOIN wallet_performance wp USING (wallet, period_days) JOIN wallets w ON w.address = sc.wallet
-            WHERE sc.period_days = 30 AND (w.backfill_status IN ('complete','partial') OR w.last_synced_at IS NOT NULL)""")
+            WHERE sc.period_days = 30 AND {scope}""".replace("{scope}", scope), *args)
         sd = []
         fields = set(Performance.__dataclass_fields__)
         for r in rows:

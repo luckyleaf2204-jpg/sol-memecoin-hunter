@@ -39,6 +39,20 @@ class RpcError(Exception):
         self.endpoint = endpoint
 
 
+def helius_credits(method: str, params: list | None, result: Any) -> int:
+    """Helius price list (helius.dev/docs/billing/credits): standard RPC 1 credit;
+    getTransactionsForAddress 10 credits per 100 full transactions returned (min 10), signatures-only 10."""
+    if method == "getTransactionsForAddress":
+        opts = (params or [None, {}])[1] if params and len(params) > 1 else {}
+        if (opts or {}).get("transactionDetails") == "signatures":
+            return 10
+        n = len((result or {}).get("data") or []) if isinstance(result, dict) else 0
+        return max(10, 10 * ((n + 99) // 100))
+    if method in ("getProgramAccounts", "getTransfersByAddress"):
+        return 10
+    return 1
+
+
 class SolanaRpc:
     def __init__(self, endpoints: tuple[RpcEndpoint, ...] | list[RpcEndpoint], redis: Any | None = None,
                  timeout: float = 30.0):
@@ -49,6 +63,7 @@ class SolanaRpc:
         self._limiters = {e.name: RateLimiter(f"rpc_{e.name}", e.rps, redis) for e in self.endpoints}
         self._cooldown_until: dict[str, float] = {}
         self._ids = itertools.count(1)
+        self.tag = "rpc"   # worker name, set by create_ctx; used to split the Helius credit counter
         self._client = httpx.AsyncClient(timeout=httpx.Timeout(timeout, connect=10.0),
                                          headers={"content-type": "application/json"},
                                          limits=httpx.Limits(max_connections=64))
@@ -118,7 +133,62 @@ class SolanaRpc:
             raise RpcError(f"{ep.name} {method}: {err.get('message')}", code, ep.name)
         lim.on_success()
         st.record_ok((time.monotonic() - t0) * 1000)
+        if ep.name == "helius":
+            await self._count_credits(method, params, data.get("result"))
         return data.get("result")
+
+    async def _count_credits(self, method: str, params: list, result: Any) -> None:
+        """Estimated Helius credits per successful call, per UTC day, total and per worker (Redis).
+        The estimate follows Helius' price list; the real figure is on the Helius dashboard."""
+        if self.redis is None:
+            return
+        try:
+            n = helius_credits(method, params, result)
+            day = time.strftime("%Y%m%d", time.gmtime())
+            pipe = self.redis.pipeline()
+            for k in (f"helius_credits:{day}", f"helius_credits:{day}:{self.tag}"):
+                pipe.incrby(k, n)
+                pipe.expire(k, 8 * 86400)
+            await pipe.execute()
+        except Exception:  # accounting must never break a call
+            pass
+
+    async def helius_credits_today(self, tag: str | None = None) -> int:
+        if self.redis is None:
+            return 0
+        day = time.strftime("%Y%m%d", time.gmtime())
+        v = await self.redis.get(f"helius_credits:{day}" + (f":{tag}" if tag else ""))
+        return int(v or 0)
+
+    def has_helius(self) -> bool:
+        return any(e.name == "helius" for e in self.endpoints)
+
+    async def get_transactions_for_address(self, address: str, *, pagination_token: str | None = None,
+                                           limit: int = 100, full: bool = True) -> tuple[list[dict], str | None]:
+        """Helius-only getTransactionsForAddress: newest first, up to 100 full transactions per call
+        (same JSON as getTransaction jsonParsed, checked field by field on 23/11/2026).
+        Returns (transactions, next pagination token or None)."""
+        ep = next((e for e in self.endpoints if e.name == "helius"), None)
+        if ep is None:
+            raise RpcError("getTransactionsForAddress needs a Helius endpoint", None, None)
+        opts: dict[str, Any] = {"transactionDetails": "full" if full else "signatures", "sortOrder": "desc",
+                                "limit": limit, "commitment": "confirmed"}
+        if full:
+            opts.update(encoding="jsonParsed", maxSupportedTransactionVersion=MAX_TX_VERSION)
+        if pagination_token:
+            opts["paginationToken"] = pagination_token
+        last: RpcError | None = None
+        for attempt in range(4):
+            try:
+                res = await self._call_one(ep, "getTransactionsForAddress", [address, opts]) or {}
+                return list(res.get("data") or []), res.get("paginationToken")
+            except RpcError as e:
+                last = e
+                if e.code in _TERMINAL_CODES:
+                    raise
+                await asyncio.sleep(1.5 * (attempt + 1))
+        assert last is not None
+        raise last
 
     # ---- typed helpers -------------------------------------------------------------
 

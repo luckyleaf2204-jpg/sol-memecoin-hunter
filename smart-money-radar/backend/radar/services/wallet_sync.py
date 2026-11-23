@@ -50,6 +50,63 @@ async def collect_signatures(ctx: Ctx, wallet: str, cutoff: int, until: str | No
     return sigs, exhausted, reached_cutoff, truncated
 
 
+class CreditCapReached(Exception):
+    pass
+
+
+async def collect_via_gtfa(ctx: Ctx, wallet: str, cutoff: int, max_sigs: int, cap: int):
+    """Backfill listing + full transactions in one pass with Helius getTransactionsForAddress
+    (100 full transactions per call, newest first). Returns the same signature entries as
+    getSignaturesForAddress (signature, slot, blockTime, err) plus {signature: tx}.
+    Checked 23/11/2026: same 1000 signatures incl. failed ones, and field-identical transactions."""
+    sigs: list[dict] = []
+    txs: dict[str, dict] = {}
+    token = None
+    pages = 0
+    exhausted = reached_cutoff = truncated = False
+    while True:
+        if await ctx.rpc.helius_credits_today() >= cap:
+            raise CreditCapReached()
+        page, token = await ctx.rpc.get_transactions_for_address(wallet, pagination_token=token, limit=100)
+        pages += 1
+        for tx in page:
+            sig = ((tx.get("transaction") or {}).get("signatures") or [None])[0]
+            if not sig:
+                continue
+            bt = tx.get("blockTime")
+            if bt is not None and bt < cutoff:
+                reached_cutoff = True
+                break
+            sigs.append({"signature": sig, "slot": tx.get("slot"), "blockTime": bt,
+                         "err": (tx.get("meta") or {}).get("err")})
+            txs[sig] = tx
+        if reached_cutoff:
+            break
+        if not token or len(page) < 100:
+            exhausted = True
+            break
+        if len(sigs) >= max_sigs:
+            truncated = True
+            break
+    return sigs, txs, exhausted, reached_cutoff, truncated, pages
+
+
+def _today() -> str:
+    return time.strftime("%Y%m%d", time.gmtime())
+
+
+async def backfill_gate(ctx: Ctx, s: dict, wallet: str) -> str | None:
+    """None when this wallet may start a backfill now, else the reason it waits (status stays queued).
+    Only wallets the scheduler admitted today (highest priority first, `backfill_wallets_per_day`)
+    are backfilled, and only while today's Helius credits are under `helius_daily_credit_cap`.
+    Incremental syncs of wallets already backfilled are never gated."""
+    if ctx.rpc.has_helius() and await ctx.rpc.helius_credits_today() >= int(s["helius_daily_credit_cap"]):
+        return "daily_credit_cap"
+    if not await ctx.redis.sismember(f"bf:allowed:{_today()}", wallet):
+        return "not_in_todays_batch"
+    return None
+
+
 async def sync_wallet(ctx: Ctx, wallet: str, mode: str, pools: PoolCache, tracked: set[str]) -> dict:
     s = await ctx.settings.get()
     w = await ctx.pool.fetchrow("SELECT * FROM wallets WHERE address = $1", wallet)
@@ -59,11 +116,17 @@ async def sync_wallet(ctx: Ctx, wallet: str, mode: str, pools: PoolCache, tracke
         mode = "backfill"
     now = int(time.time())
     cutoff = now - int(s["backfill_days"]) * 86400
+    probe_calls = 0
+    if mode == "backfill":
+        reason = await backfill_gate(ctx, s, wallet)
+        if reason:
+            return {"deferred": reason}
     watched = await ctx.pool.fetchval("SELECT 1 FROM watched_wallets WHERE address = $1 AND confirmed", wallet)
     if mode == "backfill" and s.get("skip_high_frequency_wallets", True) and not watched \
             and w["discovery_source"] not in ("manual", "watchlist"):
         # one cheap call: 1000 newest signatures spanning < 1 day means >= 1000 tx/day (bot-like)
         probe = await ctx.rpc.get_signatures_for_address(wallet, limit=1000)
+        probe_calls = 1
         own = await ctx.pool.fetchrow("""SELECT count(*) AS n, extract(epoch FROM max(block_time) - min(block_time)) AS span
             FROM wallet_transactions WHERE wallet = $1 AND tx_type IN ('buy','sell')""", wallet)
         own_per_day = (own["n"] / max(float(own["span"] or 0) / 86400, 1.0)) if own and own["n"] else None
@@ -81,8 +144,24 @@ async def sync_wallet(ctx: Ctx, wallet: str, mode: str, pools: PoolCache, tracke
     await ctx.pool.execute("UPDATE wallets SET backfill_status = CASE WHEN $2 = 'backfill' THEN 'running' "
                            "ELSE backfill_status END, backfill_sigs_fetched = CASE WHEN $2 = 'backfill' THEN 0 "
                            "ELSE backfill_sigs_fetched END, updated_at = now() WHERE address = $1", wallet, mode)
-    sigs, exhausted, reached_cutoff, truncated = await collect_signatures(
-        ctx, wallet, cutoff, until, int(s["backfill_max_signatures"]))
+    prefetched: dict[str, dict] = {}
+    method, pages = "rpc", 0
+    credits0 = await ctx.rpc.helius_credits_today(ctx.rpc.tag) if ctx.rpc.has_helius() else 0
+    if mode == "backfill" and s.get("helius_tx_history") and ctx.rpc.has_helius():
+        try:
+            sigs, prefetched, exhausted, reached_cutoff, truncated, pages = await collect_via_gtfa(
+                ctx, wallet, cutoff, int(s["backfill_max_signatures"]), int(s["helius_daily_credit_cap"]))
+            method = "gtfa"
+        except CreditCapReached:
+            await ctx.pool.execute("UPDATE wallets SET backfill_status = 'queued', backfill_error = $2, updated_at = now() "
+                                   "WHERE address = $1", wallet, "daily Helius credit cap reached; resumes next UTC day")
+            return {"deferred": "daily_credit_cap"}
+        except Exception as e:   # any gTFA problem: fall back to the classic path, nothing written yet
+            log.warning("getTransactionsForAddress failed for %s (%s); classic backfill", wallet, type(e).__name__)
+            prefetched = {}
+    if method == "rpc":
+        sigs, exhausted, reached_cutoff, truncated = await collect_signatures(
+            ctx, wallet, cutoff, until, int(s["backfill_max_signatures"]))
     failed = [x for x in sigs if x.get("err") is not None]
     ok = [x for x in sigs if x.get("err") is None]
     irr_key = f"bf:irrelevant:{wallet}"
@@ -104,11 +183,21 @@ async def sync_wallet(ctx: Ctx, wallet: str, mode: str, pools: PoolCache, tracke
         "SELECT DISTINCT mint FROM wallet_transactions WHERE wallet = $1 AND tx_type IN ('buy','sell')", wallet)}
     decoded_list = []
     new_irrelevant: list[str] = []
+    got_tx: list[str] = []
+    missing_tx: list[str] = []
 
     async def one(sig: str) -> None:
         nonlocal fetched
         async with sem:
-            if sig in have_raw:
+            if sig in prefetched:
+                tx = prefetched.pop(sig)
+                if sig not in have_raw:
+                    if _relevant(tx):
+                        async with ctx.pool.acquire() as conn:
+                            await repo.save_raw_tx(conn, sig, tx, None)
+                    else:
+                        new_irrelevant.append(sig)
+            elif sig in have_raw:
                 row = await ctx.pool.fetchrow("SELECT tx FROM raw_transactions WHERE signature = $1", sig)
                 tx = row["tx"] if row else None
             else:
@@ -120,7 +209,9 @@ async def sync_wallet(ctx: Ctx, wallet: str, mode: str, pools: PoolCache, tracke
                 elif tx is not None:
                     new_irrelevant.append(sig)
             if tx is None:
+                missing_tx.append(sig)
                 return
+            got_tx.append(sig)
             decoded_list.append(decode(tx, sig, pools))
 
     # Checkpointed in chunks of 200: each chunk is fetched, decoded and WRITTEN before the next one,
@@ -168,9 +259,40 @@ async def sync_wallet(ctx: Ctx, wallet: str, mode: str, pools: PoolCache, tracke
                 funding_checked_at = now(), discovery_detail = discovery_detail || $5 WHERE address = $1""",
                                wallet, earliest_funding[1], earliest_funding[2] / 1e9, earliest_funding[3],
                                {"funding_is_first_ever": bool(exhausted)})
+    if mode == "backfill":
+        check = await backfill_check(ctx, wallet, sigs, failed, ok, names, got_tx, missing_tx, method, pages)
+        # this wallet's own Helius calls at list price (gTFA: 10 per page of <= 100 full tx; probe and any
+        # fallback getTransaction: 1 each). The worker-wide counter is kept for the daily cap.
+        check["credits_est"] = (pages * 10 + fetched + probe_calls) if method == "gtfa" else \
+            ((await ctx.rpc.helius_credits_today(ctx.rpc.tag) - credits0) if ctx.rpc.has_helius() else 0)
+        await ctx.pool.execute("UPDATE wallets SET discovery_detail = discovery_detail || $2 WHERE address = $1",
+                               wallet, {"backfill_check": check})
     await ctx.redis.sadd(K_DIRTY_WALLETS, wallet)
-    return {"mode": mode, "signatures": len(sigs), "failed": len(failed), "fetched": fetched,
+    return {"mode": mode, "method": method, "signatures": len(sigs), "failed": len(failed), "fetched": fetched,
             "trades": decoded_trades, "truncated": truncated, "exhausted": exhausted}
+
+
+async def backfill_check(ctx: Ctx, wallet: str, sigs: list, failed: list, ok: list, names: list,
+                         got_tx: list, missing_tx: list, method: str, pages: int) -> dict:
+    """Completeness of one backfill, stored in wallets.discovery_detail.backfill_check:
+    every successful signature must have produced a transaction (none missing), and the wallet's
+    decoded trades must reconcile with the on-chain balances: verification 'verified' means the
+    decoder matched the wallet's SOL change (incl. network fee, tips, rent) and token balance changes."""
+    r = await ctx.pool.fetchrow("""SELECT count(*) FILTER (WHERE tx_type IN ('buy','sell')) AS trades,
+            count(*) FILTER (WHERE tx_type IN ('buy','sell') AND verification_status = 'verified') AS verified,
+            count(*) FILTER (WHERE tx_type IN ('buy','sell') AND abs(COALESCE(reconciliation_residual_sol, 0)) > 0.0001) AS residual,
+            count(*) FILTER (WHERE tx_type IN ('transfer_in','transfer_out')) AS transfers,
+            COALESCE(sum(fee_network_sol) FILTER (WHERE tx_type IN ('buy','sell')), 0) AS fees_network
+        FROM wallet_transactions WHERE wallet = $1 AND source = 'rpc_tx'""", wallet)
+    trades, verified = int(r["trades"] or 0), int(r["verified"] or 0)
+    return {"method": method, "pages": pages, "at": int(time.time()),
+            "signatures": len(sigs), "failed_onchain": len(failed), "successful": len(ok),
+            "skipped_known_irrelevant": len(ok) - len(names), "transactions_obtained": len(got_tx),
+            "transactions_missing": len(missing_tx), "complete": not missing_tx,
+            "trades": trades, "trades_verified": verified,
+            "verified_share": round(verified / trades, 4) if trades else None,
+            "trades_sol_residual_over_0.0001": int(r["residual"] or 0),
+            "token_transfers": int(r["transfers"] or 0), "network_fees_sol": round(float(r["fees_network"] or 0), 6)}
 
 
 def _relevant(tx: dict) -> bool:
@@ -207,8 +329,19 @@ async def scheduler(ctx: Ctx) -> None:
                              ELSE '[]'::jsonb END)) DESC,
                          (backfill_status = 'queued') DESC, last_synced_at NULLS FIRST
                 LIMIT 200""", int(s["wallet_sync_interval_minutes"]))
-            for r in rows:
+            allowed_key = f"bf:allowed:{_today()}"
+            limit = int(s["backfill_wallets_per_day"])
+            capped = ctx.rpc.has_helius() and await ctx.rpc.helius_credits_today() >= int(s["helius_daily_credit_cap"])
+            for r in rows:   # rows are in priority order
                 mode = "backfill" if r["backfill_status"] in ("queued", "none", "failed") else "sync"
+                if mode == "backfill":
+                    if capped:
+                        continue
+                    if not await ctx.redis.sismember(allowed_key, r["address"]):
+                        if await ctx.redis.scard(allowed_key) >= limit:
+                            continue
+                        await ctx.redis.sadd(allowed_key, r["address"])
+                        await ctx.redis.expire(allowed_key, 3 * 86400)
                 await ctx.enqueue(Q_WALLET_SYNC, {"wallet": r["address"], "mode": mode},
                                   dedupe_key=r["address"], dedupe_ttl=int(s["wallet_sync_interval_minutes"]) * 60)
         except Exception:

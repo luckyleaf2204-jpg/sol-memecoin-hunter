@@ -78,6 +78,10 @@ DEFAULTS: dict[str, Any] = {
     "skip_high_frequency_wallets": True,  # >= hf_signatures_per_day -> not backfilled (bot-like)
     "hf_signatures_per_day": 1000,
     "wallet_sync_interval_minutes": 30,
+    # Helius backfill (phase 1, 23/11/2026): getTransactionsForAddress, daily credit cap, wallets per day
+    "helius_tx_history": False,           # backfill via getTransactionsForAddress (Helius only)
+    "helius_daily_credit_cap": 150000,    # backfill pauses when today's Helius credits (all workers) reach this
+    "backfill_wallets_per_day": 50,       # new backfills started per UTC day, highest priority first
     "stream_store_min_sol": 1.0,
     "stream_retention_days": 7,
     # backtest
@@ -158,6 +162,9 @@ SPEC: dict[str, Spec] = {
     "skip_high_frequency_wallets": Spec(bool),
     "hf_signatures_per_day": Spec(int, 50, 100000),
     "wallet_sync_interval_minutes": Spec((int, float), 1, 1440),
+    "helius_tx_history": Spec(bool),
+    "helius_daily_credit_cap": Spec(int, 1000, 10_000_000),
+    "backfill_wallets_per_day": Spec(int, 0, 100000),
     "stream_store_min_sol": Spec((int, float), 0, 1000),
     "stream_retention_days": Spec(int, 1, 365),
     "backtest_slippage_bps": Spec((int, float), 0, 5000),

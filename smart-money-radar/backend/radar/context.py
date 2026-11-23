@@ -133,5 +133,6 @@ async def create_ctx(worker: str, run_migrations: bool = False, pool_size: int =
             log.warning("redis not ready, retrying")
             await asyncio.sleep(2)
     rpc = SolanaRpc(cfg.rpc_endpoints, redis=r)
+    rpc.tag = worker
     http = HttpClient(redis=r)
     return Ctx(cfg=cfg, pool=pool, redis=r, rpc=rpc, http=http, settings=SettingsStore(pool), worker=worker)
