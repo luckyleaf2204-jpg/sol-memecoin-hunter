@@ -43,10 +43,13 @@ def wallet_delta_lamports(tx: dict, wallet: str) -> tuple[int, set[str]]:
 
 def wallet_token_after(tx: dict, wallet: str, mint: str) -> float:
     """The wallet's balance of `mint` after this transaction (UI units), 0 when it has no account."""
-    for b in (tx.get("meta") or {}).get("postTokenBalances") or []:
-        if b.get("owner") == wallet and b.get("mint") == mint:
-            return float((b.get("uiTokenAmount") or {}).get("uiAmount") or 0)
-    return 0.0
+    return wallet_token_balance(tx, wallet, mint, "postTokenBalances")
+
+
+def wallet_token_balance(tx: dict, wallet: str, mint: str, which: str) -> float:
+    """Sum over every token account of the wallet for this mint (pre or post balances)."""
+    return sum(float((b.get("uiTokenAmount") or {}).get("uiAmount") or 0)
+               for b in (tx.get("meta") or {}).get(which) or [] if b.get("owner") == wallet and b.get("mint") == mint)
 
 
 async def run(out: str | None = None, since: str | None = None) -> dict:
@@ -98,15 +101,19 @@ async def run(out: str | None = None, since: str | None = None) -> dict:
             if bad:
                 skipped["other_token_in_same_tx"] += 1
                 continue
-            # token side: after the position's last transaction the wallet holds at most dust of the mint
-            last = max((raws[x] for x in sigs), key=lambda t: (t.get("slot") or 0))
-            left = wallet_token_after(last, r["wallet"], r["mint"])
-            if left <= dust * max(float(r["tokens_bought"] or 0), 1e-12):
+            # token side, order independent (several of a position's transactions can share a slot):
+            # the on-chain token changes of the position's own transactions must net to ~0. A negative net
+            # means the wallet sold tokens it held before the history window (history incomplete).
+            net = sum(wallet_token_balance(raws[x], r["wallet"], r["mint"], "postTokenBalances")
+                      - wallet_token_balance(raws[x], r["wallet"], r["mint"], "preTokenBalances") for x in sigs)
+            tol = dust * max(float(r["tokens_bought"] or 0), 1e-12)
+            if abs(net) <= tol:
                 tok_ok += 1
             else:
                 tok_bad += 1
-                tok_bad_ex.append({"wallet": r["wallet"], "mint": r["mint"], "tokens_left": left,
-                                   "tokens_bought": float(r["tokens_bought"] or 0)})
+                tok_bad_ex.append({"wallet": r["wallet"], "mint": r["mint"], "net_onchain_tokens": round(net, 6),
+                                   "tokens_bought": float(r["tokens_bought"] or 0),
+                                   "cause": "sold tokens held before the history window" if net < 0 else "tokens still held"})
             onchain = total / 1e9
             sys_pnl = float(r["realized_pnl_sol"])
             diff = sys_pnl - onchain
@@ -117,7 +124,7 @@ async def run(out: str | None = None, since: str | None = None) -> dict:
         worst.sort(reverse=True)
         ad = sorted(abs(x) for x in diffs)
         rep["pnl_positions_checked"] = checked
-        rep["token_balance_after_close"] = {"ok": tok_ok, "not_closed_on_chain": tok_bad, "examples": tok_bad_ex[:5]}
+        rep["token_balance_after_close"] = {"ok": tok_ok, "not_netting_to_zero": tok_bad, "cases": tok_bad_ex[:50]}
         rep["pnl_positions_skipped"] = skipped
         if checked:
             rep["pnl_abs_diff_sol"] = {"median": round(statistics.median(ad), 6), "p90": round(ad[int(0.9 * (len(ad) - 1))], 6),

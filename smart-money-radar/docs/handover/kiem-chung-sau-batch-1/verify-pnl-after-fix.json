@@ -1,0 +1,191 @@
+{
+ "batch_wallets": 23,
+ "pnl_positions_checked": 1907,
+ "token_balance_after_close": {
+  "ok": 1892,
+  "not_netting_to_zero": 15,
+  "cases": [
+   {
+    "wallet": "DNfuF1L62WWyW3pNakVkyGGFzVVhj4Yr52jSmdTyeBHm",
+    "mint": "Tqj8yFmagrg7oorpQkVGYR52r96RFTamvWfth9bpump",
+    "net_onchain_tokens": -371972.961982,
+    "tokens_bought": 4417248.010244,
+    "cause": "sold tokens held before the history window"
+   },
+   {
+    "wallet": "8BmPoCUxDUJq7yvc9878RFSukkswSuvpvrrE1ZTgyaB7",
+    "mint": "9ref3puA9wJ41bH65P7GvAVmC4JeWBAQC5SVaAzHpump",
+    "net_onchain_tokens": -28108614.44101,
+    "tokens_bought": 60167497.841899,
+    "cause": "sold tokens held before the history window"
+   },
+   {
+    "wallet": "8BmPoCUxDUJq7yvc9878RFSukkswSuvpvrrE1ZTgyaB7",
+    "mint": "HqfF6w59HLspNEnqw4BBt6VzwCCbURtWhi4Vbtwrpump",
+    "net_onchain_tokens": -30233334.51936,
+    "tokens_bought": 50418743.124106,
+    "cause": "sold tokens held before the history window"
+   },
+   {
+    "wallet": "8BmPoCUxDUJq7yvc9878RFSukkswSuvpvrrE1ZTgyaB7",
+    "mint": "FbuiGnS7jFu2WqQjiFrjkW32oYCHQZ6Ygvr4Y6s6pump",
+    "net_onchain_tokens": -17916932.58631,
+    "tokens_bought": 29902520.85503,
+    "cause": "sold tokens held before the history window"
+   },
+   {
+    "wallet": "ETU3GyrUsv6UztQJxHgsBX2UoJFmq79WJe3JyDpAqGMz",
+    "mint": "9k6SKDWHkQhVgFpWxmCXmCqQjwKyF4Xfw7LHiFn1pump",
+    "net_onchain_tokens": -43672530.465717,
+    "tokens_bought": 2602124.437198,
+    "cause": "sold tokens held before the history window"
+   },
+   {
+    "wallet": "ETU3GyrUsv6UztQJxHgsBX2UoJFmq79WJe3JyDpAqGMz",
+    "mint": "HWQ5UeQk7etL7N5cL7KK8LtrnWwxCtQ6bm9ywR6Jpump",
+    "net_onchain_tokens": -17774271.92649,
+    "tokens_bought": 815414.938934,
+    "cause": "sold tokens held before the history window"
+   },
+   {
+    "wallet": "B9K2wTQcRDLRLhMKFyRh2hPqHrr6VKiCC9yNGpkMUXrh",
+    "mint": "42t61wPi41TwWtpqBVgZN1V4hjiKwZBKwq27xME9pump",
+    "net_onchain_tokens": -1511748.251039,
+    "tokens_bought": 10166994.072953,
+    "cause": "sold tokens held before the history window"
+   },
+   {
+    "wallet": "5PZxgSQnbbadoPokb9nKesjGn3cP76LrMWEqnMEqNo5p",
+    "mint": "AAsNWUcNMKVaMG49ECRqVFvxS7kiameVCPQQpjcEfzWo",
+    "net_onchain_tokens": -297760.760495,
+    "tokens_bought": 13161603.310958,
+    "cause": "sold tokens held before the history window"
+   },
+   {
+    "wallet": "CXnf4Tt7qFz3KZNwn3Yve5MKaRyxGoAy2eDX3QT8e99m",
+    "mint": "6mXFCoZ515w37YfmwXGJMPfQfiK5tr9WkihW3oN9pump",
+    "net_onchain_tokens": -505449.799185,
+    "tokens_bought": 41949.004917,
+    "cause": "sold tokens held before the history window"
+   },
+   {
+    "wallet": "CyaE1VxvBrahnPWkqm5VsdCvyS2QmNht2UFrKJHga54o",
+    "mint": "D6K4HbXMX6Locb3nsvAFkiyY7xJBGCkGcjxSDNAypump",
+    "net_onchain_tokens": -40205109.676781,
+    "tokens_bought": 7834581.550644,
+    "cause": "sold tokens held before the history window"
+   },
+   {
+    "wallet": "CyaE1VxvBrahnPWkqm5VsdCvyS2QmNht2UFrKJHga54o",
+    "mint": "4HwJnF3uXiyemfF4eSAbmnZvYsp19gY7zRhX8tNSCcRu",
+    "net_onchain_tokens": -83082871.355761,
+    "tokens_bought": 2392674.888878,
+    "cause": "sold tokens held before the history window"
+   },
+   {
+    "wallet": "CyaE1VxvBrahnPWkqm5VsdCvyS2QmNht2UFrKJHga54o",
+    "mint": "4UaRdD11e8sMR5gzTaxyBXokzoMcEgHH2RcFT8XSpump",
+    "net_onchain_tokens": -8859117.913704,
+    "tokens_bought": 74700152.154432,
+    "cause": "sold tokens held before the history window"
+   },
+   {
+    "wallet": "CyaE1VxvBrahnPWkqm5VsdCvyS2QmNht2UFrKJHga54o",
+    "mint": "3umHFkiMHyphCkLxtbf8Aabie8r5hxn86QeBAovTpump",
+    "net_onchain_tokens": -452299.2266,
+    "tokens_bought": 3744797.490573,
+    "cause": "sold tokens held before the history window"
+   },
+   {
+    "wallet": "CyaE1VxvBrahnPWkqm5VsdCvyS2QmNht2UFrKJHga54o",
+    "mint": "2modVcXX7hcU86ZPytvAquJZxRC4p4QMgLsTZiTJpump",
+    "net_onchain_tokens": -8467475.488718,
+    "tokens_bought": 47596025.151394,
+    "cause": "sold tokens held before the history window"
+   },
+   {
+    "wallet": "CyaE1VxvBrahnPWkqm5VsdCvyS2QmNht2UFrKJHga54o",
+    "mint": "tZsjFu2CH1R23wEpbfXAYGc2KUaVrUbwofCNNNqpump",
+    "net_onchain_tokens": -1348800.621345,
+    "tokens_bought": 28853385.905211,
+    "cause": "sold tokens held before the history window"
+   }
+  ]
+ },
+ "pnl_positions_skipped": {
+  "missing_raw_tx": 0,
+  "other_token_in_same_tx": 0,
+  "transfers": 130,
+  "capped_signatures": 0
+ },
+ "pnl_abs_diff_sol": {
+  "median": 0.0,
+  "p90": 0.0,
+  "max": 0.003753
+ },
+ "pnl_within_0.001_sol": 0.9979,
+ "pnl_within_0.01_sol": 1.0,
+ "pnl_within_1pct_of_entry": 1.0,
+ "pnl_sum_system_vs_onchain": [
+  0.0114,
+  "system minus on-chain, SOL"
+ ],
+ "pnl_worst": [
+  {
+   "wallet": "5PZxgSQnbbadoPokb9nKesjGn3cP76LrMWEqnMEqNo5p",
+   "mint": "43Ck6GLTMu7MdyaLrk3tqxRdEw3Wy9U21sSoiZ3JtC4g",
+   "system_pnl": 0.551281,
+   "onchain_delta": 0.547528
+  },
+  {
+   "wallet": "78FmcvKtbWEMTeZ8Z5jc1DjfskQ8oJNf6XgAyaf6tSPE",
+   "mint": "EJKci5indQVkZXYhRrU7ZzWfztEc8PFp6wLGCeh7pump",
+   "system_pnl": 0.175139,
+   "onchain_delta": 0.17218
+  },
+  {
+   "wallet": "5sr55MD6EZCMKftkdzRBjbvVuCjBcDarv4sShn1DVmPY",
+   "mint": "6bcwFL92eiCrWbSisUqyy2t3KWc7HF9b2KkoBjW1bKKc",
+   "system_pnl": 0.363124,
+   "onchain_delta": 0.361349
+  },
+  {
+   "wallet": "2Giyf5L9mrfw22GpLvPztxMBiZE5x6BMUcxxMSUbo7af",
+   "mint": "CU3saxdfgkNyt1jcGKTxana96wwkMbq7VC38Whmt9kKD",
+   "system_pnl": 0.121113,
+   "onchain_delta": 0.119933
+  },
+  {
+   "wallet": "5PZxgSQnbbadoPokb9nKesjGn3cP76LrMWEqnMEqNo5p",
+   "mint": "EqS3mEb3WKsGgRKeVVgyPziwhoEi2Pdwfvu19MgwVYHR",
+   "system_pnl": 0.343923,
+   "onchain_delta": 0.343102
+  },
+  {
+   "wallet": "2Giyf5L9mrfw22GpLvPztxMBiZE5x6BMUcxxMSUbo7af",
+   "mint": "8vYmGwyPXh22KpiVkAvAmkNDELPSP8sz5CkxX1YCyZp9",
+   "system_pnl": 0.379346,
+   "onchain_delta": 0.37853
+  },
+  {
+   "wallet": "92aios2R2XXhPkeBqEmwDB8EQ8sZFLBPBpt1X3N1xniD",
+   "mint": "HiqRfinTzRBKeBReegjNq4MYkk5BugovvWpTXDmzpump",
+   "system_pnl": 0.001806,
+   "onchain_delta": 0.001805
+  },
+  {
+   "wallet": "92aios2R2XXhPkeBqEmwDB8EQ8sZFLBPBpt1X3N1xniD",
+   "mint": "FYSJ3wWVoFpmsXb5pb2U9ULUWpATKPZsNTsVEnrSpump",
+   "system_pnl": 0.750054,
+   "onchain_delta": 0.750053
+  }
+ ],
+ "performance_rows_checked": 23,
+ "performance_mismatches": 0,
+ "performance_mismatch_examples": [],
+ "scores_recomputed": 23,
+ "score_abs_diff": {
+  "max": 0.0,
+  "within_0.01": 23
+ }
+}

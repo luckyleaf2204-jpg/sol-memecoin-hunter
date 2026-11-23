@@ -244,8 +244,10 @@ async def sync_wallet(ctx: Ctx, wallet: str, mode: str, pools: PoolCache, tracke
         if new_irrelevant:
             await ctx.redis.sadd(irr_key, *new_irrelevant)
             await ctx.redis.expire(irr_key, 14 * 86400)
+        # an incremental sync must not overwrite the backfill's signature count with its few new ones
         await ctx.pool.execute("UPDATE wallets SET backfill_sigs_fetched = backfill_sigs_fetched + $2, "
-                               "backfill_sigs_seen = $3 WHERE address = $1", wallet, len(chunk), len(sigs))
+                               "backfill_sigs_seen = CASE WHEN $4 = 'backfill' THEN $3 ELSE backfill_sigs_seen END "
+                               "WHERE address = $1", wallet, len(chunk), len(sigs), mode)
 
     newest = sigs[0]["signature"] if sigs else w["last_synced_signature"]
     if mode == "backfill":

@@ -114,3 +114,13 @@ def test_stale_backfill_message_for_a_wallet_already_backfilled_becomes_an_incre
     # the guard must run before the backfill gate and before any RPC call
     assert src.index('elif mode == "backfill" and w["backfill_status"] in ("complete", "partial")') < \
         src.index("reason = await backfill_gate(")
+
+
+def test_token_balance_sums_every_account_of_the_wallet():
+    from radar.tools.verify_pnl import wallet_token_balance
+    M = "Mint11111111111111111111111111111111111111"
+    t = {"meta": {"preTokenBalances": [], "postTokenBalances": [
+        {"owner": W, "mint": M, "uiTokenAmount": {"uiAmount": 1.5}},
+        {"owner": W, "mint": M, "uiTokenAmount": {"uiAmount": 2.0}}]}}
+    assert wallet_token_balance(t, W, M, "postTokenBalances") == 3.5
+    assert wallet_token_balance(t, W, M, "preTokenBalances") == 0.0

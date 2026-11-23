@@ -1,0 +1,219 @@
+### Step 1 batch start 2026-11-23T03:33:31Z (settings: helius_tx_history=true, cap 150000/day, 50 wallets/day, 60 days, max 3000 sigs)
+--- backfill status before
+complete|7
+failed|16
+none|205
+partial|18
+queued|519
+--- trade rows before
+492711|52033
+--- Helius credit counter (estimate, since deploy) before
+  total=1215 sync= verifier=1 discovery=1214 analytics= prices= signals= stream=
+sync started 03:33:33
+03:35:33 admitted=50 still_pending=37   total=5854 sync=4637 verifier=3 discovery=1214 analytics= prices= signals= stream=
+03:37:34 admitted=50 still_pending=27   total=9627 sync=8408 verifier=9 discovery=1214 analytics= prices= signals= stream=
+03:39:35 admitted=50 still_pending=27   total=15619 sync=14384 verifier=21 discovery=1214 analytics= prices= signals= stream=
+03:41:36 admitted=50 still_pending=28   total=21843 sync=20595 verifier=34 discovery=1214 analytics= prices= signals= stream=
+03:43:38 admitted=50 still_pending=29   total=27758 sync=26507 verifier=37 discovery=1214 analytics= prices= signals= stream=
+03:45:39 admitted=50 still_pending=28   total=33816 sync=32558 verifier=44 discovery=1214 analytics= prices= signals= stream=
+03:47:40 admitted=50 still_pending=28   total=39076 sync=37812 verifier=60 discovery=1214 analytics= prices= signals= stream=
+03:49:41 admitted=50 still_pending=27   total=41795 sync=40504 verifier=77 discovery=1214 analytics= prices= signals= stream=
+03:51:42 admitted=50 still_pending=27   total=41835 sync=40504 verifier=117 discovery=1214 analytics= prices= signals= stream=
+03:53:43 admitted=50 still_pending=27   total=41863 sync=40504 verifier=145 discovery=1214 analytics= prices= signals= stream=
+03:55:44 admitted=50 still_pending=27   total=41908 sync=40504 verifier=190 discovery=1214 analytics= prices= signals= stream=
+03:57:46 admitted=50 still_pending=27   total=41930 sync=40504 verifier=212 discovery=1214 analytics= prices= signals= stream=
+03:59:47 admitted=50 still_pending=27   total=41952 sync=40504 verifier=234 discovery=1214 analytics= prices= signals= stream=
+04:01:48 admitted=50 still_pending=27   total=41970 sync=40504 verifier=252 discovery=1214 analytics= prices= signals= stream=
+04:03:49 admitted=50 still_pending=27   total=41984 sync=40504 verifier=266 discovery=1214 analytics= prices= signals= stream=
+04:05:50 admitted=50 still_pending=27   total=42002 sync=40504 verifier=284 discovery=1214 analytics= prices= signals= stream=
+04:07:51 admitted=50 still_pending=27   total=42021 sync=40504 verifier=303 discovery=1214 analytics= prices= signals= stream=
+04:09:52 admitted=50 still_pending=27   total=42022 sync=40504 verifier=305 discovery=1214 analytics= prices= signals= stream=
+04:11:53 admitted=50 still_pending=27   total=42039 sync=40504 verifier=321 discovery=1214 analytics= prices= signals= stream=
+04:13:54 admitted=50 still_pending=27   total=42044 sync=40504 verifier=326 discovery=1214 analytics= prices= signals= stream=
+04:15:55 admitted=50 still_pending=27   total=42051 sync=40504 verifier=333 discovery=1214 analytics= prices= signals= stream=
+04:17:56 admitted=50 still_pending=27   total=42168 sync=40613 verifier=341 discovery=1214 analytics= prices= signals= stream=
+04:19:57 admitted=50 still_pending=27   total=42251 sync=40690 verifier=347 discovery=1214 analytics= prices= signals= stream=
+04:21:58 admitted=50 still_pending=27   total=42263 sync=40690 verifier=359 discovery=1214 analytics= prices= signals= stream=
+04:23:59 admitted=50 still_pending=27   total=42281 sync=40690 verifier=377 discovery=1214 analytics= prices= signals= stream=
+04:26:00 admitted=50 still_pending=27   total=42303 sync=40690 verifier=399 discovery=1214 analytics= prices= signals= stream=
+04:28:02 admitted=50 still_pending=27   total=42317 sync=40690 verifier=413 discovery=1214 analytics= prices= signals= stream=
+04:30:03 admitted=50 still_pending=27   total=42328 sync=40690 verifier=424 discovery=1214 analytics= prices= signals= stream=
+04:32:04 admitted=50 still_pending=27   total=42347 sync=40690 verifier=443 discovery=1214 analytics= prices= signals= stream=
+04:34:05 admitted=50 still_pending=27   total=43551 sync=40690 verifier=446 discovery=2427 analytics= prices= signals= stream=
+04:36:06 admitted=50 still_pending=27   total=43575 sync=40690 verifier=453 discovery=2432 analytics= prices= signals= stream=
+04:38:07 admitted=50 still_pending=27   total=43580 sync=40690 verifier=458 discovery=2432 analytics= prices= signals= stream=
+04:40:08 admitted=50 still_pending=27   total=43589 sync=40690 verifier=467 discovery=2432 analytics= prices= signals= stream=
+
+### report 2026-11-23 04:41:52 UTC (monitor loop stopped: it counted 27 high-frequency skips as pending)
+--- admitted 50: outcome
+  status  | backfill_status | method | count 
+----------+-----------------+--------+-------
+ observed | none            | -      |    27
+ tracked  | partial         | gtfa   |    16
+ observed | partial         | gtfa   |     4
+ tracked  | complete        | gtfa   |     2
+ observed | complete        | gtfa   |     1
+(5 rows)
+
+--- 23 backfilled: totals
+ wallets | sigs  | txs_obtained | missing | skipped_cached | failed_onchain | trades | verified | residual | transfers | fees_sol | pages | credits_last_run | capped3000 
+---------+-------+--------------+---------+----------------+----------------+--------+----------+----------+-----------+----------+-------+------------------+------------
+      23 | 64087 |        34128 |       0 |          12227 |          17732 |  17878 |    16281 |     1436 |      1129 |   4.1145 |   642 |             6428 |         20
+(1 row)
+
+--- per wallet
+    w     |    st    | sigs | miss | trades | vshare | pages | cr  
+----------+----------+------+------+--------+--------+-------+-----
+ DuQabFqd | partial  | 3000 |    0 |     21 | 0.381  |    30 | 300
+ DjM7Tu7w | partial  | 3000 |    0 |     33 | 0.9697 |    30 | 300
+ 2Giyf5L9 | partial  | 3000 |    0 |   2723 | 0.9996 |    30 | 301
+ 9FNz4MjP | partial  | 3000 |    0 |    469 | 0.8337 |    30 | 300
+ 2X4H5Y9C | partial  | 3000 |    0 |    196 | 0.648  |    30 | 300
+ ArkdCAPE | partial  | 3000 |    0 |    786 | 0.771  |    30 | 301
+ B9K2wTQc | partial  | 3000 |    0 |    737 | 0.6079 |    30 | 300
+ ETU3GyrU | partial  | 3000 |    0 |   1712 | 0.7599 |    30 | 300
+ CATk62cY | partial  | 3000 |    0 |    667 | 0.8066 |    30 | 300
+ DNfuF1L6 | partial  | 3000 |    0 |     15 | 0.9333 |    30 | 300
+ GJA1HEbx | partial  | 3000 |    0 |    127 | 0.6693 |    30 | 300
+ 92aios2R | partial  | 3000 |    0 |    795 | 0.995  |    30 | 301
+ 5PZxgSQn | partial  | 3000 |    0 |   2721 | 1.0    |    30 | 301
+ 5sr55MD6 | partial  | 3000 |    0 |   2767 | 1.0    |    30 | 301
+ sAdNbe1c | partial  | 3000 |    0 |     16 | 0.9375 |    30 | 300
+ AVAZvHLR | partial  | 3000 |    0 |     67 | 0.7015 |    30 | 300
+ CXnf4Tt7 | partial  | 3000 |    0 |    114 | 0.4825 |    30 | 300
+ CyaE1Vxv | partial  | 3000 |    0 |     77 | 1.0    |    30 | 300
+ 9yYya3F5 | partial  | 3000 |    0 |      0 |        |    30 | 300
+ G6fUXjMK | partial  | 3000 |    0 |    693 | 0.5685 |    30 | 300
+ 8BmPoCUx | complete | 1771 |    0 |   1475 | 1.0    |    18 | 181
+ 78FmcvKt | complete | 1470 |    0 |   1085 | 1.0    |    15 | 151
+ 6ntUoFQS | complete |  846 |    0 |    582 | 1.0    |     9 |  91
+(23 rows)
+
+--- 27 skipped as high frequency (bot rule hf_signatures_per_day=1000, unchanged)
+27|3194|73897
+--- duplicate (signature,event_key) rows for batch wallets
+0
+--- backfill runs per wallet in sync log (bug: stale duplicate queue messages)
+--- Helius credit counter today (estimate at list price)
+  helius_credits = 43592
+  helius_credits:sync = 40690
+  helius_credits:verifier = 470
+  helius_credits:discovery = 2432
+--- verify-pnl --since 2026-11-23T03:33:31Z
+{
+ "batch_wallets": 23,
+ "pnl_positions_checked": 1906,
+ "token_balance_after_close": {
+  "ok": 1894,
+  "not_closed_on_chain": 12,
+  "examples": [
+   {
+    "wallet": "DNfuF1L62WWyW3pNakVkyGGFzVVhj4Yr52jSmdTyeBHm",
+    "mint": "Tqj8yFmagrg7oorpQkVGYR52r96RFTamvWfth9bpump",
+    "tokens_left": 4789220.972227,
+    "tokens_bought": 4417248.010244
+   },
+   {
+    "wallet": "5PZxgSQnbbadoPokb9nKesjGn3cP76LrMWEqnMEqNo5p",
+    "mint": "AAsNWUcNMKVaMG49ECRqVFvxS7kiameVCPQQpjcEfzWo",
+    "tokens_left": 561152.792769,
+    "tokens_bought": 13161603.310958
+   },
+   {
+    "wallet": "CXnf4Tt7qFz3KZNwn3Yve5MKaRyxGoAy2eDX3QT8e99m",
+    "mint": "6mXFCoZ515w37YfmwXGJMPfQfiK5tr9WkihW3oN9pump",
+    "tokens_left": 5352722.229698,
+    "tokens_bought": 41949.004917
+   },
+   {
+    "wallet": "CyaE1VxvBrahnPWkqm5VsdCvyS2QmNht2UFrKJHga54o",
+    "mint": "3umHFkiMHyphCkLxtbf8Aabie8r5hxn86QeBAovTpump",
+    "tokens_left": 37773870.454549,
+    "tokens_bought": 3744797.490573
+   },
+   {
+    "wallet": "ArkdCAPErAo6KdVDTFA32YKnqaD7jfXsESFoyxQzDgnu",
+    "mint": "pGukrxxcRKCU8QLWdheMeDEarevsZWTBHyCfjAFpump",
+    "tokens_left": 14720691.946179,
+    "tokens_bought": 96449438.144093
+   }
+  ]
+ },
+ "pnl_positions_skipped": {
+  "missing_raw_tx": 0,
+  "other_token_in_same_tx": 0,
+  "transfers": 130,
+  "capped_signatures": 0
+ },
+ "pnl_abs_diff_sol": {
+  "median": 0.0,
+  "p90": 0.0,
+  "max": 0.003753
+ },
+ "pnl_within_0.001_sol": 0.9979,
+ "pnl_within_0.01_sol": 1.0,
+ "pnl_within_1pct_of_entry": 1.0,
+ "pnl_sum_system_vs_onchain": [
+  0.0114,
+  "system minus on-chain, SOL"
+ ],
+ "pnl_worst": [
+  {
+   "wallet": "5PZxgSQnbbadoPokb9nKesjGn3cP76LrMWEqnMEqNo5p",
+   "mint": "43Ck6GLTMu7MdyaLrk3tqxRdEw3Wy9U21sSoiZ3JtC4g",
+   "system_pnl": 0.551281,
+   "onchain_delta": 0.547528
+  },
+  {
+   "wallet": "78FmcvKtbWEMTeZ8Z5jc1DjfskQ8oJNf6XgAyaf6tSPE",
+   "mint": "EJKci5indQVkZXYhRrU7ZzWfztEc8PFp6wLGCeh7pump",
+   "system_pnl": 0.175139,
+   "onchain_delta": 0.17218
+  },
+  {
+   "wallet": "5sr55MD6EZCMKftkdzRBjbvVuCjBcDarv4sShn1DVmPY",
+   "mint": "6bcwFL92eiCrWbSisUqyy2t3KWc7HF9b2KkoBjW1bKKc",
+   "system_pnl": 0.363124,
+   "onchain_delta": 0.361349
+  },
+  {
+   "wallet": "2Giyf5L9mrfw22GpLvPztxMBiZE5x6BMUcxxMSUbo7af",
+   "mint": "CU3saxdfgkNyt1jcGKTxana96wwkMbq7VC38Whmt9kKD",
+   "system_pnl": 0.121113,
+   "onchain_delta": 0.119933
+  },
+  {
+   "wallet": "5PZxgSQnbbadoPokb9nKesjGn3cP76LrMWEqnMEqNo5p",
+   "mint": "EqS3mEb3WKsGgRKeVVgyPziwhoEi2Pdwfvu19MgwVYHR",
+   "system_pnl": 0.343923,
+   "onchain_delta": 0.343102
+  },
+  {
+   "wallet": "2Giyf5L9mrfw22GpLvPztxMBiZE5x6BMUcxxMSUbo7af",
+   "mint": "8vYmGwyPXh22KpiVkAvAmkNDELPSP8sz5CkxX1YCyZp9",
+   "system_pnl": 0.379346,
+   "onchain_delta": 0.37853
+  },
+  {
+   "wallet": "92aios2R2XXhPkeBqEmwDB8EQ8sZFLBPBpt1X3N1xniD",
+   "mint": "HiqRfinTzRBKeBReegjNq4MYkk5BugovvWpTXDmzpump",
+   "system_pnl": 0.001806,
+   "onchain_delta": 0.001805
+  },
+  {
+   "wallet": "92aios2R2XXhPkeBqEmwDB8EQ8sZFLBPBpt1X3N1xniD",
+   "mint": "FYSJ3wWVoFpmsXb5pb2U9ULUWpATKPZsNTsVEnrSpump",
+   "system_pnl": 0.750054,
+   "onchain_delta": 0.750053
+  }
+ ],
+ "performance_rows_checked": 23,
+ "performance_mismatches": 0,
+ "performance_mismatch_examples": [],
+ "scores_recomputed": 23,
+ "score_abs_diff": {
+  "max": 0.0,
+  "within_0.01": 23
+ }
+}
+--- key leak: logs 0 files 0
