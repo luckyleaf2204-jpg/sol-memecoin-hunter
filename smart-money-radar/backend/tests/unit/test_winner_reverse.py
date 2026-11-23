@@ -144,3 +144,25 @@ def test_priority_prefers_growth_that_held_with_depth_and_enough_data():
     assert priority({**base, "peak_mc_usd": 400_000}) < p               # grew less
     assert priority({**base, "volume_first_24h_usd": 50_000}) < p       # thin trading
     assert priority({**base, "candles": 6}) == round(p * 0.5, 4) or priority({**base, "candles": 6}) < p
+
+
+def test_verification_counts_losses_and_excludes_unreliable_positions():
+    from radar.tools.winner_verify import judge
+    chk = {"method": "gtfa", "transactions_missing": 0, "verified_share": 0.99, "trades_per_day_measured": 12.0}
+    good = [{"mint": f"M{i}", "buy_sol": 2.0, "realized_pnl_sol": (1.5 if i % 2 else -0.5), "verification": "verified",
+             "tokens_bought": 100, "tokens_sold": 100, "flags": [], "holding_seconds": 600, "signatures": [f"s{i}"]}
+            for i in range(30)]
+    r = judge(good, chk)
+    assert r["pass"] and r["figures"]["losses"] == 15 and r["figures"]["profit_factor"] == 3.0
+    # a big "win" made of tokens bought before the window, and an unverified USDC trade, are not counted
+    bad = good + [{"mint": "PRE", "buy_sol": 2.0, "realized_pnl_sol": 90.0, "verification": "verified",
+                   "tokens_bought": 100, "tokens_sold": 900, "flags": [], "holding_seconds": 600},
+                  {"mint": "USDC", "buy_sol": 2.0, "realized_pnl_sol": -40.0, "verification": "partially_verified",
+                   "tokens_bought": 100, "tokens_sold": 100, "flags": [], "holding_seconds": 600}]
+    r2 = judge(bad, chk)
+    assert r2["figures"]["pnl_sol"] == r["figures"]["pnl_sol"]
+    assert r2["figures"]["excluded"]["sold_pre_window_tokens"] == 1 and r2["figures"]["excluded"]["unverified"] == 1
+    # a bot and a one-hit wallet fail with reasons
+    assert not judge(good, {**chk, "trades_per_day_measured": 400.0})["pass"]
+    one_hit = [{**good[0], "realized_pnl_sol": 50.0}] + [{**p, "realized_pnl_sol": 0.1} for p in good[1:]]
+    assert any("best trade" in x for x in judge(one_hit, chk)["reasons"])
