@@ -97,6 +97,7 @@ DEFAULTS: dict[str, Any] = {
     "winner_min_tokens": 3,               # candidate: profitable early buyer of >= 3 different winners
     "winner_lookback_days": 14,
     "winner_max_trades_per_day": 100,     # candidate: not a high-frequency bot
+    "winner_hist_min_peak_usd": 300000.0,  # historical run: peak market cap (hourly close) at least this
     "stream_store_min_sol": 1.0,
     "stream_retention_days": 7,
     # backtest
@@ -194,6 +195,7 @@ SPEC: dict[str, Spec] = {
     "winner_min_tokens": Spec(int, 1, 50),
     "winner_lookback_days": Spec(int, 1, 60),
     "winner_max_trades_per_day": Spec((int, float), 1, 100000),
+    "winner_hist_min_peak_usd": Spec((int, float), 10000, 1e10),
     "stream_store_min_sol": Spec((int, float), 0, 1000),
     "stream_retention_days": Spec(int, 1, 365),
     "backtest_slippage_bps": Spec((int, float), 0, 5000),

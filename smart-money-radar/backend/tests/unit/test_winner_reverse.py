@@ -107,3 +107,29 @@ def test_a_single_lucky_win_is_not_a_candidate():
             ("M1", {"wallet": "C", **b}), ("M1", {"wallet": "C", **b})]
     c = wr.repeated(wins, 3)
     assert list(c) == ["A"] and c["A"]["tokens"] == 3 and c["A"]["pnl"] == 9.0
+
+
+def test_historical_winner_test_uses_hourly_closes_and_ignores_wicks():
+    import asyncio
+    from radar.tools import winner_history as wh
+
+    class Http:
+        def __init__(self, candles):
+            self.candles = candles
+
+        async def request_json(self, *a, **k):
+            return {"data": {"attributes": {"ohlcv_list": self.candles}}}
+
+    class C:
+        def __init__(self, candles):
+            self.http = Http(candles)
+
+    s = {"winner_hist_min_peak_usd": 300000, "winner_min_multiple": 5, "winner_hold_fraction": 0.3}
+    # [t, open, high, low, close, volume]; price x 1e9 supply = market cap (USD)
+    held = [[3600 * i, 0, 0.09, 0, c, 1] for i, c in enumerate([8e-5, 2e-4, 6e-4, 4e-4, 3e-4])]
+    r = asyncio.run(wh.winner_test(C(held), {"pool": "P"}, s, 150.0))
+    assert r["winner"] is True and r["peak_mc_usd"] == 600000          # the 0.09 wick is ignored
+    dumped = [[3600 * i, 0, 0, 0, c, 1] for i, c in enumerate([8e-5, 2e-4, 6e-4, 5e-5])]
+    assert asyncio.run(wh.winner_test(C(dumped), {"pool": "P"}, s, 150.0))["reason"] == "did_not_hold_after_peak"
+    small = [[3600 * i, 0, 0, 0, c, 1] for i, c in enumerate([8e-5, 1e-4, 2e-4, 1.5e-4])]
+    assert asyncio.run(wh.winner_test(C(small), {"pool": "P"}, s, 150.0))["reason"] == "peak_below_min"

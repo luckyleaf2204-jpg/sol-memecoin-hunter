@@ -164,14 +164,15 @@ class SolanaRpc:
         return any(e.name == "helius" for e in self.endpoints)
 
     async def get_transactions_for_address(self, address: str, *, pagination_token: str | None = None,
-                                           limit: int = 100, full: bool = True) -> tuple[list[dict], str | None]:
+                                           limit: int = 100, full: bool = True,
+                                           sort: str = "desc") -> tuple[list[dict], str | None]:
         """Helius-only getTransactionsForAddress: newest first, up to 100 full transactions per call
         (same JSON as getTransaction jsonParsed, checked field by field on 23/11/2026).
         Returns (transactions, next pagination token or None)."""
         ep = next((e for e in self.endpoints if e.name == "helius"), None)
         if ep is None:
             raise RpcError("getTransactionsForAddress needs a Helius endpoint", None, None)
-        opts: dict[str, Any] = {"transactionDetails": "full" if full else "signatures", "sortOrder": "desc",
+        opts: dict[str, Any] = {"transactionDetails": "full" if full else "signatures", "sortOrder": sort,
                                 "limit": limit, "commitment": "confirmed"}
         if full:
             opts.update(encoding="jsonParsed", maxSupportedTransactionVersion=MAX_TX_VERSION)
