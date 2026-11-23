@@ -63,6 +63,7 @@ def first_hour(candles: list, created: float) -> dict | None:
 class DevStats:
     def __init__(self, helius_key: str | None, rpc, pump, get=_get, now=time.time, sleep=time.sleep, state=None):
         self.key, self.rpc, self.pump, self.get, self.now, self.sleep = helius_key, rpc, pump, get, now, sleep
+        self.paused = lambda: False                           # set to the stream's paused() by the service
         box = state.setdefault("devstats", {"devs": {}, "coins": {}}) if state is not None else {"devs": {}, "coins": {}}
         self.devs: dict[str, dict] = box["devs"]                 # in the watcher's saved state: survives a restart
         self.coins: dict[str, dict] = box["coins"]
@@ -141,6 +142,9 @@ class DevStats:
 
     def run_forever(self, stop: threading.Event) -> None:
         while not stop.is_set():
+            if self.paused():                                 # page "Tạm dừng": no Helius calls
+                stop.wait(3)
+                continue
             with self.lock:
                 dev = self.todo.pop() if self.todo else None      # the newest ask first: the coin just opened
             if not dev or not self.key:

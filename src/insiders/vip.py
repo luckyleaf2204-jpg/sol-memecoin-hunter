@@ -701,6 +701,11 @@ class VipStream:
 
         workers = [asyncio.create_task(worker()) for _ in range(WORKERS)]
         while not stop.is_set():
+            if self.paused():                                 # "Tạm dừng": socket closed, no Helius traffic
+                self.stat["connected"], self.ws, self.subs = False, None, {}
+                self.stat["subscribed"] = 0
+                await asyncio.sleep(2)
+                continue
             pending: dict[int, str] = {}
             try:
                 async with connect() as ws:
@@ -710,7 +715,7 @@ class VipStream:
                     self.stat.update(connected=True, error=None)
                     backoff, nxt = 1.0, 1
                     heard, swept = time.monotonic(), time.monotonic()
-                    while not stop.is_set():
+                    while not stop.is_set() and not self.paused():   # leaving closes the socket
                         sent = 0
                         while not self.queue.empty() and sent < SUB_BATCH:
                             sent += 1
@@ -855,6 +860,20 @@ class VipStream:
             pass
         return self.sol_usd
 
+    def paused(self) -> bool:
+        return bool(self.state.get("paused_at"))
+
+    def set_paused(self, on: bool) -> bool:
+        """Pause (socket closed, polling / dev stats stopped: no Helius calls) or resume; kept across restarts."""
+        self.state["paused_at"] = self.now() if on else 0
+        if on:
+            self.state["turbo_until"] = 0
+        try:
+            self.w.save()
+        except Exception:
+            pass
+        return self.paused()
+
     def turbo(self) -> bool:
         return self.now() < (self.state.get("turbo_until") or 0)
 
@@ -865,6 +884,8 @@ class VipStream:
 
     def poll_forever(self, stop: threading.Event) -> None:
         rpc, fast = _rpc(POLL_GAP_S), _rpc(TURBO_GAP_S)
+        while not stop.is_set() and self.paused():
+            stop.wait(2)
         self.refresh_sol_usd()
         try:
             self.refresh_balances(rpc, force=True)
@@ -874,6 +895,9 @@ class VipStream:
         while not stop.is_set() and not self.subs and time.monotonic() - t0 < 120:
             stop.wait(2)
         while not stop.is_set():
+            if self.paused():
+                stop.wait(2)
+                continue
             try:
                 self.refresh_sol_usd()
                 self.refresh_balances(rpc)
@@ -892,7 +916,7 @@ class VipStream:
                 "removed": sorted(({"wallet": a, **v} for a, v in (self.state.get("removed") or {}).items()),
                                   key=lambda x: -(x.get("ts") or 0))[:150],
                 "sol_usd": self.sol_usd, "focus": self.focus or ["ALL"], "poll": self.pstat, "turbo_until": self.state.get("turbo_until") or 0,
-                "turbo": self.turbo(), "turbo_max_s": TURBO_MAX_S, "child_min_sol": CHILD_MIN_SOL,
+                "turbo": self.turbo(), "turbo_max_s": TURBO_MAX_S, "paused": self.paused(), "paused_at": self.state.get("paused_at") or 0, "child_min_sol": CHILD_MIN_SOL,
                 "parked": sum(1 for a, v in self.state["children"].items() if self._alive(a, v) and not self._rich(v)), "ws_max": WS_MAX, "refused": len(self.ws_refused), "provider": PROVIDER,
                 "max_wallets": MAX_WALLETS, "adopt_min_sol": ADOPT_MIN_SOL, "strong_window_s": STRONG_WINDOW_S}
 

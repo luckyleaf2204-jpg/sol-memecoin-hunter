@@ -1590,6 +1590,37 @@ def test_buy_then_move_away_alerts_and_follows_the_store(tmp_path):
     assert vs2._buy_send(tx, ev, "x") is None                          # nothing bought before
 
 
+def test_pause_stops_polling_and_dev_stats_and_survives_a_restart(tmp_path):
+    """'Tạm dừng quét': no polling round and no dev-stats call while paused, turbo off, flag saved with the state."""
+    import threading
+    from insiders.devstats import DevStats
+    w, r = vip_watcher(tmp_path)
+    asked = []
+    vs = VP.VipStream(w, r, rpc=lambda m, p: asked.append(p[0]) or [], now=lambda: 5_000.0)
+    vs.set_turbo(True)
+    assert vs.set_paused(True) is True and not vs.turbo() and vs.status()["paused"] is True
+    stop = threading.Event()
+    th = threading.Thread(target=vs.poll_forever, args=(stop,), daemon=True)
+    th.start()
+    th.join(0.5)
+    assert asked == []                                                # nothing asked while paused
+    stop.set()
+    th.join(3)
+    w.save()
+    assert json.loads(w.path.read_text(encoding="utf-8"))["vip"]["paused_at"] == 5_000.0
+    ds = DevStats("k", vs.rpc, None, get=lambda url: asked.append(url) or [])
+    ds.paused = vs.paused
+    ds.todo = ["DEV"] if isinstance(getattr(ds, "todo", None), list) else ds.todo
+    stop2 = threading.Event()
+    t2 = threading.Thread(target=ds.run_forever, args=(stop2,), daemon=True)
+    t2.start()
+    t2.join(0.5)
+    stop2.set()
+    t2.join(5)
+    assert asked == []
+    assert vs.set_paused(False) is False and vs.status()["paused"] is False
+
+
 # ---------------------------------------------------------------- coin buys priced at what the wallet paid
 def pool_tx(wallet, sig, mint, tok, sol_wallet, curve_sol, extra_mint=None, create=False):
     """A swap against a curve account (off-curve PDA) holding the coin and the SOL side."""

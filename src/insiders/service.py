@@ -83,6 +83,7 @@ class InsiderService:
             from insiders.devstats import DevStats
             self.watcher.devstats = DevStats(os.environ.get("HELIUS_API_KEY"), self.watcher.vip.rpc, self.watcher.pump,
                                              state=self.watcher.state)
+            self.watcher.devstats.paused = self.watcher.vip.paused
             threading.Thread(target=self.watcher.devstats.run_forever, args=(self.watch_stop,), daemon=True).start()
             # tracing only by default (2026-10-14): balances, shadow paper and the paper book are off unless asked for
             if (os.environ.get("INSIDER_SHADOW") or "0") == "1":     # live measurement of every signal (paper)
