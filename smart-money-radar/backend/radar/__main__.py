@@ -179,6 +179,7 @@ def main(argv: list[str] | None = None) -> None:
     ap.add_argument("--max-credits", dest="max_credits", type=int, default=77760)
     ap.add_argument("--already-spent", dest="already_spent", type=int, default=0)
     ap.add_argument("--verify-reserve", dest="verify_reserve", type=int, default=15000)
+    ap.add_argument("--stage", default="zones")
     ap.add_argument("--candidates", default=None)
     ap.add_argument("--result", default=None)
     ap.add_argument("--since", default=None)   # verify-pnl: only wallets backfilled since this ISO time
@@ -209,6 +210,10 @@ def main(argv: list[str] | None = None) -> None:
         import json as _json
         print(_json.dumps(asyncio.run(wv(a.max_credits, a.out, candidates_file=a.candidates or "candidates.json",
                                          result_file=a.result or "verification.json")), indent=1, default=str))
+    elif a.command == "pumpswap-zone":
+        from .tools.pumpswap_zone import run as pz
+        import json as _json
+        print(_json.dumps(asyncio.run(pz(a.stage, a.max_credits, a.already_spent)), indent=1, default=str))
     elif a.command == "latency":
         from .tools.latency import run as lat
         import json as _json

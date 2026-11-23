@@ -166,3 +166,25 @@ def test_verification_counts_losses_and_excludes_unreliable_positions():
     assert not judge(good, {**chk, "trades_per_day_measured": 400.0})["pass"]
     one_hit = [{**good[0], "realized_pnl_sol": 50.0}] + [{**p, "realized_pnl_sol": 0.1} for p in good[1:]]
     assert any("best trade" in x for x in judge(one_hit, chk)["reasons"])
+
+
+def test_pumpswap_zone_window_from_15_minute_closes():
+    import asyncio
+    from radar.tools import pumpswap_zone as pz
+
+    class Http:
+        async def request_json(self, *a, **k):
+            # graduation at 0; closes (USD per token): 60k -> 120k -> 250k -> 400k market cap
+            return {"data": {"attributes": {"ohlcv_list": [[0, 0, 0, 0, 6e-5, 1], [900, 0, 0, 0, 1.2e-4, 1],
+                                                            [1800, 0, 0, 0, 2.5e-4, 1], [2700, 0, 0, 0, 4e-4, 1]]}}}
+
+    class C:
+        http = Http()
+
+    z = asyncio.run(pz.zone_window(C(), "P", 0, 100_000, 300_000))
+    assert z["in_zone"] and z["start"] == 900 and z["end"] == 3600       # in the zone 15:00 -> 45:00 (+15 min)
+    class H2(Http):
+        async def request_json(self, *a, **k):
+            return {"data": {"attributes": {"ohlcv_list": [[0, 0, 0, 0, 5e-4, 1], [900, 0, 0, 0, 6e-4, 1]]}}}
+    C.http = H2()
+    assert asyncio.run(pz.zone_window(C(), "P", 0, 100_000, 300_000))["reason"] == "never_in_zone"
