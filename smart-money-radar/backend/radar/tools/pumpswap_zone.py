@@ -71,12 +71,19 @@ async def count_window(ctx, pool: str, start: int, end: int, budget, max_calls: 
             return {"signatures": n, "count_calls": calls}
 
 
-async def read_window(ctx, mint: str, pool: str, start: int, end: int, budget, sol_usd: float) -> list[dict]:
-    trades, token = [], None
+async def read_window(ctx, mint: str, pool: str, start: int, end: int, budget, sol_usd: float,
+                      max_pages: int = 10_000) -> list[dict]:
+    """Only the window's transactions (blockTime filter), at most `max_pages` calls (per-token cap)."""
+    trades, token, pages = [], None, 0
     resolver = lambda p: (mint, WSOL) if p == pool else None   # noqa: E731
     while True:
+        if pages >= max_pages:
+            trades.append({"_capped": True})
+            return trades
         await budget()
-        page, token = await ctx.rpc.get_transactions_for_address(pool, pagination_token=token, limit=100, sort="asc")
+        page, token = await ctx.rpc.get_transactions_for_address(pool, pagination_token=token, limit=100, sort="asc",
+                                                                 filters={"blockTime": {"gte": start, "lte": end}})
+        pages += 1
         for tx in page:
             bt = tx.get("blockTime") or 0
             if bt > end:
@@ -97,7 +104,8 @@ async def read_window(ctx, mint: str, pool: str, start: int, end: int, budget, s
 
 
 async def run(stage: str, max_credits: int, already_spent: int = 0, data_dir: str = "/app/winner_data",
-              zone_lo: float = 100_000, zone_hi: float = 300_000, min_buy: float = 0.5) -> dict:
+              zone_lo: float = 100_000, zone_hi: float = 300_000, min_buy: float = 0.5,
+              only: list[str] | None = None) -> dict:
     ctx = await create_ctx("pumpswap-zone", pool_size=2)
     base = os.path.join(data_dir, "pumpswap")
     rep: dict = {"stage": stage, "ceiling": max_credits, "already_spent": already_spent}
@@ -150,21 +158,27 @@ async def run(stage: str, max_credits: int, already_spent: int = 0, data_dir: st
         sol_usd = await ctx.sol_usd() or 0.0
         rdir = os.path.join(base, "trades")
         buyers_all: dict = _load(os.path.join(base, "zone_buyers.json")) or {}
-        for m, e in sorted(((m, e) for m, e in est.items() if e.get("read_cost_estimate") is not None),
-                           key=lambda kv: kv[1]["read_cost_estimate"]):
+        for m, e in sorted(((m, e) for m, e in est.items() if e.get("read_cost_estimate") is not None
+                            and (only is None or m in only)), key=lambda kv: kv[1]["read_cost_estimate"]):
             if os.path.exists(os.path.join(rdir, f"{m}.json.gz")):
                 continue
-            if await budget_obj.used() + e["read_cost_estimate"] > max_credits:
+            # per-token ceiling: the counted signatures + one page of margin
+            token_cap = e["read_cost_estimate"] + 10
+            if await budget_obj.used() + token_cap > max_credits:
                 rep.setdefault("skipped_over_budget", []).append(m)
                 continue
             z = zones[m]
             u0 = await budget_obj.used()
             try:
-                trades = await read_window(ctx, m, z["pool"], z["start"], z["end"], budget, sol_usd)
+                trades = await read_window(ctx, m, z["pool"], z["start"], z["end"], budget, sol_usd,
+                                           max_pages=token_cap // 10)
             except RuntimeError as ex:
                 rep["stopped"] = str(ex)
                 break
-            _dump(os.path.join(rdir, f"{m}.json.gz"), {"mint": m, "zone": z, "sol_usd_used": sol_usd, "trades": trades})
+            capped = bool(trades and trades[-1].get("_capped"))
+            trades = [t for t in trades if not t.get("_capped")]
+            _dump(os.path.join(rdir, f"{m}.json.gz"), {"mint": m, "zone": z, "sol_usd_used": sol_usd, "capped": capped,
+                                                         "credit_cap": token_cap, "trades": trades})
             by: dict = {}
             for t in trades:
                 if t["tx_type"] == "buy" and zone_lo <= t["mc_usd"] <= zone_hi:
@@ -174,6 +188,7 @@ async def run(stage: str, max_credits: int, already_spent: int = 0, data_dir: st
             _dump(os.path.join(base, "zone_buyers.json"), buyers_all)
             with open(os.path.join(base, "progress.jsonl"), "a", encoding="utf-8") as f:
                 f.write(json.dumps({"at": int(time.time()), "mint": m, "trades": len(trades), "zone_buyers": len(buyers_all[m]),
+                                    "credit_cap": token_cap, "capped": capped,
                                     "credits_before": u0, "credits_after": await budget_obj.used()}) + "\n")
         rep["read"] = {"tokens_read": len(buyers_all), "credits_used_total": await budget_obj.used()}
         return rep

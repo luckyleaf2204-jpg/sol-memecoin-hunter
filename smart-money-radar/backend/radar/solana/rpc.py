@@ -165,7 +165,7 @@ class SolanaRpc:
 
     async def get_transactions_for_address(self, address: str, *, pagination_token: str | None = None,
                                            limit: int = 100, full: bool = True,
-                                           sort: str = "desc") -> tuple[list[dict], str | None]:
+                                           sort: str = "desc", filters: dict | None = None) -> tuple[list[dict], str | None]:
         """Helius-only getTransactionsForAddress: newest first, up to 100 full transactions per call
         (same JSON as getTransaction jsonParsed, checked field by field on 23/11/2026).
         Returns (transactions, next pagination token or None)."""
@@ -178,6 +178,8 @@ class SolanaRpc:
             opts.update(encoding="jsonParsed", maxSupportedTransactionVersion=MAX_TX_VERSION)
         if pagination_token:
             opts["paginationToken"] = pagination_token
+        if filters:   # e.g. {"blockTime": {"gte": t0, "lte": t1}} (checked 23/11/2026: starts at t0)
+            opts["filters"] = filters
         last: RpcError | None = None
         for attempt in range(4):
             try:
