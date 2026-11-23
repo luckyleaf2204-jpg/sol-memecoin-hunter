@@ -153,7 +153,8 @@ def market_events(tx: dict, mint_hint: str | None = None) -> list[dict]:
     evs, _ = events_from_logs((tx.get("meta") or {}).get("logMessages") or [])
     for i, (prog, ev) in enumerate(evs):
         if isinstance(ev, PumpTradeEvent):
-            if ev.quote_mint and ev.quote_mint != WSOL_MINT:
+            # v2 events carry quote_mint = the zero key ("1111...") for SOL-quoted curves
+            if ev.quote_mint and ev.quote_mint not in (WSOL_MINT, "11111111111111111111111111111111"):
                 continue
             out.append({"venue": "curve", "market": curve_pda(ev.mint), "mint": ev.mint, "user": ev.user,
                         "side": "buy" if ev.is_buy else "sell", "sol": ev.sol_amount / 1e9, "tok": ev.token_amount / 1e6,
@@ -173,9 +174,16 @@ def market_events(tx: dict, mint_hint: str | None = None) -> list[dict]:
                 b1, q1 = b0 - ev.base_amount / 1e6, q0 + ev.quote_amount / 1e9 + lp
             else:
                 b1, q1 = b0 + ev.base_amount / 1e6, q0 - ev.quote_amount / 1e9 + lp
+            # effective quote depth seen by THIS trade (all fees included): the pool's actual fills differ
+            # from x*y on the event reserves by a stable per-pool factor (3-24 % measured on 23/11/2026),
+            # so copies are priced with the factor observed on real trades of the same pool and side
+            out_tok, user_q = ev.base_amount / 1e6, (ev.user_quote_amount or 0) / 1e9
+            k = None
+            if out_tok > 0 and user_q > 0 and q0 > 0:
+                k = ((b0 * user_q / out_tok - user_q) / q0) if ev.side == "buy" else ((user_q * (b0 + out_tok) / out_tok) / q0)
             out.append({"venue": "pumpswap", "market": ev.pool, "mint": mint_hint, "user": ev.user, "side": ev.side,
                         "sol": ev.quote_amount / 1e9, "tok": ev.base_amount / 1e6, "x": q1, "y": b1, "x_pre": q0, "y_pre": b0,
-                        "fee": fee, "i": i})
+                        "fee": fee, "k": k, "i": i})
     return out
 
 
@@ -262,7 +270,7 @@ def wallet_trades(rpc: PublicRPC, wallet: str, max_sigs: int, cache: dict) -> tu
                        "venue": e["venue"], "market": e["market"], "side": e["side"], "sol": e["sol"], "tok": e["tok"],
                        "price": e["sol"] / e["tok"] if e["tok"] else None, "wallet_sol_delta": sol_delta,
                        "fee_paid": meta["fee"] / 1e9, "pre_tok": pre.get(e["mint"], 0.0), "post_tok": tokd.get(e["mint"], 0.0),
-                       "state": {"x": e["x"], "y": e["y"], "fee": e["fee"]}})
+                       "state": {"x": e["x"], "y": e["y"], "fee": e["fee"], "k": e.get("k"), "side": e["side"]}})
     trades.sort(key=lambda t: (t["slot"], t["sig"]))
     return trades, cnt
 
@@ -329,9 +337,15 @@ def market_window(rpc: PublicRPC, market: str, after_sig: str, after_slot: int, 
         for e in market_events(tx, mint):
             if e["market"] == market:
                 states.append({"slot": s["slot"], "order": order * 100 + e["i"], "x": e["x"], "y": e["y"], "fee": e["fee"],
-                               "x_pre": e.get("x_pre"), "y_pre": e.get("y_pre"), "real_tok": e.get("real_tok")})
+                               "x_pre": e.get("x_pre"), "y_pre": e.get("y_pre"), "real_tok": e.get("real_tok"),
+                               "side": e["side"], "k": e.get("k")})
     return {"complete": complete or bool(win and len(win) < len(sigs)), "sig_pages": pages, "window_tx": len(win),
             "decoded": n, "truncated": len(win) > SIM["max_window_tx"], "states": states}
+
+
+def pool_k(side: str, *sources) -> float | None:
+    ks = sorted(st["k"] for src in sources for st in src if st.get("k") and st.get("side") == side and 0.5 < st["k"] < 3)
+    return ks[len(ks) // 2] if ks else None
 
 
 def state_at(base: dict, window: dict, slot: int) -> dict:
@@ -384,7 +398,16 @@ def simulate_position(p: dict, windows: dict) -> dict:
             r.update(copyable=False, reason="bonding curve đã đầy (token chuyển sàn)")
             res["delays"][str(d)] = r
             continue
-        tok, impact = buy_fill(st["x"], st["y"], SIM["copy_size_sol"], st["fee"])
+        if first["venue"] == "pumpswap":
+            kb = pool_k("buy", [first["state"]], w["states"])
+            if kb is None:
+                r.update(copyable=False, reason="thiếu dữ liệu: không có lệnh mua thật để hiệu chỉnh pool")
+                res["delays"][str(d)] = r
+                continue
+            tok, impact = buy_fill(st["x"] * kb, st["y"], SIM["copy_size_sol"], 0.0)
+            r["k_buy"] = round(kb, 4)
+        else:
+            tok, impact = buy_fill(st["x"], st["y"], SIM["copy_size_sol"], st["fee"])
         our_price = SIM["copy_size_sol"] / tok if tok > 0 else math.inf
         chase = our_price / first["price"] - 1 if first["price"] else None
         r.update(entry_price=our_price, chase=round(chase, 4) if chase is not None else None, impact=round(impact, 4))
@@ -409,7 +432,14 @@ def simulate_position(p: dict, windows: dict) -> dict:
             else:
                 sx = state_at(t["state"], wx, t["slot"] + ds)
             q = held_c * frac if frac < 0.999 else held_c
-            out += sell_fill(sx["x"], sx["y"], q, sx["fee"])
+            if t["venue"] == "pumpswap":
+                ks = pool_k("sell", [t["state"]], (wx or {}).get("states", [])) or pool_k("sell", w["states"])
+                if ks is None:
+                    ks = (pool_k("buy", [first["state"]], w["states"]) or 1.0) * 0.99
+                    r["exit_note"] = "hệ số pool phía bán ước tính từ phía mua"
+                out += sell_fill(sx["x"] * ks, sx["y"], q, 0.0)
+            else:
+                out += sell_fill(sx["x"], sx["y"], q, sx["fee"])
             held_c -= q
             ntx += 1
         cost = ntx * SIM["copier_tx_cost_sol"]
