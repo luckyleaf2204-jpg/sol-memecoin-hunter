@@ -77,14 +77,15 @@ def judge(positions: list[dict], check: dict, crit: dict = CRIT) -> dict:
                      key=lambda e: e["pnl"])[:5]}
 
 
-async def run(max_credits: int, out: str | None = None, data_dir: str = "/app/winner_data") -> dict:
+async def run(max_credits: int, out: str | None = None, data_dir: str = "/app/winner_data",
+              candidates_file: str = "candidates.json", result_file: str = "verification.json") -> dict:
     from ..services import analytics_runner
     from ..services.txproc import PoolCache
     from ..services.wallet_sync import sync_wallet
     ctx = await create_ctx("winner-verify", pool_size=3)
     rep: dict = {"ceiling": max_credits}
     try:
-        with open(os.path.join(data_dir, "candidates.json"), encoding="utf-8") as fh:
+        with open(os.path.join(data_dir, candidates_file), encoding="utf-8") as fh:
             cands = json.load(fh)
         s = await ctx.settings.get()
         start = await ctx.rpc.helius_credits_today(ctx.rpc.tag)
@@ -120,7 +121,7 @@ async def run(max_credits: int, out: str | None = None, data_dir: str = "/app/wi
             j["sync"] = res
             j["winners"] = c
             results[w] = j
-            with open(os.path.join(data_dir, "verification.json"), "w", encoding="utf-8") as fh:
+            with open(os.path.join(data_dir, result_file), "w", encoding="utf-8") as fh:
                 json.dump(results, fh, indent=1, default=str)
         rep.update(candidates=len(cands), verified=len(results), passed=sum(1 for r in results.values() if r["pass"]),
                    credits_used=await ctx.rpc.helius_credits_today(ctx.rpc.tag) - start, stopped=stop)
