@@ -21,8 +21,11 @@ Usage: python -m radar winner-history [--days 14] [--max-credits 80000] [--out r
 from __future__ import annotations
 
 import asyncio
+import gzip
 import json
 import logging
+import math
+import os
 import time
 
 from ..context import create_ctx
@@ -121,9 +124,11 @@ async def winner_test(ctx, g: dict, s: dict, sol_usd: float) -> dict:
     i_peak = max(range(len(closes)), key=lambda i: closes[i][1])
     peak_mc = closes[i_peak][1] * SUPPLY
     after = closes[i_peak + 1][1] * SUPPLY if i_peak + 1 < len(closes) else 0.0
+    vol24 = sum(float(c[5] or 0) for c in candles[:24])
     out = {"graduation_mc_usd": round(grad_mc), "peak_mc_usd": round(peak_mc), "peak_hour": closes[i_peak][0],
            "mc_1h_after_peak_usd": round(after), "peak_mc_sol": round(peak_mc / sol_usd, 1) if sol_usd else None,
-           "winner": False}
+           "hold_ratio": round(after / peak_mc, 3) if peak_mc else 0.0, "volume_first_24h_usd": round(vol24),
+           "candles": len(candles), "pool": g.get("pool"), "winner": False}
     if peak_mc < float(s["winner_hist_min_peak_usd"]):
         out["reason"] = "peak_below_min"
     elif grad_mc <= 0 or peak_mc / grad_mc < float(s["winner_min_multiple"]) / 2:
@@ -171,64 +176,198 @@ async def curve_trades(ctx, mint: str, until: int, budget, max_pages: int) -> tu
     return trades, {**meta, "pages": pages, "complete": False}
 
 
-async def run(days: int = 14, max_credits: int = 80_000, out: str | None = None, max_pages_per_token: int = 150) -> dict:
+def priority(w: dict) -> float:
+    """Ranking of winners before any paid call: growth after graduation x how well it held, x
+    trading depth (first-day volume, capped), x data reliability (enough hourly candles)."""
+    grow = math.log10(max(w["peak_mc_usd"], 1) / max(w["graduation_mc_usd"], 1))
+    depth = min(1.0, math.log10(max(w.get("volume_first_24h_usd", 0), 1)) / 7)     # 10M USD/day = 1
+    reliab = 1.0 if w.get("candles", 0) >= 24 else 0.5
+    return round(grow * w["hold_ratio"] * depth * reliab, 4)
+
+
+async def sig_count(ctx, mint: str, until: int) -> dict:
+    """10 credits: oldest 1000 signatures of the mint -> creation time and curve-phase size."""
+    page, _ = await ctx.rpc.get_transactions_for_address(mint, limit=1000, full=False, sort="asc")
+    if not page:
+        return {"curve_sigs": 0, "created_at": None}
+    created = page[0].get("blockTime") or 0
+    n = sum(1 for x in page if (x.get("blockTime") or 0) <= until)
+    return {"curve_sigs": n, "curve_sigs_capped": n >= 1000, "created_at": created,
+            "curve_seconds": max(0, until - created)}
+
+
+class Budget:
+    """Counts this run's Helius credits (Redis counter of this worker tag); raises at the ceiling."""
+
+    def __init__(self, ctx, ceiling: int, already_spent: int):
+        self.ctx, self.ceiling, self.already = ctx, ceiling, already_spent
+        self.start = None
+
+    async def used(self) -> int:
+        now = await self.ctx.rpc.helius_credits_today(self.ctx.rpc.tag)
+        if self.start is None:
+            self.start = now
+        return self.already + now - self.start
+
+    async def check(self, need: int = 0) -> int:
+        u = await self.used()
+        if u + need > self.ceiling:
+            raise RuntimeError(f"credit ceiling: used {u} + needed {need} > {self.ceiling}")
+        return u
+
+
+def _dump(path: str, obj) -> None:
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    tmp = path + ".tmp"
+    if path.endswith(".gz"):
+        with gzip.open(tmp, "wt", encoding="utf-8") as f:
+            json.dump(obj, f, default=str)
+    else:
+        with open(tmp, "w", encoding="utf-8") as f:
+            json.dump(obj, f, indent=1, default=str)
+    os.replace(tmp, path)
+
+
+def _load(path: str):
+    if not os.path.exists(path):
+        return None
+    if path.endswith(".gz"):
+        with gzip.open(path, "rt", encoding="utf-8") as f:
+            return json.load(f)
+    with open(path, encoding="utf-8") as f:
+        return json.load(f)
+
+
+async def run(days: int = 14, max_credits: int = 77_760, out: str | None = None, max_pages_per_token: int = 150,
+              data_dir: str = "/app/winner_data", already_spent: int = 0, verify_reserve: int = 15_000,
+              group: int = 10) -> dict:
+    """Staged and resumable; every stage writes its inputs and results under data_dir:
+      graduations.json        listing (signature, slot, time, mint, pool) - paid once
+      ranking.json            free winner test + priority of every graduation
+      estimates.json          10-credit signature counts of the winners read next
+      trades/<mint>.json.gz   decoded curve trades (signature, slot, wallet, side, SOL, tokens, MC)
+      results.json            early-buyer funnel and qualifying buyers per token
+      progress.jsonl          credits before / after every group
+    already_spent: credits of this approval spent by earlier runs (counted against max_credits)."""
     ctx = await create_ctx("winner-history", pool_size=2)
-    rep: dict = {"days": days, "max_credits": max_credits}
+    rep: dict = {"days": days, "ceiling": max_credits, "already_spent_before_this_run": already_spent}
+    prog_path = os.path.join(data_dir, "progress.jsonl")
+
+    def progress(**kw):
+        os.makedirs(data_dir, exist_ok=True)
+        with open(prog_path, "a", encoding="utf-8") as f:
+            f.write(json.dumps({"at": int(time.time()), **kw}, default=str) + "\n")
+
     try:
         s = await ctx.settings.get()
         sol_usd = await ctx.sol_usd() or 0.0
-        start = await ctx.rpc.helius_credits_today()
+        budget = Budget(ctx, max_credits, already_spent)
 
-        spent = {"now": 0}
+        async def guard():
+            await budget.check()
 
-        async def refresh():
-            spent["now"] = await ctx.rpc.helius_credits_today() - start
-
-        async def budget():
-            # checked before every paid call (Helius counter in Redis, all workers included)
-            await refresh()
-            if spent["now"] >= max_credits:
-                raise RuntimeError("credit budget reached")
-
-        try:
-            grads = await list_graduations(ctx, int(time.time()) - days * 86400, budget)
-        except RuntimeError:
-            rep["stopped"] = "credit budget reached while listing graduations"
-            return rep
-        await refresh()
+        # 1. listing (paid once, cached)
+        gpath = os.path.join(data_dir, "graduations.json")
+        grads = _load(gpath)
+        if grads is None:
+            u0 = await budget.check()
+            grads = await list_graduations(ctx, int(time.time()) - days * 86400, guard)
+            grads = list({g["mint"]: g for g in grads}.values())
+            _dump(gpath, grads)
+            progress(stage="listing", graduations=len(grads), credits_before=u0, credits_after=await budget.used())
         rep["graduations"] = len(grads)
-        rep["credits_listing"] = spent["now"]
-        done = {r["job"] for r in await ctx.pool.fetch("SELECT job FROM api_sync_status WHERE source = 'winner'")}
-        winners, evaluated, tested = 0, 0, 0
-        reasons: dict = {}
+
+        # 2. free winner test + ranking (GeckoTerminal; earlier evaluations reused)
+        rpath = os.path.join(data_dir, "ranking.json")
+        ranking = _load(rpath) or {}
+        prior = {r["job"]: r["details"] for r in await ctx.pool.fetch(
+            "SELECT job, details FROM api_sync_status WHERE source = 'winner'")}
         for g in grads:
-            if g["mint"] in done:
+            if g["mint"] in ranking:
                 continue
-            w = await winner_test(ctx, g, s, sol_usd)
-            tested += 1
-            reasons[w.get("reason", "winner")] = reasons.get(w.get("reason", "winner"), 0) + 1
-            ev = {"source": "history", **g, **w}
-            if w["winner"]:
-                await refresh()
+            d = prior.get(g["mint"])
+            if d and "peak_mc_usd" in d and "hold_ratio" in d:
+                w = {k: d.get(k) for k in ("graduation_mc_usd", "peak_mc_usd", "peak_hour", "mc_1h_after_peak_usd",
+                                           "peak_mc_sol", "hold_ratio", "volume_first_24h_usd", "candles", "pool")}
+                w["winner"] = None
+            else:
+                w = await winner_test(ctx, g, s, sol_usd)
+                await asyncio.sleep(2.1)
+            ranking[g["mint"]] = {**g, **w}
+            if len(ranking) % 50 == 0:
+                _dump(rpath, ranking)
+        # winner rule applied uniformly (also to reused evaluations)
+        for m, w in ranking.items():
+            if "peak_mc_usd" not in w or not w.get("peak_mc_usd"):
+                w["winner"], w["priority"] = False, 0.0
+                continue
+            w["hold_ratio"] = w.get("hold_ratio") or ((w.get("mc_1h_after_peak_usd") or 0) / w["peak_mc_usd"])
+            w["winner"] = (w["peak_mc_usd"] >= float(s["winner_hist_min_peak_usd"])
+                           and w["peak_mc_usd"] >= float(s["winner_min_multiple"]) / 2 * max(w.get("graduation_mc_usd") or 0, 1)
+                           and w["hold_ratio"] >= float(s["winner_hold_fraction"]))
+            w["priority"] = priority(w) if w["winner"] else 0.0
+        _dump(rpath, ranking)
+        winners = sorted((w for w in ranking.values() if w["winner"]), key=lambda w: -w["priority"])
+        rep["free_filter"] = {"tested": len(ranking), "winners": len(winners),
+                              "not_winner": len(ranking) - len(winners)}
+
+        # 3+4. estimate and read in priority order, in groups, within the ceiling minus the verification reserve
+        epath, respath = os.path.join(data_dir, "estimates.json"), os.path.join(data_dir, "results.json")
+        estimates, results = _load(epath) or {}, _load(respath) or {}
+        read_ceiling = max_credits - verify_reserve
+        stop = None
+        for gi in range(0, len(winners), group):
+            batch = winners[gi:gi + group]
+            u_before = await budget.used()
+            done_in_group = []
+            for w in batch:
+                m = w["mint"]
+                if m in results:
+                    continue
                 try:
-                    trades, meta = await curve_trades(ctx, g["mint"], g["graduated_at"], budget, max_pages_per_token)
-                except RuntimeError:
-                    rep["stopped"] = "credit budget reached"
+                    if m not in estimates:
+                        await budget.check(10)
+                        estimates[m] = await sig_count(ctx, m, w["graduated_at"])
+                        _dump(epath, estimates)
+                    e = estimates[m]
+                    if (e.get("curve_seconds") or 0) < 60:
+                        results[m] = {"skipped": "graduated within 60 s of launch (bundled launch, no organic curve phase)"}
+                        continue
+                    need = min(max_pages_per_token, (e["curve_sigs"] + 99) // 100) * 10
+                    if await budget.used() + need > read_ceiling:
+                        stop = f"next token needs ~{need} credits; read ceiling {read_ceiling} reached"
+                        break
+                    trades, meta = await curve_trades(ctx, m, w["graduated_at"], guard, max_pages_per_token)
+                except RuntimeError as ex:
+                    stop = str(ex)
                     break
-                peak_sol = w["peak_mc_sol"] or 0.0
-                buyers, excl = early_buyers(trades, meta["created_slot"], meta["creator"], peak_sol, set(), s)
-                ev.update(curve_trades=len(trades), **meta, qualifying_buyers=buyers, early_buyer_funnel=excl)
-                winners += 1
-            await ctx.pool.execute("""INSERT INTO api_sync_status(source, job, status, details, last_success_at, updated_at)
-                VALUES ('winner', $1, $2, $3, now(), now()) ON CONFLICT (source, job) DO NOTHING""",
-                                   g["mint"], "winner" if w["winner"] else "not_winner", ev)
-            evaluated += 1
-            await asyncio.sleep(2.1)            # GeckoTerminal free tier: 30 calls / minute
-        await refresh()
-        rep.update(tested=tested, evaluated=evaluated, winners=winners, reasons=reasons, credits_used=spent["now"])
+                _dump(os.path.join(data_dir, "trades", f"{m}.json.gz"), {"mint": m, "meta": meta, "trades": trades})
+                buyers, excl = early_buyers(trades, meta["created_slot"], meta["creator"], w.get("peak_mc_sol") or 0.0, set(), s)
+                results[m] = {"curve_trades": len(trades), **meta, "qualifying_buyers": buyers, "early_buyer_funnel": excl,
+                              "priority": w["priority"], "peak_mc_usd": w["peak_mc_usd"], "hold_ratio": w["hold_ratio"]}
+                await ctx.pool.execute("""INSERT INTO api_sync_status(source, job, status, details, last_success_at, updated_at)
+                    VALUES ('winner', $1, 'winner', $2, now(), now())
+                    ON CONFLICT (source, job) DO UPDATE SET status = 'winner', details = EXCLUDED.details, updated_at = now()""",
+                                       m, {"source": "history", **w, **results[m]})
+                done_in_group.append(m)
+            _dump(respath, results)
+            progress(stage="read", group=gi // group + 1, tokens=done_in_group, credits_before=u_before,
+                     credits_after=await budget.used())
+            if stop:
+                break
+        rep["read"] = {"tokens_read": sum(1 for r in results.values() if "curve_trades" in r),
+                       "skipped_bundled_launch": sum(1 for r in results.values() if "skipped" in r),
+                       "winners_not_reached": len(winners) - len(results), "stopped": stop}
+
+        # 5. candidates: profitable early buyer on >= winner_min_tokens different winners
+        wins = [(m, b) for m, r in results.items() for b in r.get("qualifying_buyers", [])]
+        from ..services.winner_reverse import repeated
+        cands = repeated(wins, int(s["winner_min_tokens"]))
+        _dump(os.path.join(data_dir, "candidates.json"), cands)
+        rep["candidates"] = len(cands)
+        rep["credits_used_total"] = await budget.used()
         if out:
-            with open(out, "w", encoding="utf-8") as f:
-                json.dump(rep, f, indent=1, default=str)
+            _dump(out, rep)
         return rep
     finally:
         await ctx.close()

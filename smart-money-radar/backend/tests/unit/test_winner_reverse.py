@@ -133,3 +133,14 @@ def test_historical_winner_test_uses_hourly_closes_and_ignores_wicks():
     assert asyncio.run(wh.winner_test(C(dumped), {"pool": "P"}, s, 150.0))["reason"] == "did_not_hold_after_peak"
     small = [[3600 * i, 0, 0, 0, c, 1] for i, c in enumerate([8e-5, 1e-4, 2e-4, 1.5e-4])]
     assert asyncio.run(wh.winner_test(C(small), {"pool": "P"}, s, 150.0))["reason"] == "peak_below_min"
+
+
+def test_priority_prefers_growth_that_held_with_depth_and_enough_data():
+    from radar.tools.winner_history import priority
+    base = {"graduation_mc_usd": 100_000, "peak_mc_usd": 1_000_000, "hold_ratio": 0.6,
+            "volume_first_24h_usd": 5_000_000, "candles": 48}
+    p = priority(base)
+    assert priority({**base, "hold_ratio": 0.3}) < p                    # held less
+    assert priority({**base, "peak_mc_usd": 400_000}) < p               # grew less
+    assert priority({**base, "volume_first_24h_usd": 50_000}) < p       # thin trading
+    assert priority({**base, "candles": 6}) == round(p * 0.5, 4) or priority({**base, "candles": 6}) < p

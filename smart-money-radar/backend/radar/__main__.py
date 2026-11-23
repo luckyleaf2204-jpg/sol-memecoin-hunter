@@ -176,7 +176,9 @@ def main(argv: list[str] | None = None) -> None:
     ap.add_argument("--promote", type=int, default=150)
     ap.add_argument("--apply", action="store_true")
     ap.add_argument("--minutes", type=int, default=30)
-    ap.add_argument("--max-credits", dest="max_credits", type=int, default=80000)
+    ap.add_argument("--max-credits", dest="max_credits", type=int, default=77760)
+    ap.add_argument("--already-spent", dest="already_spent", type=int, default=0)
+    ap.add_argument("--verify-reserve", dest="verify_reserve", type=int, default=15000)
     ap.add_argument("--since", default=None)   # verify-pnl: only wallets backfilled since this ISO time
     a = ap.parse_args(argv)
     if a.command == "api":
@@ -198,7 +200,8 @@ def main(argv: list[str] | None = None) -> None:
     elif a.command == "winner-history":
         from .tools.winner_history import run as wh
         import json as _json
-        print(_json.dumps(asyncio.run(wh(a.days, a.max_credits, a.out)), indent=1, default=str))
+        print(_json.dumps(asyncio.run(wh(a.days, a.max_credits, a.out, already_spent=a.already_spent,
+                                         verify_reserve=a.verify_reserve)), indent=1, default=str))
     elif a.command == "latency":
         from .tools.latency import run as lat
         import json as _json
