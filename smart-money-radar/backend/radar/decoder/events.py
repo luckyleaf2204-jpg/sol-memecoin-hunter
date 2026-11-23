@@ -88,6 +88,11 @@ class PumpTradeEvent:
     creator_fee: int
     ix_name: str | None = None
     venue: str = "pump_curve"
+    # curves quoted in another token (USDC, ...; seen on 23/11/2026, sol fields are 0 there):
+    quote_mint: str | None = None
+    quote_amount: int | None = None            # raw quote units moved by the curve, before fees
+    virtual_quote_reserves: int | None = None
+    real_quote_reserves: int | None = None
 
 
 @dataclass
@@ -158,7 +163,20 @@ def decode_pump_trade(p: bytes) -> PumpTradeEvent:
         r.boolean(); r.u64(); r.u64(); r.u64(); r.i64()
         ev.ix_name = r.string(64)
     except (EOFError, ValueError):
-        pass
+        return ev
+    # trailing (v2 instructions BuyV2/SellV2/buy_exact_quote_in): 37 bytes of flags / cashback
+    # fields, then quote_mint, quote_amount, virtual_quote_reserves, real_quote_reserves.
+    # Layout established on 23/11/2026 against real transactions: quote_amount equals the user's
+    # quote-token balance change exactly for buy/sell (10 of 10) and before fees for
+    # buy_exact_quote_in.
+    try:
+        if r.remaining() >= 37 + 32 + 24:
+            for _ in range(37):
+                r.u8()
+            ev.quote_mint = r.pubkey()
+            ev.quote_amount, ev.virtual_quote_reserves, ev.real_quote_reserves = r.u64(), r.u64(), r.u64()
+    except (EOFError, ValueError):
+        ev.quote_mint = None
     return ev
 
 

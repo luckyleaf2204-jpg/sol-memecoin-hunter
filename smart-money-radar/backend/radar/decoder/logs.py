@@ -130,9 +130,38 @@ def amm_trade_record(signature: str, slot: int, ordinal: int, ev: AmmSwapEvent, 
         extra={"pool": ev.pool, "user_quote_amount": ev.user_quote_amount})
 
 
-def records_from_logs(signature: str, slot: int, logs: list[str], pool_resolver=None) -> dict:
+def quote_curve_record(signature: str, slot: int, ordinal: int, ev: PumpTradeEvent, sol_per_quote_ui: float,
+                       quote_decimals: int = 6, source: str = "rpc_logs") -> TradeRecord:
+    """Trade on a curve quoted in another token (USDC, ...), valued in SOL at a GIVEN rate
+    (research use: the caller states the rate; the amounts in quote units are kept in `extra`)."""
+    q_ui = (ev.quote_amount or 0) / 10 ** quote_decimals
+    vq_ui = (ev.virtual_quote_reserves or 0) / 10 ** quote_decimals
+    vt_ui = ev.virtual_token_reserves / 10 ** PUMP_DECIMALS
+    spot_q = vq_ui / vt_ui if vt_ui > 0 else None
+    tok = ev.token_amount / 10 ** PUMP_DECIMALS
+    fee_q = 0.0
+    if ev.quote_amount and (ev.fee_basis_points or ev.creator_fee_basis_points):
+        fee_q = q_ui * (ev.fee_basis_points + ev.creator_fee_basis_points) / 10_000
+    return TradeRecord(
+        signature=signature, event_key=f"trade:{ordinal}", wallet=ev.user, mint=ev.mint, slot=slot,
+        block_time=ev.timestamp, tx_type="buy" if ev.is_buy else "sell", venue="pump_curve_quote",
+        sol_amount=q_ui * sol_per_quote_ui, token_amount=tok, token_amount_raw=ev.token_amount, decimals=PUMP_DECIMALS,
+        fee_trading_sol=fee_q * sol_per_quote_ui,
+        price_sol=spot_q * sol_per_quote_ui if spot_q is not None else None,
+        effective_price_sol=(q_ui * sol_per_quote_ui / tok) if tok else None,
+        market_cap_sol=spot_q * (PUMP_TOTAL_SUPPLY_RAW / 10 ** PUMP_DECIMALS) * sol_per_quote_ui if spot_q is not None else None,
+        liquidity_sol=(ev.real_quote_reserves or 0) / 10 ** quote_decimals * sol_per_quote_ui, source=source,
+        verification_status=PARTIAL,
+        verification_note=f"non-SOL quoted curve ({(ev.quote_mint or '')[:8]}): valued at a fixed SOL rate",
+        extra={"quote_mint": ev.quote_mint, "quote_amount_ui": q_ui, "spot_quote": spot_q, "ix_name": ev.ix_name})
+
+
+def records_from_logs(signature: str, slot: int, logs: list[str], pool_resolver=None,
+                      quote_rates: dict[str, float] | None = None) -> dict:
     """Stream-side decoding. Uses the SAME ordinal rule as radar.decoder.tx (every curve or
-    AMM trade event increments the ordinal) so the verifier later upserts the same keys."""
+    AMM trade event increments the ordinal) so the verifier later upserts the same keys.
+    quote_rates: {quote_mint: SOL per quote unit} (research only, default None = unchanged
+    behaviour): trades on curves quoted in those tokens are returned, valued at that rate."""
     from .events import PumpCompleteEvent, PumpCreateEvent, PumpMigrationEvent
 
     evs, truncated = events_from_logs(logs)
@@ -143,6 +172,8 @@ def records_from_logs(signature: str, slot: int, logs: list[str], pool_resolver=
         if isinstance(ev, PumpTradeEvent):
             if not (ev.virtual_sol_reserves == 0 and ev.sol_amount == 0):
                 out["trades"].append(trade_record_from_curve_event(signature, slot, ordinal, ev))
+            elif quote_rates and ev.quote_mint in quote_rates and ev.quote_amount is not None:
+                out["trades"].append(quote_curve_record(signature, slot, ordinal, ev, quote_rates[ev.quote_mint]))
             else:
                 out["multi_hop"] = True  # non-SOL quoted curve: only the verifier can value it
                 out.setdefault("nonsol_users", []).append(ev.user)
@@ -163,7 +194,7 @@ def records_from_logs(signature: str, slot: int, logs: list[str], pool_resolver=
         elif isinstance(ev, PumpMigrationEvent):
             out["migrations"].append(ev)
     hop_users = set(out.get("nonsol_users", []))
-    if hop_users:
+    if hop_users and not quote_rates:
         # A wallet that traded a curve quoted in another token (B) in this tx: its SOL trades of
         # other tokens here are almost always the B leg of the route (SOL -> B -> token). They are
         # left to the full-transaction decoder, which merges them into ONE trade of the real token,
