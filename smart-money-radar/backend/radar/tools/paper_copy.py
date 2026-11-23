@@ -51,7 +51,7 @@ SIM = {
     "max_impact": 0.10,            # copy refused if our 0.5 SOL moves the price more than 10 %
     "window_slots": 30,            # market transactions read after each wallet trade (~12 s)
     "max_sig_pages": 8,            # signature pages read between two wallet trades of a market
-    "max_window_tx": 45,           # market transactions decoded per window
+    "max_window_tx": 30,           # market transactions decoded per window
 }
 QUOTES = {WSOL_MINT, "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v", "Es9vMFrzaCERmJfrF4H2FYD4KCoNkY11McCe8BenwNYB"}
 
@@ -174,16 +174,24 @@ def market_events(tx: dict, mint_hint: str | None = None) -> list[dict]:
                 b1, q1 = b0 - ev.base_amount / 1e6, q0 + ev.quote_amount / 1e9 + lp
             else:
                 b1, q1 = b0 + ev.base_amount / 1e6, q0 - ev.quote_amount / 1e9 + lp
-            # effective quote depth seen by THIS trade (all fees included): the pool's actual fills differ
-            # from x*y on the event reserves by a stable per-pool factor (3-24 % measured on 23/11/2026),
-            # so copies are priced with the factor observed on real trades of the same pool and side
-            out_tok, user_q = ev.base_amount / 1e6, (ev.user_quote_amount or 0) / 1e9
-            k = None
-            if out_tok > 0 and user_q > 0 and q0 > 0:
-                k = ((b0 * user_q / out_tok - user_q) / q0) if ev.side == "buy" else ((user_q * (b0 + out_tok) / out_tok) / q0)
+            # PumpSwap pools price on (quote vault + a virtual quote reserve V): measured on 23/11/2026,
+            # V = 17.584 SOL on freshly graduated pools, constant over every trade of a pool. V is
+            # recovered from each real fill and the copy is priced with the pool's median V.
+            out_tok = ev.base_amount / 1e6
+            ex = ev.extra or {}
+            fee_r = (ex.get("lp_bps", 0) + ex.get("protocol_bps", 0) + ex.get("creator_bps", 0)) / 1e4
+            V = None
+            if out_tok > 0:
+                if ev.side == "buy":
+                    qn = (ex.get("quote_with_lp") or ev.quote_amount) / 1e9
+                    V = b0 * qn / out_tok - qn - q0
+                else:
+                    V = (ev.quote_amount / 1e9) * (b0 + out_tok) / out_tok - q0
             out.append({"venue": "pumpswap", "market": ev.pool, "mint": mint_hint, "user": ev.user, "side": ev.side,
                         "sol": ev.quote_amount / 1e9, "tok": ev.base_amount / 1e6, "x": q1, "y": b1, "x_pre": q0, "y_pre": b0,
-                        "fee": fee, "k": k, "i": i})
+                        "fee": fee_r or fee, "V": V, "i": i,
+                        "qn": ((ex.get("quote_with_lp") or ev.quote_amount) / 1e9) if ev.side == "buy" else None,
+                        "tok_out": out_tok})
     return out
 
 
@@ -270,7 +278,8 @@ def wallet_trades(rpc: PublicRPC, wallet: str, max_sigs: int, cache: dict) -> tu
                        "venue": e["venue"], "market": e["market"], "side": e["side"], "sol": e["sol"], "tok": e["tok"],
                        "price": e["sol"] / e["tok"] if e["tok"] else None, "wallet_sol_delta": sol_delta,
                        "fee_paid": meta["fee"] / 1e9, "pre_tok": pre.get(e["mint"], 0.0), "post_tok": tokd.get(e["mint"], 0.0),
-                       "state": {"x": e["x"], "y": e["y"], "fee": e["fee"], "k": e.get("k"), "side": e["side"]}})
+                       "state": {"x": e["x"], "y": e["y"], "fee": e["fee"], "V": e.get("V"), "side": e["side"],
+                                 "x_pre": e.get("x_pre"), "y_pre": e.get("y_pre")}})
     trades.sort(key=lambda t: (t["slot"], t["sig"]))
     return trades, cnt
 
@@ -338,14 +347,26 @@ def market_window(rpc: PublicRPC, market: str, after_sig: str, after_slot: int, 
             if e["market"] == market:
                 states.append({"slot": s["slot"], "order": order * 100 + e["i"], "x": e["x"], "y": e["y"], "fee": e["fee"],
                                "x_pre": e.get("x_pre"), "y_pre": e.get("y_pre"), "real_tok": e.get("real_tok"),
-                               "side": e["side"], "k": e.get("k")})
+                               "side": e["side"], "V": e.get("V"), "qn": e.get("qn"), "tok_out": e.get("tok_out")})
     return {"complete": complete or bool(win and len(win) < len(sigs)), "sig_pages": pages, "window_tx": len(win),
             "decoded": n, "truncated": len(win) > SIM["max_window_tx"], "states": states}
 
 
-def pool_k(side: str, *sources) -> float | None:
-    ks = sorted(st["k"] for src in sources for st in src if st.get("k") and st.get("side") == side and 0.5 < st["k"] < 3)
-    return ks[len(ks) // 2] if ks else None
+def pool_v(*sources) -> float | None:
+    vs = sorted(st["V"] for src in sources for st in src if st.get("V") is not None and -0.5 < st["V"] < 1000)
+    return max(0.0, vs[len(vs) // 2]) if vs else None
+
+
+def ps_state_at(base: dict, window: dict | None, slot: int) -> dict:
+    """PumpSwap pool at the end of `slot`: the exact pre-swap reserves of the first later trade in
+    the window when there is one, else the rebuilt post-swap reserves of the last trade."""
+    st = base
+    for s in (window or {}).get("states", []):
+        if s["slot"] <= slot:
+            st = s
+        elif s.get("x_pre") is not None:
+            return {"x": s["x_pre"], "y": s["y_pre"], "fee": s["fee"]}
+    return st
 
 
 def state_at(base: dict, window: dict, slot: int) -> dict:
@@ -393,19 +414,21 @@ def simulate_position(p: dict, windows: dict) -> dict:
         if first["venue"] == "other":
             res["delays"][str(d)] = simulate_generic(first, frac_sold, windows, w, ds, p["closed"])
             continue
-        st = state_at(first["state"], w, first["slot"] + ds)
+        st = (ps_state_at(first["state"], w, first["slot"] + ds) if first["venue"] == "pumpswap"
+              else state_at(first["state"], w, first["slot"] + ds))
         if first["venue"] == "curve" and st.get("real_tok") is not None and st["real_tok"] <= 0:
             r.update(copyable=False, reason="bonding curve đã đầy (token chuyển sàn)")
             res["delays"][str(d)] = r
             continue
         if first["venue"] == "pumpswap":
-            kb = pool_k("buy", [first["state"]], w["states"])
-            if kb is None:
-                r.update(copyable=False, reason="thiếu dữ liệu: không có lệnh mua thật để hiệu chỉnh pool")
+            V = pool_v([first["state"]], w["states"])
+            if V is None:
+                r.update(copyable=False, reason="thiếu dữ liệu: không đo được thanh khoản pool")
                 res["delays"][str(d)] = r
                 continue
-            tok, impact = buy_fill(st["x"] * kb, st["y"], SIM["copy_size_sol"], 0.0)
-            r["k_buy"] = round(kb, 4)
+            # fees are paid on top of the amount entering the pool
+            tok, impact = buy_fill(st["x"] + V, st["y"], SIM["copy_size_sol"] / (1 + st["fee"]), 0.0)
+            r["virtual_quote"] = round(V, 3)
         else:
             tok, impact = buy_fill(st["x"], st["y"], SIM["copy_size_sol"], st["fee"])
         our_price = SIM["copy_size_sol"] / tok if tok > 0 else math.inf
@@ -429,15 +452,14 @@ def simulate_position(p: dict, windows: dict) -> dict:
             if wx is None or (not wx["states"] and not wx["complete"]):
                 exit_ok = False
                 sx = t["state"]
+            elif t["venue"] == "pumpswap":
+                sx = ps_state_at(t["state"], wx, t["slot"] + ds)
             else:
                 sx = state_at(t["state"], wx, t["slot"] + ds)
             q = held_c * frac if frac < 0.999 else held_c
             if t["venue"] == "pumpswap":
-                ks = pool_k("sell", [t["state"]], (wx or {}).get("states", [])) or pool_k("sell", w["states"])
-                if ks is None:
-                    ks = (pool_k("buy", [first["state"]], w["states"]) or 1.0) * 0.99
-                    r["exit_note"] = "hệ số pool phía bán ước tính từ phía mua"
-                out += sell_fill(sx["x"] * ks, sx["y"], q, 0.0)
+                Vs = pool_v([t["state"]], (wx or {}).get("states", [])) or pool_v([first["state"]], w["states"]) or 0.0
+                out += sell_fill(sx["x"] + Vs, sx["y"], q, sx["fee"])
             else:
                 out += sell_fill(sx["x"], sx["y"], q, sx["fee"])
             held_c -= q
@@ -494,6 +516,29 @@ def simulate_generic(first: dict, frac_sold: list, windows: dict, w: dict, ds: i
     return r
 
 
+def model_check(windows: dict) -> dict:
+    """Out-of-sample check of the PumpSwap price model: each real buy in the windows is predicted from
+    its exact pre-swap reserves and the pool's V measured on the OTHER trades; error on tokens out."""
+    by_pool: dict = {}
+    for w in windows.values():
+        for s in w["states"]:
+            if s.get("x_pre") is not None and s.get("V") is not None:
+                by_pool.setdefault(round(s["x_pre"] + s["y_pre"], 3), None)
+    errs = []
+    for w in windows.values():
+        st = [s for s in w["states"] if s.get("x_pre") is not None and s.get("V") is not None]
+        for j, s in enumerate(st):
+            others = [o for k, o in enumerate(st) if k != j]
+            V = pool_v(others)
+            if V is None or s["side"] != "buy" or not s.get("tok_out"):
+                continue
+            pred = s["y_pre"] * s["qn"] / (s["x_pre"] + V + s["qn"])
+            errs.append(abs(pred / s["tok_out"] - 1))
+    errs.sort()
+    return {"buys_checked": len(errs), "median_abs_error": round(errs[len(errs) // 2], 5) if errs else None,
+            "p90_abs_error": round(errs[int(len(errs) * 0.9)], 5) if errs else None}
+
+
 def check_pumpswap_reserves(windows: dict) -> dict:
     """Consistency of the PumpSwap 'reserves before the swap' reading: the pre-state of a trade should
     equal the post-state of the previous trade in the same pool."""
@@ -529,13 +574,14 @@ def run_wallet(rpc: PublicRPC, wallet: str, out_dir: str, max_sigs: int, per_wal
     data = {"wallet": wallet, "collected_at": int(time.time()), "sim": SIM, "counts": cnt, "trades": trades,
             "positions": [{"mint": p["mint"], "closed": p["closed"], "trades": [t["sig"] for t in p["trades"]]} for p in pos],
             "windows": windows, "simulations": sims, "reserve_check": check_pumpswap_reserves(windows),
+            "model_check": model_check(windows),
             "rpc_calls": rpc.calls}
     with gzip.open(path, "wt") as f:
         json.dump(data, f)
     return data
 
 
-def replay(out_dir: str, per_wallet: int = 25, max_sigs: int = 1500) -> None:
+def replay(out_dir: str, per_wallet: int = 25, max_sigs: int = 300) -> None:
     os.makedirs(out_dir, exist_ok=True)
     rpc = PublicRPC()
     for w in WALLETS:
@@ -543,7 +589,7 @@ def replay(out_dir: str, per_wallet: int = 25, max_sigs: int = 1500) -> None:
             continue
         d = run_wallet(rpc, w, out_dir, max_sigs, per_wallet)
         print(w[:8], "swaps", d["counts"]["signed_swaps"], "closed simulated", len(d["simulations"]),
-              "reserve check", d["reserve_check"], "calls", rpc.calls, "429", rpc.throttled, flush=True)
+              "reserve check", d["reserve_check"], "model", d["model_check"], "calls", rpc.calls, "429", rpc.throttled, flush=True)
     print("done", rpc.calls, flush=True)
 
 
@@ -551,7 +597,7 @@ def live(out_dir: str, hours: float) -> None:
     """Poll the 5 wallets (public RPC), log every new self-signed swap with its detection delay;
     every 10 minutes the closed positions of the session are simulated (results in live/)."""
     os.makedirs(out_dir, exist_ok=True)
-    rpc = PublicRPC(rps=2.0)
+    rpc = PublicRPC(rps=0.8)
     seen_path = os.path.join(out_dir, "live_seen.json")
     seen = json.load(open(seen_path)) if os.path.exists(seen_path) else {}
     log_path = os.path.join(out_dir, "live_detections.jsonl")
@@ -587,7 +633,8 @@ def report(out_dir: str) -> dict:
             continue
         d = json.load(gzip.open(p))
         sims = d["simulations"]
-        wr = {"counts": d["counts"], "positions_closed": len(sims), "reserve_check": d["reserve_check"]}
+        wr = {"counts": d["counts"], "positions_closed": len(sims), "reserve_check": d["reserve_check"],
+              "model_check": d.get("model_check")}
         wn = [s["wallet"]["net_sol_onchain"] for s in sims if s["closed"]]
         wr["wallet_original"] = {"positions": len(wn), "pnl_sol_onchain": round(sum(wn), 4), "wins": sum(1 for x in wn if x > 0),
                                  "win_rate": round(sum(1 for x in wn if x > 0) / len(wn), 3) if wn else None,
