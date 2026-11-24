@@ -776,6 +776,12 @@ async def backtest_runs(limit: int = 20):
     return j({"runs": out})
 
 
+# ---------------------------------------------------------------- Telegram Caller Tracker (separate module)
+from . import callers as _callers_api  # noqa: E402
+
+_callers_api.install(app, ctx, rows, j, Auth)
+
+
 # ---------------------------------------------------------------- websocket
 @app.websocket("/api/ws")
 async def ws(websocket: WebSocket):

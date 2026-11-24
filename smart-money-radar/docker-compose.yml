@@ -80,6 +80,10 @@ services:
   analytics:   { <<: *backend, command: ["python", "-m", "radar", "analytics"] }
   signals:     { <<: *backend, command: ["python", "-m", "radar", "signals"] }
   winners:     { <<: *backend, command: ["python", "-m", "radar", "winners"] }   # winner-reverse discovery, database only
+  callers:     # Telegram Caller Tracker (read-only; public t.me previews; optional Telethon session in a volume)
+    <<: *backend
+    command: ["python", "-m", "radar", "callers"]
+    volumes: ["tg_session:/app/tg_session"]
 
   frontend:
     build: ./frontend
@@ -123,6 +127,7 @@ services:
 
 volumes:
   pgdata:
+  tg_session:
   redisdata:
   caddydata:
   caddyconfig:

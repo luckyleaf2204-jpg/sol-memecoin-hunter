@@ -12,6 +12,7 @@ const NAV: { href: string; label: string; short: string; icon: IconName; sub: st
   { href: "/", label: "Overview", short: "Home", icon: "overview", sub: "Tổng quan thị trường và dòng tiền Smart Money" },
   { href: "/wallets", label: "Top Wallets", short: "Wallets", icon: "wallets", sub: "Xếp hạng ví theo dữ liệu on-chain đã xác minh" },
   { href: "/kol", label: "KOL Tracker", short: "KOL", icon: "kol", sub: "Ví KOL / người gọi kèo đang theo dõi" },
+  { href: "/callers", label: "Telegram Callers", short: "Callers", icon: "bell", sub: "Kênh Telegram gọi kèo: kết quả thật và đối chiếu Smart Money" },
   { href: "/radar", label: "Token Radar", short: "Radar", icon: "radar", sub: "Token đang được các ví theo dõi giao dịch" },
   { href: "/live", label: "Live Feed", short: "Live", icon: "feed", sub: "Giao dịch mới nhất hệ thống ghi nhận" },
   { href: "/alerts", label: "Cảnh báo", short: "Alerts", icon: "alerts", sub: "Cảnh báo trong web và Telegram" },

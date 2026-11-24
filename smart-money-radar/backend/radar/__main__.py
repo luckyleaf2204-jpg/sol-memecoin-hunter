@@ -12,6 +12,11 @@
     python -m radar crosscheck [--n 25]     re-fetch stored trades from a second RPC and compare
     python -m radar history --days 60       sample graduated tokens of the last N days, seed their
                                             early buyers and backfill N days of their history
+    python -m radar callers                 Telegram Caller Tracker worker (read-only)
+    python -m radar tg-add <channel> [...]  follow public Telegram channels (also from the dashboard)
+    python -m radar tg-backfill <channel> --days 30   read a channel's older posts (history calls)
+    python -m radar tg-login                one-time login of the owner's Telegram account (optional
+                                            client source; needs TELEGRAM_API_ID / TELEGRAM_API_HASH)
 """
 from __future__ import annotations
 
@@ -24,16 +29,17 @@ import sys
 
 log = logging.getLogger("radar")
 
-ROLES = ("stream", "verifier", "sync", "discovery", "prices", "analytics", "signals", "winners")
+ROLES = ("stream", "verifier", "sync", "discovery", "prices", "analytics", "signals", "winners", "callers")
 
 
 async def _run_role(role: str) -> None:
     from .context import create_ctx
+    from .callers import worker as callers_worker
     from .services import (analytics_runner, discovery, health, prices, signal_engine, stream, verifier,
                            wallet_sync, winner_reverse)
     mains = {"stream": stream.main, "verifier": verifier.main, "sync": wallet_sync.main, "discovery": discovery.main,
              "prices": prices.main, "analytics": analytics_runner.main, "signals": signal_engine.main,
-             "winners": winner_reverse.main}
+             "winners": winner_reverse.main, "callers": callers_worker.main}
     roles = list(ROLES) if role == "all" else [role]
     ctx = await create_ctx(role, run_migrations=True, pool_size=4 + 3 * len(roles))
     log.info("starting roles %s (trading disabled: read-only analytics)", roles)
@@ -162,6 +168,23 @@ async def _healthcheck() -> int:
     return 0 if ok else 1
 
 
+async def _tg(cmd: str, args: list[str], days: int) -> None:
+    from .callers import worker as cw
+    from .callers.sources import clean_username
+    from .context import create_ctx
+    ctx = await create_ctx("callers-cli", run_migrations=True, pool_size=2)
+    try:
+        for raw in args:
+            u = clean_username(raw)
+            await ctx.pool.execute("INSERT INTO tg_channels(username) VALUES ($1) ON CONFLICT (username) DO NOTHING", u)
+            if cmd == "tg-backfill":
+                print(u, json.dumps(await cw.backfill(ctx, u, days), default=str))
+            else:
+                print("following", u)
+    finally:
+        await ctx.close()
+
+
 def main(argv: list[str] | None = None) -> None:
     ap = argparse.ArgumentParser(prog="radar")
     ap.add_argument("command")
@@ -196,6 +219,11 @@ def main(argv: list[str] | None = None) -> None:
         asyncio.run(_run_role(a.command))
     elif a.command == "seed":
         asyncio.run(_seed(a.args))
+    elif a.command in ("tg-add", "tg-backfill"):
+        asyncio.run(_tg(a.command, a.args, a.days))
+    elif a.command == "tg-login":
+        from .callers.sources import login
+        asyncio.run(login(os.environ.get("TELEGRAM_SESSION_PATH", "/app/tg_session/radar")))
     elif a.command == "verify-pnl":
         from .tools.verify_pnl import run as vp
         import json as _json
