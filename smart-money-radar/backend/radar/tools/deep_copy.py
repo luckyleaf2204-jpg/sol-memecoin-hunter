@@ -161,6 +161,43 @@ def window(rpc: PublicRPC, t: dict, cache: dict) -> dict:
             "truncated": len(win) > MAX_WINDOW_TX, "states": states}
 
 
+EXTEND_SLOTS = 25   # 10 s delay = 25 slots: every pool trade up to here must be decoded for an exact state
+
+
+def _states_of(tx: dict, t: dict, slot: int) -> list[dict]:
+    out = []
+    if t["venue"] in ("damm", "dbc"):
+        for e in mm.swap_events(tx, keys_of(tx)):
+            if e["pool"] != t["market"]:
+                continue
+            cs = mm.curve_state(e, True, not (e.get("collect_fee_mode") == 1 and e["direction"] == 1))
+            out.append({"slot": slot, "s": e["next_sqrt"] / mm.Q64, "s_pre": cs["s0"] if cs else None,
+                        "L": cs["L"] if cs else None, "fee": cs["fee_rate"] if cs else None,
+                        "side": "buy" if e["direction"] == 1 else "sell"})
+    else:
+        for e in market_events(tx, t["mint"]):
+            if e["market"] == t["market"]:
+                out.append({"slot": slot, "x": e["x"], "y": e["y"], "fee": e["fee"], "x_pre": e.get("x_pre"),
+                            "y_pre": e.get("y_pre"), "real_tok": e.get("real_tok"), "side": e["side"], "V": e.get("V")})
+    return out
+
+
+def extend_window(rpc: PublicRPC, t: dict, w: dict) -> dict:
+    """A truncated window: decode only the pool trades after the first MAX_WINDOW_TX (already read)
+    up to slot + EXTEND_SLOTS, so the pool state at every simulated delay is exact."""
+    before = anchor_sig(rpc, t["slot"] + WINDOW_SLOTS + 1)
+    page = rpc.sigs(t["market"], before=before, until=t["sig"]) if before else []
+    win = [s for s in reversed(page or []) if s.get("err") is None and s["slot"] <= t["slot"] + WINDOW_SLOTS]
+    rest = [s for s in win[MAX_WINDOW_TX:] if s["slot"] <= t["slot"] + EXTEND_SLOTS]
+    states = list(w["states"])
+    for s in rest:
+        tx = rpc.tx(s["signature"])
+        if not tx:
+            return w                  # incomplete: keep the window as it was (still counted as estimate)
+        states += _states_of(tx, t, s["slot"])
+    return {**w, "states": states, "decoded_to_slot": t["slot"] + EXTEND_SLOTS, "extended_tx": len(rest)}
+
+
 def met_state_at(t: dict, w: dict, slot: int) -> dict | None:
     """Meteora pool at the end of `slot`: pre-swap state of the first later trade, else post of last."""
     st = {"s": t["state"]["s"], "L": t["state"]["L"], "fee": t["state"]["fee"]}
@@ -219,6 +256,13 @@ def fill_sell(t: dict, w: dict | None, slot: int, tok: float) -> float | None:
     return sell_fill(st["x"], st["y"], tok, st["fee"])
 
 
+def exact_at(t: dict, w: dict | None, slot: int) -> bool:
+    """True when every pool trade up to `slot` was decoded: the simulated fill uses the real pool state."""
+    if not w or not w.get("anchor"):
+        return False
+    return (not w["truncated"]) or w.get("decoded_to_slot", -1) >= slot or any(s["slot"] > slot for s in w["states"])
+
+
 def simulate(p: dict, wins: dict, delay: float, max_chase: float = MAX_CHASE) -> dict:
     first = p["trades"][0]
     ds = math.ceil(delay / SLOT_S)
@@ -259,7 +303,8 @@ def simulate(p: dict, wins: dict, delay: float, max_chase: float = MAX_CHASE) ->
         held -= q
         cost += t["fee_paid"] + t["tip"]
     pnl = out - SIZE - cost
-    return {**r, "copied": True, "sol_out": round(out, 6), "cost": round(cost, 6), "pnl": round(pnl, 6),
+    exact = exact_at(first, w, first["slot"] + ds) and all(exact_at(t, wins.get(t["sig"]), t["slot"] + ds) for t in sells)
+    return {**r, "copied": True, "exact_state": exact, "sol_out": round(out, 6), "cost": round(cost, 6), "pnl": round(pnl, 6),
             "roi": round(pnl / SIZE, 4), "exit_data_complete": exit_ok}
 
 
@@ -314,7 +359,9 @@ def main(wallet: str, out_dir: str, min_positions: int = 100, max_sigs: int = 40
         data["windows"] = {}
     allpos = positions(data["trades"] + data["unpriceable"])
     closed = [p for p in allpos if p["closed"]]
-    priced = [p for p in closed if all(t.get("state") for t in p["trades"])]
+    def reversed_ps(p):   # PumpSwap pool with the token on the quote side: the reserve model does not apply
+        return any(t["venue"] == "pumpswap" and t["state"].get("side") != t["side"] for t in p["trades"] if t.get("state"))
+    priced = [p for p in closed if all(t.get("state") for t in p["trades"]) and not reversed_ps(p)]
     wins = data["windows"]
     # windows already in the checkpoint are never read again; the rest with 3 threads sharing the
     # same rate gate (public RPC latency 1.5-3.7 s per call on 24/11/2026, limit ~3 calls/s)
@@ -354,9 +401,11 @@ def main(wallet: str, out_dir: str, min_positions: int = 100, max_sigs: int = 40
                               "median_hold_s": statistics.median(r["hold_s"] for r in wallet_rows) if wallet_rows else None}
     unp = [p for p in closed if p not in priced]
     res["unpriceable_positions"] = [{"mint": p["mint"], "venue": p["trades"][0]["venue"], "open_sig": p["trades"][0]["sig"],
+                                     "reason": "PumpSwap pool đảo chiều (token ở phía quote)" if reversed_ps(p) else "thiếu trạng thái pool",
                                      "wallet_pnl": round(sum(t["wallet_sol_delta"] for t in p["trades"]), 6)} for p in unp]
     for d in DELAYS:
         res["by_delay"][str(d)] = stats(sims[d], len(priced))
+        res["by_delay"][str(d)]["exact_state_fills"] = sum(1 for r in sims[d] if r.get("exact_state"))
         res["sensitivity_chase_10pct"][str(d)] = stats([simulate(p, wins, d, 0.10) for p in priced], len(priced))
         for v in sorted({r["venue"] for r in wallet_rows}):
             idx = [i for i, r in enumerate(wallet_rows) if r["venue"] == v]
@@ -377,5 +426,30 @@ def main(wallet: str, out_dir: str, min_positions: int = 100, max_sigs: int = 40
     print(json.dumps({k: res[k] for k in ("window", "positions", "wallet_original", "by_delay", "model_check")}, indent=1, ensure_ascii=False))
 
 
-if __name__ == "__main__":
+def extend(wallet: str, out_dir: str) -> None:
+    """Second pass on the checkpoint: complete the truncated windows (no other data is read again)."""
+    from concurrent.futures import ThreadPoolExecutor
+    path = os.path.join(out_dir, f"deep_{wallet}.json.gz")
+    data = json.load(gzip.open(path))
+    wins = data["windows"]
+    rpc = PublicRPC()
+    trades = {t["sig"]: t for t in data["trades"]}
+    todo = [s for s, w in wins.items() if w["truncated"] and "decoded_to_slot" not in w and s in trades
+            and not any(x["slot"] > trades[s]["slot"] + EXTEND_SLOTS for x in w["states"])]
+    print("  windows to extend", len(todo), flush=True)
+    with ThreadPoolExecutor(max_workers=int(os.environ.get("DEEP_THREADS", "3"))) as ex:
+        for i, (s, w) in enumerate(zip(todo, ex.map(lambda s: extend_window(rpc, trades[s], wins[s]), todo))):
+            wins[s] = w
+            if i % 20 == 0:
+                print("  extended", i, "/", len(todo), "calls", rpc.calls, "429", rpc.throttled, flush=True)
+                with gzip.open(path, "wt") as f:
+                    json.dump(data, f)
+    with gzip.open(path, "wt") as f:
+        json.dump(data, f)
+    print("  extend done", flush=True)
+
+
+if __name__ == "__main__" and len(sys.argv) > 1 and sys.argv[1] == "extend":
+    extend(sys.argv[2], sys.argv[3])
+elif __name__ == "__main__":
     main(sys.argv[1], sys.argv[2], int(sys.argv[3]) if len(sys.argv) > 3 else 100, int(sys.argv[4]) if len(sys.argv) > 4 else 4000)
