@@ -64,15 +64,18 @@ class PublicRPC:
     def __init__(self, rps: float = 3.0):
         self.gap = 1.0 / rps
         self.last = 0.0
+        import threading
+        self._gate = threading.Lock()   # several threads may share one client: the rate stays the same
         self.calls = 0
         self.throttled = 0
 
     def call(self, method: str, params: list):
         for attempt in range(8):
-            w = self.gap - (time.time() - self.last)
-            if w > 0:
-                time.sleep(w)
-            self.last = time.time()
+            with self._gate:
+                w = self.gap - (time.time() - self.last)
+                if w > 0:
+                    time.sleep(w)
+                self.last = time.time()
             req = urllib.request.Request(RPC, json.dumps({"jsonrpc": "2.0", "id": 1, "method": method, "params": params}).encode(),
                                          {"Content-Type": "application/json"})
             try:

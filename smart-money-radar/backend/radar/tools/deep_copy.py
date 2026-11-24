@@ -316,14 +316,18 @@ def main(wallet: str, out_dir: str, min_positions: int = 100, max_sigs: int = 40
     closed = [p for p in allpos if p["closed"]]
     priced = [p for p in closed if all(t.get("state") for t in p["trades"])]
     wins = data["windows"]
-    for i, p in enumerate(priced):
-        for t in p["trades"]:
-            if t["sig"] not in wins:
-                wins[t["sig"]] = window(rpc, t, cache)
-        if i % 10 == 0:
-            print("  windows", i, "/", len(priced), "calls", rpc.calls, flush=True)
-            with gzip.open(path, "wt") as f:
-                json.dump(data, f)
+    # windows already in the checkpoint are never read again; the rest with 3 threads sharing the
+    # same rate gate (public RPC latency 1.5-3.7 s per call on 24/11/2026, limit ~3 calls/s)
+    from concurrent.futures import ThreadPoolExecutor
+    todo = [t for p in priced for t in p["trades"] if t["sig"] not in wins]
+    print("  windows in checkpoint", len(wins), "to read", len(todo), flush=True)
+    with ThreadPoolExecutor(max_workers=int(os.environ.get("DEEP_THREADS", "3"))) as ex:
+        for i, (t, w) in enumerate(zip(todo, ex.map(lambda t: window(rpc, t, cache), todo))):
+            wins[t["sig"]] = w
+            if i % 25 == 0:
+                print("  windows", len(wins), "calls", rpc.calls, "429", rpc.throttled, flush=True)
+                with gzip.open(path, "wt") as f:
+                    json.dump(data, f)
     with gzip.open(path, "wt") as f:
         json.dump(data, f)
     res = {"wallet": wallet, "generated_at": int(time.time()), "rpc_calls": rpc.calls,
